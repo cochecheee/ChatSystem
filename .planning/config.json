@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "project_name": "Security-Integrated CI/CD System",
+  "granularity": "Coarse",
+  "execution_mode": "Parallel",
+  "git_tracking": "Yes",
+  "agents": {
+    "research": "Yes",
+    "plan_check": "Yes",
+    "verifier": "Yes"
+  },
+  "models": {
+    "researcher_model": "gemini-2.5-flash",
+    "synthesizer_model": "gemini-2.5-flash",
+    "roadmapper_model": "gemini-2.5-flash"
+  }
+}

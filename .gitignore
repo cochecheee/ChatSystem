@@ -1,0 +1,27 @@
+# General
+.DS_Store
+.env
+.idea/
+.vscode/
+*.log
+
+# Python (mcp/)
+mcp/__pycache__/
+mcp/.venv/
+mcp/venv/
+mcp/env/
+mcp/.pytest_cache/
+mcp/findings.db
+
+# Node.js (dashboard/)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.next/
+dashboard/build/
+
+# GSD/Gemini
+.gemini/tmp/
+.planning/STATE.md.backup
+.planning/ROADMAP.md.backup
+.planning/REQUIREMENTS.md.backup
+.planning/PROJECT.md.backup
