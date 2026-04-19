@@ -5,6 +5,9 @@
 .vscode/
 *.log
 
+**/__pycache__/
+*.py[cod]
+
 # Python (mcp/)
 mcp/__pycache__/
 mcp/.venv/
@@ -12,6 +15,7 @@ mcp/venv/
 mcp/env/
 mcp/.pytest_cache/
 mcp/findings.db
+mcp/mcp.db
 
 # Node.js (dashboard/)
 dashboard/node_modules/
