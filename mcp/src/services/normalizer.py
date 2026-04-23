@@ -1,6 +1,7 @@
 import json
 from typing import List, Dict, Any
 from src.models.schemas import FindingCreate
+from defusedxml.ElementTree import fromstring 
 
 class BaseNormalizer:
     def normalize(self, content: str) -> List[FindingCreate]:
@@ -32,6 +33,24 @@ class SarifNormalizer(BaseNormalizer):
                     line_number=line_number,
                     raw_data=result
                 ))
+        return findings
+
+class SpotBugsXMLNormalizer(BaseNormalizer):
+    """Xử lý định dạng XML của SpotBugs (Dành cho Java)"""
+    def normalize(self, content: str) -> List[FindingCreate]:
+        root = fromstring(content)
+        findings = []
+        for bug in root.findall("BugInstance"):
+            source = bug.find("SourceLine")
+            findings.append(FindingCreate(
+                tool="SpotBugs",
+                rule_id=bug.get("type"),
+                severity=bug.get("priority", "warning"),
+                message=bug.find("LongMessage").text if bug.find("LongMessage") is not None else "",
+                file_path=source.get("sourcepath") if source is not None else "unknown",
+                line_number=int(source.get("start")) if source is not None else 0,
+                raw_data={"category": bug.get("category")}
+            ))
         return findings
 
 class NormalizerFactory:

@@ -36,6 +36,15 @@ class GitHubClient:
             print(f"✅ Đã tải và giải nén {len(results)} file từ artifact {artifact_id}")
             return results
 
+    async def get_run_artifacts(self, owner: str, repo: str, run_id: int):
+        """Lấy danh sách ID của các artifact thuộc về một run cụ thể"""
+        url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self.headers)
+            if response.status_code == 200:
+                return response.json().get("artifacts", [])
+            return []
+
     async def get_workflow_runs(self, owner: str, repo: str, workflow_name: str):
         """Lấy danh sách các lần chạy workflow (Dùng cho Poller ở Plan 04)"""
         url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs"
@@ -46,3 +55,4 @@ class GitHubClient:
                 # Lọc theo tên workflow (ví dụ: 'Security Scans')
                 return [r for r in runs if r.get("name") == workflow_name]
             return []
+        
