@@ -34,6 +34,7 @@ class FindingOut(BaseModel):
     dedup_hash: str | None
     status: str
     raw_data: dict[str, Any] | None
+    ai_analysis: dict[str, Any] | None
 
     model_config = {"from_attributes": True}
 
