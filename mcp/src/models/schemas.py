@@ -83,6 +83,21 @@ class WebhookRunPayload(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+# ---------------------------------------------------------------------------
+# LLM Analysis
+# ---------------------------------------------------------------------------
+
+class AnalysisResult(BaseModel):
+    finding_id: int
+    vulnerability_id: str
+    explanation_vi: str
+    impact_vi: str
+    remediation_diff: str
+    severity: str
+    cwe_reference: str
+    confidence: str
+
+
 def compute_dedup_hash(rule_id: str, file_path: str, message: str) -> str:
     raw = f"{rule_id}:{file_path}:{message}"
     return hashlib.sha256(raw.encode()).hexdigest()

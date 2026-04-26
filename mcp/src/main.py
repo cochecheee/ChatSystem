@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.analysis import router as analysis_router
 from .api.artifacts import router as artifacts_router
 from .core.config import settings
 from .core.db import init_db
@@ -44,6 +45,7 @@ app.add_middleware(
 )
 
 app.include_router(artifacts_router, tags=["core"])
+app.include_router(analysis_router, tags=["ai"])
 
 
 @app.get("/")

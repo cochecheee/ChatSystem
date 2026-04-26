@@ -2,23 +2,12 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
-import pytest_asyncio
 
 from src.api.artifacts import get_github_client
 from src.main import app
 from src.services.processor import SecurityProcessor
 
-# Uses `client` fixture from conftest.py (handles init_db)
-
-
-@pytest_asyncio.fixture
-async def project(client):
-    resp = await client.post("/projects", json={
-        "name": f"Java App {uuid.uuid4().hex[:8]}",
-        "github_url": f"https://github.com/test/{uuid.uuid4().hex}",
-    })
-    assert resp.status_code == 201
-    return resp.json()
+# Uses `client` and `project` fixtures from conftest.py
 
 
 # ---------------------------------------------------------------------------
