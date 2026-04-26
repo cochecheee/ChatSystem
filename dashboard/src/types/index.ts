@@ -14,6 +14,12 @@ export interface Finding {
   status: string;
   raw_data: Record<string, unknown> | null;
   ai_analysis: AnalysisResult | null;
+  justification: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  revoke_justification: string | null;
+  revoked_by: string | null;
+  revoked_at: string | null;
 }
 
 export interface Project {
@@ -57,3 +63,21 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export const SEVERITY_ORDER: Record<string, number> = {
   critical: 0, high: 1, medium: 2, low: 3, info: 4,
 };
+
+export interface CommandRequest {
+  command: string;
+  finding_id?: number;
+  run_id?: number;
+  justification?: string;
+}
+
+export interface CommandResponse {
+  status: string;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+}

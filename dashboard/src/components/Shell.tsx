@@ -54,6 +54,7 @@ export function Sidebar({ active, onNav, vulnCount }: SidebarProps) {
           {group.items.map(it => (
             <div
               key={it.id}
+              data-nav={it.id}
               className={`nav-item${active === it.id ? ' active' : ''}`}
               onClick={() => onNav(it.id)}
             >

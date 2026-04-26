@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Toaster } from 'sonner';
 import { api } from './api/client';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
 import { PageChat } from './pages/Chat';
@@ -7,6 +8,7 @@ import { PagePipelines } from './pages/Pipelines';
 import { PageReports } from './pages/Reports';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
+import { notify, updateCritHighBaseline } from './utils/toast';
 
 export default function App() {
   const [active, setActive] = useState<PageId>('overview');
@@ -18,8 +20,21 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  const critHighRef = useRef(0);
+
   useEffect(() => {
-    api.findings.list({ limit: 200 }).then(f => setVulnCount(f.length)).catch(() => {});
+    const fetch = () => {
+      api.findings.list({ limit: 200 }).then(f => {
+        setVulnCount(f.length);
+        const critHigh = f.filter(x => x.severity === 'critical' || x.severity === 'high').length;
+        notify.newFindings(critHigh);
+        if (critHighRef.current === 0) updateCritHighBaseline(critHigh);
+        critHighRef.current = critHigh;
+      }).catch(() => {});
+    };
+    fetch();
+    const id = setInterval(fetch, 60_000);
+    return () => clearInterval(id);
   }, []);
 
   const onNav = (id: PageId) => {
@@ -44,17 +59,20 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar active={active} onNav={onNav} vulnCount={vulnCount} />
-      <div className="main">
-        <Topbar
-          active={active}
-          onNav={onNav}
-          theme={theme}
-          onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-        />
-        {page}
+    <>
+      <div className="app-shell">
+        <Sidebar active={active} onNav={onNav} vulnCount={vulnCount} />
+        <div className="main">
+          <Topbar
+            active={active}
+            onNav={onNav}
+            theme={theme}
+            onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+          />
+          {page}
+        </div>
       </div>
-    </div>
+      <Toaster position="bottom-right" richColors />
+    </>
   );
 }

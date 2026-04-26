@@ -1,11 +1,25 @@
-import type { AnalysisResult, Finding, Project, WorkflowArtifact, WorkflowRun } from '../types';
+import type { AnalysisResult, CommandRequest, CommandResponse, Finding, Project, TokenResponse, WorkflowArtifact, WorkflowRun } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+
+let _token: string | null = localStorage.getItem('auth_token');
+
+export function setAuthToken(token: string | null) {
+  _token = token;
+  if (token) localStorage.setItem('auth_token', token);
+  else localStorage.removeItem('auth_token');
+}
+
+export function getAuthToken() { return _token; }
+
+function authHeaders(): Record<string, string> {
+  return _token ? { Authorization: `Bearer ${_token}` } : {};
+}
 
 async function get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { headers: authHeaders() });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
@@ -13,10 +27,13 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((detail as { detail?: string }).detail ?? `${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -37,6 +54,13 @@ export const api = {
       get<WorkflowRun[]>('/github/runs', { branch, status }),
     artifacts: (runId: number) =>
       get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
+  },
+  chat: {
+    login: (username: string, role: string) =>
+      post<TokenResponse>('/api/chat/auth/token', { username, role }),
+    command: (req: CommandRequest) =>
+      post<CommandResponse>('/api/chat/command', req),
+    reportUrl: () => `${BASE}/api/chat/report`,
   },
   health: () => get<{ status: string }>('/health'),
 };

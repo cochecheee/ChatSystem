@@ -358,6 +358,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             {filtered.map(f => (
               <div
                 key={f.id}
+                data-testid="finding-row"
                 className={`vuln-row${selectedId === f.id ? ' active' : ''}`}
                 onClick={() => setSelectedId(f.id)}
               >
