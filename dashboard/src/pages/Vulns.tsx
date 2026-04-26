@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { Icon } from '../components/Icon';
-import type { AnalysisResult, Finding } from '../types';
+import type { AnalysisResult, Finding, Project } from '../types';
 import { SEVERITY_ORDER } from '../types';
 
 function SevChip({ sev }: { sev: string }) {
@@ -310,24 +310,51 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
 
 export function PageVulns({ initialId }: { initialId?: number }) {
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [projectFilter, setProjectFilter] = useState<number | 'all'>('all');
   const [sevFilter, setSevFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [toolFilter, setToolFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(initialId ?? null);
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [showAI, setShowAI] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    api.findings.list({ limit: 200 })
-      .then(f => { setFindings(f); setLoading(false); })
-      .catch(() => setLoading(false));
-    const id = setInterval(() => api.findings.list({ limit: 200 }).then(setFindings).catch(() => {}), 30_000);
-    return () => clearInterval(id);
+    api.projects.list().then(setProjects).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    setLoading(true);
+    const params: Parameters<typeof api.findings.list>[0] = { limit: 500 };
+    if (projectFilter !== 'all') params.project_id = projectFilter as number;
+    api.findings.list(params)
+      .then(f => { setFindings(f); setLoading(false); })
+      .catch(() => setLoading(false));
+    const id = setInterval(() => {
+      const p: Parameters<typeof api.findings.list>[0] = { limit: 500 };
+      if (projectFilter !== 'all') p.project_id = projectFilter as number;
+      api.findings.list(p).then(setFindings).catch(() => {});
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [projectFilter]);
+
   useEffect(() => { if (initialId != null) setSelectedId(initialId); }, [initialId]);
+
+  // Fetch individual finding from GET /findings/{id} when selection changes
+  useEffect(() => {
+    if (selectedId == null) { setSelectedFinding(null); return; }
+    const cached = findings.find(f => f.id === selectedId);
+    if (cached) setSelectedFinding(cached);
+    api.findings.get(selectedId)
+      .then(f => {
+        setSelectedFinding(f);
+        setFindings(prev => prev.map(x => x.id === f.id ? f : x));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   const tools = Array.from(new Set(findings.map(f => f.tool))).sort();
 
@@ -345,7 +372,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
     })
     .sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
 
-  const selected = findings.find(f => f.id === selectedId) ?? filtered[0] ?? null;
+  const selected = selectedFinding ?? filtered[0] ?? null;
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -357,6 +384,19 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
               {loading ? 'Loading…' : `${filtered.length} / ${findings.length} findings`}
             </div>
+            {projects.length > 1 && (
+              <select
+                style={{
+                  marginTop: 8, width: '100%', padding: '5px 8px', background: 'var(--surface-2)',
+                  border: '1px solid var(--line)', borderRadius: 6, color: 'var(--fg)', fontSize: 11.5, outline: 'none',
+                }}
+                value={projectFilter}
+                onChange={e => setProjectFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              >
+                <option value="all">All projects</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
           </div>
 
           <div style={{ padding: '0 12px 10px', flexShrink: 0 }}>

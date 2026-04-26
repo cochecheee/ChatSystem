@@ -47,13 +47,16 @@ export function PageOverview({ onNav, onOpenVuln: _onOpenVuln }: Props) {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [healthy, setHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
+    api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
     api.findings.list({ limit: 200 }).then(setFindings).catch(() => {});
     api.github.runs().then(setRuns).catch(() => {});
     api.projects.list().then(setProjects).catch(() => {});
 
     const id = setInterval(() => {
+      api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
       api.findings.list({ limit: 200 }).then(setFindings).catch(() => {});
       api.github.runs().then(setRuns).catch(() => {});
     }, 60_000);
@@ -81,7 +84,13 @@ export function PageOverview({ onNav, onOpenVuln: _onOpenVuln }: Props) {
       <div className="page-header">
         <div>
           <h1 className="h1">Security overview</h1>
-          <div className="sub">{projects.map(p => p.name).join(', ') || 'Loading…'} · auto-refresh every 60s</div>
+          <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+              background: healthy === true ? 'var(--sev-low-fg)' : healthy === false ? 'var(--sev-crit-fg)' : 'var(--fg-4)',
+            }} />
+            {projects.map(p => p.name).join(', ') || 'Loading…'} · auto-refresh every 60s
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn">
