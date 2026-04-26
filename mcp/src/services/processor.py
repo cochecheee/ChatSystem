@@ -15,9 +15,9 @@ from .normalizer import NormalizerFactory
 
 log = logging.getLogger(__name__)
 
-# Artifact names produced by the SAST_CICD pipeline that contain security findings.
-# Other artifacts (gate1-result-*, run-metadata-*, build-classes, trivy-image-scan-*)
-# are metadata/build artifacts and must not be processed as security findings.
+# Artifact names produced by the SAST CI pipeline that contain security findings.
+# Other artifacts (gate1-result-*, run-metadata-*, build-classes) are
+# metadata/build artifacts and must not be processed as security findings.
 _SECURITY_ARTIFACT_NAMES = frozenset({
     "spotbugs-report",
     "semgrep-report",
@@ -26,6 +26,17 @@ _SECURITY_ARTIFACT_NAMES = frozenset({
     "trivy-report",
     "eslint-report",
 })
+
+# Prefix-matched names — runs append the run_number, e.g. "trivy-image-scan-42".
+_SECURITY_ARTIFACT_PREFIXES: tuple[str, ...] = (
+    "trivy-image-scan-",
+)
+
+
+def _is_security_artifact(name: str) -> bool:
+    if name in _SECURITY_ARTIFACT_NAMES:
+        return True
+    return any(name.startswith(p) for p in _SECURITY_ARTIFACT_PREFIXES)
 
 
 class SecurityProcessor:
@@ -65,7 +76,7 @@ class SecurityProcessor:
 
         all_artifacts = await self.github_client.list_artifacts(github_run_id)
         security_artifacts = [
-            a for a in all_artifacts if a.get("name") in _SECURITY_ARTIFACT_NAMES
+            a for a in all_artifacts if _is_security_artifact(a.get("name", ""))
         ]
         log.info(
             "Run %d: %d/%d artifacts are security-relevant",
@@ -77,6 +88,7 @@ class SecurityProcessor:
                 db_artifact = ArtifactModel(
                     github_artifact_id=str(gh_artifact["id"]),
                     project_id=project_id,
+                    github_run_id=github_run_id,
                     status="pending",
                 )
                 session.add(db_artifact)
@@ -125,16 +137,26 @@ class SecurityProcessor:
         results: list[Finding] = []
 
         for file_info in files:
+            filename = file_info["filename"]
             scrubbed = self.scrubber.scrub_content(file_info["content"])
 
             try:
-                # Pass scrubbed content so the factory can detect JSON format
-                normalizer = NormalizerFactory.get(file_info["filename"], content=scrubbed)
-            except ValueError:
-                log.debug("No normalizer for %s — skipping", file_info["filename"])
+                normalizer = NormalizerFactory.get(filename, content=scrubbed)
+            except ValueError as exc:
+                log.info("Skipping %s — %s", filename, exc)
                 continue
 
-            findings = normalizer.normalize(scrubbed, artifact_id=db_artifact_id)
+            try:
+                findings = normalizer.normalize(scrubbed, artifact_id=db_artifact_id)
+            except Exception as exc:  # noqa: BLE001 - isolate per-file parse errors
+                log.warning("Failed to normalize %s: %s — skipping this file", filename, exc)
+                continue
+
+            log.info(
+                "%s: %d findings normalized by %s",
+                filename, len(findings), type(normalizer).__name__,
+            )
+
             findings = normalizer.deduplicate(findings, existing_hashes=batch_hashes)
 
             for schema_finding in findings:

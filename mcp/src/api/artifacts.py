@@ -226,3 +226,61 @@ async def get_finding(
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
     return finding
+
+
+@router.post("/github/runs/{run_id}/reprocess", status_code=202)
+async def reprocess_run(
+    run_id: int,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Wipe existing findings/artifacts for a run and reprocess from GitHub.
+
+    Used after fixing the normalizer or pulling in new artifact types — the
+    previous artifacts in the DB are stale, so we delete them and re-fetch.
+    """
+    artifact_result = await session.execute(
+        select(Artifact).where(Artifact.github_run_id == run_id)
+    )
+    artifacts = list(artifact_result.scalars().all())
+    project_id: int | None = None
+    if artifacts:
+        project_id = artifacts[0].project_id
+        artifact_ids = [a.id for a in artifacts]
+        from sqlalchemy import delete
+        await session.execute(delete(Finding).where(Finding.artifact_id.in_(artifact_ids)))
+        await session.execute(delete(Artifact).where(Artifact.id.in_(artifact_ids)))
+        await session.commit()
+
+    if project_id is None:
+        github_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
+        result = await session.execute(select(Project).where(Project.github_url == github_url))
+        project = result.scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Không tìm thấy project gắn với run này.")
+        project_id = project.id
+
+    processor = SecurityProcessor(session_factory=AsyncSessionLocal)
+    background_tasks.add_task(processor.process_run, project_id, run_id)
+    return {"status": "accepted", "run_id": run_id, "deleted_artifacts": len(artifacts)}
+
+
+@router.get("/github/runs/{run_id}/findings", response_model=list[FindingOut])
+async def get_run_findings(
+    run_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> list[Finding]:
+    """Return all findings from a specific GitHub Actions workflow run."""
+    artifact_result = await session.execute(
+        select(Artifact).where(Artifact.github_run_id == run_id)
+    )
+    artifacts = artifact_result.scalars().all()
+    if not artifacts:
+        return []
+    artifact_ids = [a.id for a in artifacts]
+    finding_result = await session.execute(
+        select(Finding)
+        .where(Finding.artifact_id.in_(artifact_ids))
+        .order_by(Finding.severity, Finding.rule_id)
+    )
+    return list(finding_result.scalars().all())

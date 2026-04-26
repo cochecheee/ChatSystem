@@ -54,12 +54,23 @@ export const api = {
       get<WorkflowRun[]>('/github/runs', { branch, status }),
     artifacts: (runId: number) =>
       get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
+    runFindings: (runId: number) =>
+      get<Finding[]>(`/github/runs/${runId}/findings`),
+    reprocessRun: (runId: number) =>
+      post<{ status: string; run_id: number; deleted_artifacts: number }>(
+        `/github/runs/${runId}/reprocess`,
+      ),
   },
   chat: {
     login: (username: string, role: string) =>
       post<TokenResponse>('/api/chat/auth/token', { username, role }),
     command: (req: CommandRequest) =>
       post<CommandResponse>('/api/chat/command', req),
+    message: (text: string, finding_id?: number) =>
+      post<{ reply: string; suggested_command: string | null }>(
+        '/api/chat/message',
+        { text, finding_id },
+      ),
     reportUrl: () => `${BASE}/api/chat/report`,
   },
   health: () => get<{ status: string }>('/health'),

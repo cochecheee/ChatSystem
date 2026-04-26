@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import User, create_access_token, get_current_user
 from ..core.db import get_session
+from ..models.entities import Finding
 from ..models.schemas import (
     CommandRequest,
     CommandResponse,
@@ -15,6 +19,9 @@ from ..models.schemas import (
 )
 from ..services.command_service import CommandService
 from ..services import report_service
+from ..services.llm.client import GeminiClient
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -70,6 +77,116 @@ async def download_report(
 # ---------------------------------------------------------------------------
 # Auth — demo token endpoint (thesis/dev mode)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Free-form chat (Gemini)
+# ---------------------------------------------------------------------------
+
+class ChatMessageRequest(BaseModel):
+    text: str
+    finding_id: int | None = None  # optional context: which finding the user is asking about
+
+
+class ChatMessageResponse(BaseModel):
+    reply: str
+    suggested_command: str | None = None  # e.g. "/explain 5" — frontend can show as a one-click chip
+
+
+_gemini: GeminiClient | None = None
+
+
+def _get_gemini() -> GeminiClient:
+    global _gemini
+    if _gemini is None:
+        _gemini = GeminiClient()
+    return _gemini
+
+
+def _suggested_command(text: str) -> str | None:
+    """Heuristic: map common natural-language phrases to a slash command.
+
+    Lets the user say "phân tích finding 5" and get a clickable /explain 5
+    suggestion in the AI reply, without forcing them to learn the syntax.
+    """
+    import re
+    t = text.lower()
+
+    m = re.search(r"(?:explain|phân tích|giải thích).*?\b(\d+)\b", t)
+    if m:
+        return f"/explain {m.group(1)}"
+    m = re.search(r"(?:fix|sửa|khắc phục).*?\b(\d+)\b", t)
+    if m:
+        return f"/fix {m.group(1)}"
+    m = re.search(r"(?:approve|phê duyệt|duyệt).*?\b(\d+)\b", t)
+    if m:
+        return f"/approve {m.group(1)}"
+    m = re.search(r"(?:revoke|thu hồi|huỷ duyệt).*?\b(\d+)\b", t)
+    if m:
+        return f"/revoke {m.group(1)}"
+    if any(k in t for k in ["scan mới", "kích hoạt scan", "chạy scan", "trigger scan"]):
+        return "/scan"
+    if any(k in t for k in ["báo cáo", "report", "xuất file"]):
+        return "/report"
+    return None
+
+
+async def _build_context(db: AsyncSession, finding_id: int | None) -> str:
+    parts: list[str] = []
+
+    if finding_id is not None:
+        f = await db.get(Finding, finding_id)
+        if f:
+            parts.append(
+                f"Finding hiện tại: #{f.id} | tool={f.tool} | rule={f.rule_id} | "
+                f"severity={f.severity} | file={f.file_path}:{f.line_number or '?'}\n"
+                f"Mô tả: {f.message[:300]}"
+            )
+
+    # Top recent critical/high findings (no JWT info; just stats)
+    result = await db.execute(
+        select(Finding)
+        .where(Finding.severity.in_(["critical", "high"]))
+        .order_by(Finding.id.desc())
+        .limit(5)
+    )
+    recent = list(result.scalars().all())
+    if recent:
+        lines = [
+            f"  - #{f.id} [{f.severity}] {f.tool}/{f.rule_id} ({f.file_path})"
+            for f in recent
+        ]
+        parts.append("Findings nghiêm trọng gần nhất:\n" + "\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
+@router.post("/message", response_model=ChatMessageResponse)
+async def chat_message(
+    request: ChatMessageRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> ChatMessageResponse:
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Tin nhắn không được để trống.")
+
+    suggested = _suggested_command(text)
+
+    try:
+        context = await _build_context(db, request.finding_id)
+        reply = await _get_gemini().chat(text, context=context)
+    except Exception as exc:  # noqa: BLE001 — Gemini may be unavailable
+        log.warning("Gemini chat failed: %s", exc)
+        if suggested:
+            reply = f"Tôi nghĩ bạn muốn chạy lệnh `{suggested}`. Nhấn vào gợi ý bên dưới để thực thi."
+        else:
+            reply = (
+                "Hiện không thể kết nối tới AI. Bạn có thể dùng các lệnh nhanh: "
+                "/explain [id], /fix [id], /scan, /report."
+            )
+
+    return ChatMessageResponse(reply=reply, suggested_command=suggested)
+
 
 @router.post("/auth/token", response_model=TokenResponse, tags=["auth"])
 async def demo_login(request: TokenRequest) -> TokenResponse:

@@ -10,9 +10,10 @@ interface Message {
   role: 'user' | 'ai' | 'system';
   text: string;
   loading?: boolean;
+  suggestedCommand?: string | null;
 }
 
-const PRESETS = ['/explain [id]', '/fix [id]', '/scan', '/approve [id]', '/revoke [id]', '/report', '/status'];
+const PRESETS = ['/explain [id]', '/fix [id]', '/scan', '/approve [id]', '/revoke [id]', '/report'];
 
 function parseCommand(input: string): { cmd: string; args: string[] } {
   const parts = input.trim().split(/\s+/);
@@ -100,7 +101,7 @@ function LoginOverlay({ onLogin }: { onLogin: () => void }) {
 export function PageChat() {
   const [messages, setMessages] = useState<Message[]>([{
     role: 'ai',
-    text: 'Xin chào! Mình là Sentinel AI — trợ lý bảo mật của bạn. Dùng các lệnh bên dưới hoặc đặt câu hỏi bất kỳ.',
+    text: 'Xin chào! Mình là Sentinel AI — trợ lý bảo mật của bạn. Bạn có thể chat tự do bằng tiếng Việt, hoặc dùng lệnh nhanh như /explain 5, /scan, /report.',
   }]);
   const [input, setInput] = useState('');
   const [authed, setAuthed] = useState(!!getAuthToken());
@@ -200,6 +201,20 @@ export function PageChat() {
     }
   };
 
+  const sendNaturalLanguage = async (text: string) => {
+    addMsg({ role: 'ai', text: '⏳ Đang xử lý…', loading: true });
+    try {
+      const res = await api.chat.message(text);
+      setMessages(m => m.map((msg, i) =>
+        i === m.length - 1 && msg.role === 'ai'
+          ? { ...msg, text: res.reply, loading: false, suggestedCommand: res.suggested_command }
+          : msg,
+      ));
+    } catch (e) {
+      replaceLastAi(`Lỗi: ${e}`);
+    }
+  };
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text) return;
@@ -210,8 +225,15 @@ export function PageChat() {
       const { cmd, args } = parseCommand(text);
       await executeCommand(cmd, args);
     } else {
-      addMsg({ role: 'ai', text: 'Để phân tích một finding cụ thể, dùng /explain [id]. Để xem danh sách, vào trang Vulnerabilities.' });
+      await sendNaturalLanguage(text);
     }
+  };
+
+  const handleSuggestedCommand = async (cmdText: string) => {
+    setInput('');
+    addMsg({ role: 'user', text: cmdText });
+    const { cmd, args } = parseCommand(cmdText);
+    await executeCommand(cmd, args);
   };
 
   const handleApproveConfirm = async (justification: string) => {
@@ -264,6 +286,18 @@ export function PageChat() {
                 : m.text.split('\n').map((line, j) => <p key={j}>{line}</p>)
               }
             </div>
+            {m.suggestedCommand && !m.loading && (
+              <div className="msg-actions" style={{ marginTop: 6 }}>
+                <span
+                  className="suggestion-chip"
+                  onClick={() => handleSuggestedCommand(m.suggestedCommand!)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <Icon name="sparkle" size={11} style={{ marginRight: 4 }} />
+                  Chạy {m.suggestedCommand}
+                </span>
+              </div>
+            )}
           </div>
         ))}
         <div ref={bottomRef} />
@@ -287,7 +321,7 @@ export function PageChat() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-            placeholder="Đặt câu hỏi hoặc nhập lệnh /explain 1, /fix 1, /scan… (Enter để gửi)"
+            placeholder="Hỏi tự do bằng tiếng Việt, hoặc gõ lệnh /explain 1, /fix 1, /scan… (Enter để gửi)"
           />
           <div className="ai-composer-row">
             <span className="grow" />

@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 
 from ...core.config import settings
-from .prompts import SYSTEM_INSTRUCTION
+from .prompts import CHAT_SYSTEM_INSTRUCTION, SYSTEM_INSTRUCTION
 from .schemas import AnalysisOutput
 
 log = logging.getLogger(__name__)
@@ -47,3 +47,39 @@ class GeminiClient:
                     raise
 
         raise RuntimeError(f"Gemini API không phản hồi sau {self._max_retries} lần thử: {last_exc}")
+
+    async def chat(self, prompt: str, context: str = "") -> str:
+        """Free-form Vietnamese chat for the Sentinel assistant.
+
+        Returns plain text — no JSON schema enforced — so the assistant can
+        answer general questions about security findings, the pipeline, or
+        the project. `context` is concatenated to the user prompt and is
+        intended to carry recent-finding summaries provided by the API layer.
+        """
+        full_prompt = (
+            f"### Bối cảnh\n{context}\n\n### Câu hỏi của người dùng\n{prompt}"
+            if context else prompt
+        )
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries):
+            try:
+                response = await asyncio.to_thread(
+                    self._client.models.generate_content,
+                    model=self._model,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=CHAT_SYSTEM_INSTRUCTION,
+                        temperature=0.4,
+                    ),
+                )
+                return (response.text or "").strip()
+            except Exception as exc:
+                last_exc = exc
+                err_str = str(exc)
+                if "429" in err_str or "503" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                log.error("Gemini chat error: %s", exc)
+                raise
+
+        raise RuntimeError(f"Gemini chat không phản hồi: {last_exc}")

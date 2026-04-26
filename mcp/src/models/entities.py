@@ -31,6 +31,7 @@ class Artifact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     github_artifact_id: Mapped[str] = mapped_column(String(255), nullable=False)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
+    github_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default=ArtifactStatus.pending.value, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))

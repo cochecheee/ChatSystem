@@ -4,9 +4,9 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any
 
 import defusedxml.ElementTree as ET
-from sarif_pydantic import Sarif
 
 from ..models.schemas import FindingCreate, compute_dedup_hash
 
@@ -78,61 +78,174 @@ class BaseNormalizer(ABC):
 # SARIF — Semgrep, CodeQL, SpotBugs .sarif, ESLint .sarif, Trivy .sarif
 # ---------------------------------------------------------------------------
 
+_TOOL_NAME_NORMALIZE: dict[str, str] = {
+    # Map common SARIF driver names → canonical lowercase tool names so the
+    # frontend can group/filter consistently.
+    "semgrep":           "semgrep",
+    "codeql":            "codeql",
+    "codeql command-line tools": "codeql",
+    "spotbugs":          "spotbugs",
+    "find security bugs": "spotbugs",
+    "eslint":            "eslint",
+    "trivy":             "trivy",
+    "aqua security trivy": "trivy",
+}
+
+
+def _normalize_tool_name(raw: str | None) -> str:
+    if not raw:
+        return "unknown"
+    key = raw.strip().lower()
+    return _TOOL_NAME_NORMALIZE.get(key, key)
+
+
 class SarifNormalizer(BaseNormalizer):
+    """Lenient SARIF parser — walks JSON dict so any SARIF 2.1.x variant works.
+
+    The previous pydantic-based parser rejected SARIF reports from CodeQL and
+    Semgrep that included extra fields not in sarif_pydantic's strict schema,
+    causing those tools' findings to silently disappear.
+    """
+
     TOOL_NAME = "sarif"
 
     def normalize(self, content: str, artifact_id: int) -> list[FindingCreate]:
-        sarif = Sarif.model_validate_json(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            log.warning("Invalid SARIF JSON: %s", exc)
+            return []
+
+        if not isinstance(data, dict):
+            return []
+
         findings: list[FindingCreate] = []
+        for run in data.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            tool_name = self._extract_tool_name(run)
+            rules_index = self._index_rules(run)
 
-        for run in sarif.runs or []:
-            tool_name = (
-                run.tool.driver.name
-                if run.tool and run.tool.driver and run.tool.driver.name
-                else "unknown"
-            ).lower()
-
-            for result in run.results or []:
-                rule_id = result.rule_id or "unknown-rule"
-                level = result.level.value if result.level else "none"
-                severity = _SARIF_LEVEL_TO_SEVERITY.get(level, "info")
-                message = (
-                    result.message.text if result.message and result.message.text else ""
-                )
-
-                file_path, line_number = self._extract_location(result)
-
-                dedup = compute_dedup_hash(rule_id, file_path, message)
-                findings.append(
-                    FindingCreate(
-                        artifact_id=artifact_id,
-                        tool=tool_name,
-                        rule_id=rule_id,
-                        severity=severity,
-                        message=message,
-                        file_path=file_path,
-                        line_number=line_number,
-                        raw_data={
-                            "level": level,
-                            "dedup_hash": dedup,
-                        },
+            for result in run.get("results") or []:
+                if not isinstance(result, dict):
+                    continue
+                try:
+                    findings.append(
+                        self._result_to_finding(
+                            result, tool_name, rules_index, artifact_id
+                        )
                     )
-                )
+                except Exception as exc:  # noqa: BLE001 - skip individual result, keep going
+                    log.debug("Skipping malformed SARIF result: %s", exc)
+                    continue
 
         return findings
 
     @staticmethod
-    def _extract_location(result) -> tuple[str, int | None]:
-        locations = result.locations or []
-        if not locations:
+    def _extract_tool_name(run: dict[str, Any]) -> str:
+        tool = run.get("tool") or {}
+        driver = tool.get("driver") if isinstance(tool, dict) else None
+        if isinstance(driver, dict):
+            return _normalize_tool_name(driver.get("name"))
+        return "unknown"
+
+    @staticmethod
+    def _index_rules(run: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """Build a {ruleId: rule_dict} index from `tool.driver.rules` if present."""
+        tool = run.get("tool") or {}
+        driver = tool.get("driver") if isinstance(tool, dict) else None
+        rules = driver.get("rules") if isinstance(driver, dict) else None
+        if not isinstance(rules, list):
+            return {}
+        return {
+            r.get("id"): r
+            for r in rules
+            if isinstance(r, dict) and r.get("id")
+        }
+
+    def _result_to_finding(
+        self,
+        result: dict[str, Any],
+        tool_name: str,
+        rules_index: dict[str, dict[str, Any]],
+        artifact_id: int,
+    ) -> FindingCreate:
+        rule_id = result.get("ruleId") or result.get("rule", {}).get("id") or "unknown-rule"
+        level = (result.get("level") or "none")
+        severity = _SARIF_LEVEL_TO_SEVERITY.get(level, "info")
+
+        msg_obj = result.get("message") or {}
+        message = msg_obj.get("text") if isinstance(msg_obj, dict) else ""
+        if not message:
+            # Some SARIF reports put the human-readable text in markdown
+            message = msg_obj.get("markdown", "") if isinstance(msg_obj, dict) else ""
+
+        # Fall back to rule short description when result message is empty
+        rule_def = rules_index.get(rule_id) or {}
+        if not message:
+            short = rule_def.get("shortDescription") or {}
+            if isinstance(short, dict):
+                message = short.get("text") or ""
+        if not message:
+            message = rule_id
+
+        file_path, line_number = self._extract_location(result)
+        cwe_id = self._extract_cwe(rule_def)
+
+        dedup = compute_dedup_hash(rule_id, file_path, message)
+        return FindingCreate(
+            artifact_id=artifact_id,
+            tool=tool_name,
+            rule_id=rule_id,
+            severity=severity,
+            message=message,
+            file_path=file_path,
+            line_number=line_number,
+            cwe_id=cwe_id,
+            raw_data={
+                "level": level,
+                "dedup_hash": dedup,
+            },
+        )
+
+    @staticmethod
+    def _extract_location(result: dict[str, Any]) -> tuple[str, int | None]:
+        locations = result.get("locations") or []
+        if not isinstance(locations, list) or not locations:
             return "unknown", None
         loc = locations[0]
-        pl = loc.physical_location
-        if not pl:
+        if not isinstance(loc, dict):
             return "unknown", None
-        uri = pl.artifact_location.uri if pl.artifact_location else None
-        line = pl.region.start_line if pl.region else None
+        pl = loc.get("physicalLocation") or {}
+        if not isinstance(pl, dict):
+            return "unknown", None
+        artifact_loc = pl.get("artifactLocation") or {}
+        uri = artifact_loc.get("uri") if isinstance(artifact_loc, dict) else None
+        region = pl.get("region") or {}
+        line = region.get("startLine") if isinstance(region, dict) else None
         return uri or "unknown", line
+
+    @staticmethod
+    def _extract_cwe(rule_def: dict[str, Any]) -> str | None:
+        """Try to pull a CWE id out of rule properties / tags (CodeQL & Semgrep)."""
+        if not rule_def:
+            return None
+        props = rule_def.get("properties") or {}
+        if not isinstance(props, dict):
+            return None
+        # CodeQL: properties.tags = ["external/cwe/cwe-079", ...]
+        tags = props.get("tags") or []
+        if isinstance(tags, list):
+            for tag in tags:
+                if isinstance(tag, str) and "cwe" in tag.lower():
+                    parts = tag.lower().split("cwe-")
+                    if len(parts) > 1 and parts[1][:4].rstrip("/").isdigit():
+                        num = parts[1].split("/")[0]
+                        return f"CWE-{int(num)}"
+        cwe = props.get("cwe")
+        if isinstance(cwe, str) and cwe:
+            return cwe if cwe.startswith("CWE-") else f"CWE-{cwe}"
+        return None
 
 
 # ---------------------------------------------------------------------------

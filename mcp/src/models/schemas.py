@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sarif_pydantic import Sarif as SarifLog  # noqa: F401 — re-exported for SARIF validation
 
 
 class FindingCreate(BaseModel):

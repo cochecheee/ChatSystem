@@ -47,7 +47,6 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
   useEffect(() => {
     setError('');
     setMessages([]);
-    // load from ai_analysis field (returned by API after backend fix)
     if (finding.ai_analysis) {
       setAnalysis(finding.ai_analysis);
     } else {
@@ -68,17 +67,17 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
     }
   };
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     const text = input.trim();
     if (!text) return;
     setMessages(m => [...m, { role: 'user', text }]);
     setInput('');
-    setTimeout(() => {
-      setMessages(m => [...m, {
-        role: 'ai',
-        text: 'Tính năng chat tự do sẽ có trong Phase 6. Hiện tại hãy nhấn "Phân tích AI" để nhận phân tích chi tiết về finding này.',
-      }]);
-    }, 500);
+    try {
+      const res = await api.chat.message(text, finding.id);
+      setMessages(m => [...m, { role: 'ai', text: res.reply }]);
+    } catch (e) {
+      setMessages(m => [...m, { role: 'ai', text: `Lỗi: ${e}` }]);
+    }
   };
 
   return (
@@ -103,7 +102,7 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
                 Finding: <strong>{finding.rule_id}</strong><br />
                 File: <code>{finding.file_path}{finding.line_number ? `:${finding.line_number}` : ''}</code>
               </p>
-              <p>Nhấn nút bên dưới để nhận giải thích và remediation diff bằng tiếng Việt.</p>
+              <p>Nhấn nút bên dưới để nhận giải thích và remediation diff bằng tiếng Việt, hoặc đặt câu hỏi tự do.</p>
             </div>
             <div className="msg-actions" style={{ marginTop: 8 }}>
               <div className="action-card" onClick={runAnalysis}>
@@ -220,7 +219,6 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: showAI ? 'minmax(0,1fr) 360px' : '1fr', height: '100%', minHeight: 0 }}>
-      {/* main detail */}
       <div style={{ overflowY: 'auto', padding: '24px 28px 40px', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
@@ -231,6 +229,12 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
               {finding.status === 'ai_analyzed' && (
                 <span className="chip" style={{ background: 'var(--accent-tint)', color: 'var(--accent-2)', fontSize: 10 }}>AI analyzed</span>
               )}
+              {finding.status === 'APPROVED' && (
+                <span className="chip" style={{ background: 'rgba(67,160,71,0.15)', color: 'var(--sev-low-fg)', fontSize: 10 }}>Approved</span>
+              )}
+              {finding.status === 'REVOKED' && (
+                <span className="chip" style={{ background: 'rgba(229,57,53,0.15)', color: 'var(--sev-crit-fg)', fontSize: 10 }}>Revoked</span>
+              )}
             </div>
             <h2 className="h2" style={{ lineHeight: 1.4 }}>{finding.message}</h2>
           </div>
@@ -239,7 +243,6 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
           </button>
         </div>
 
-        {/* metadata grid */}
         <div className="card card-pad" style={{ marginBottom: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {([
@@ -259,7 +262,6 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
           </div>
         </div>
 
-        {/* OWASP enrichment */}
         {(owasp || cweName) && (
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             {owasp && (
@@ -273,9 +275,32 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
             )}
           </div>
         )}
+
+        {(finding.approved_by || finding.revoked_by) && (
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Audit Trail
+            </div>
+            {finding.approved_by && (
+              <div style={{ fontSize: 12, marginBottom: 6 }}>
+                <span style={{ color: 'var(--fg-3)' }}>Approved by </span>
+                <strong>{finding.approved_by}</strong>
+                {finding.approved_at && <span style={{ color: 'var(--fg-3)' }}> · {new Date(finding.approved_at).toLocaleString()}</span>}
+                {finding.justification && <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--fg-3)' }}>"{finding.justification}"</div>}
+              </div>
+            )}
+            {finding.revoked_by && (
+              <div style={{ fontSize: 12 }}>
+                <span style={{ color: 'var(--fg-3)' }}>Revoked by </span>
+                <strong>{finding.revoked_by}</strong>
+                {finding.revoked_at && <span style={{ color: 'var(--fg-3)' }}> · {new Date(finding.revoked_at).toLocaleString()}</span>}
+                {finding.revoke_justification && <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--fg-3)' }}>"{finding.revoke_justification}"</div>}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* AI panel */}
       {showAI && (
         <AiPanel finding={finding} onClose={onToggleAI} />
       )}
@@ -288,6 +313,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const [loading, setLoading] = useState(true);
   const [sevFilter, setSevFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [toolFilter, setToolFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(initialId ?? null);
   const [showAI, setShowAI] = useState(true);
@@ -303,9 +329,12 @@ export function PageVulns({ initialId }: { initialId?: number }) {
 
   useEffect(() => { if (initialId != null) setSelectedId(initialId); }, [initialId]);
 
+  const tools = Array.from(new Set(findings.map(f => f.tool))).sort();
+
   const filtered = findings
     .filter(f => {
       if (sevFilter !== 'all' && f.severity !== sevFilter) return false;
+      if (toolFilter !== 'all' && f.tool !== toolFilter) return false;
       if (statusFilter === 'pending' && f.status !== 'pending_review') return false;
       if (statusFilter === 'analyzed' && f.status !== 'ai_analyzed') return false;
       if (search) {
@@ -319,11 +348,9 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const selected = findings.find(f => f.id === selectedId) ?? filtered[0] ?? null;
 
   return (
-    // flex: 1 + minHeight: 0 lets this fill the remaining space in .main (flex column)
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <div className="vuln-split" style={{ flex: 1, minWidth: 0 }}>
 
-        {/* ── LEFT: list pane ── */}
         <div className="vuln-list-pane" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ padding: '16px 16px 10px', flexShrink: 0 }}>
             <h1 className="h1" style={{ fontSize: 17 }}>Vulnerabilities</h1>
@@ -345,13 +372,21 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             ))}
           </div>
 
+          {tools.length > 1 && (
+            <div className="filter-bar" style={{ padding: '3px 12px', borderTop: 0, flexShrink: 0, flexWrap: 'wrap' }}>
+              <button className={`filter-pill${toolFilter === 'all' ? ' active' : ''}`} onClick={() => setToolFilter('all')}>all tools</button>
+              {tools.map(t => (
+                <button key={t} className={`filter-pill${toolFilter === t ? ' active' : ''}`} onClick={() => setToolFilter(t)}>{t}</button>
+              ))}
+            </div>
+          )}
+
           <div className="filter-bar" style={{ padding: '3px 12px', borderTop: 0, flexShrink: 0 }}>
             {[['all', 'All'], ['pending', 'Pending'], ['analyzed', 'AI Analyzed']].map(([v, l]) => (
               <button key={v} className={`filter-pill${statusFilter === v ? ' active' : ''}`} onClick={() => setStatusFilter(v)}>{l}</button>
             ))}
           </div>
 
-          {/* scrollable list */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {loading && <div className="empty">Loading…</div>}
             {!loading && filtered.length === 0 && <div className="empty">No findings match filters</div>}
@@ -362,7 +397,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                 className={`vuln-row${selectedId === f.id ? ' active' : ''}`}
                 onClick={() => setSelectedId(f.id)}
               >
-                <div className="vuln-row-title">{f.message}</div>
+                <div className="vuln-row-title">{f.message.split('\n')[0]}</div>
                 <div className="vuln-row-meta">
                   <SevChip sev={f.severity} />
                   <span className="tool-tag">{f.tool}</span>
@@ -378,7 +413,6 @@ export function PageVulns({ initialId }: { initialId?: number }) {
           </div>
         </div>
 
-        {/* ── RIGHT: detail pane ── */}
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {selected ? (
             <FindingDetail
