@@ -1,0 +1,107 @@
+import io
+import zipfile
+from pathlib import Path
+
+import httpx
+
+from ..core.config import settings
+
+_ALLOWED_EXTENSIONS = {".sarif", ".xml", ".json"}
+_MAX_ZIP_BYTES = 50 * 1024 * 1024   # 50 MB
+_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB per file
+_GITHUB_API = "https://api.github.com"
+
+
+class GitHubClient:
+    def __init__(
+        self,
+        token: str | None = None,
+        owner: str | None = None,
+        repo: str | None = None,
+    ) -> None:
+        self._headers = {
+            "Authorization": f"Bearer {token or settings.GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        self.owner = owner or settings.GITHUB_OWNER
+        self.repo = repo or settings.GITHUB_REPO
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def list_workflow_runs(
+        self,
+        workflow_name: str,
+        branch: str,
+        status: str = "completed",
+    ) -> list[dict]:
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/runs",
+                params={"branch": branch, "status": status, "per_page": 20},
+            )
+            resp.raise_for_status()
+            runs = resp.json().get("workflow_runs", [])
+            return [r for r in runs if r.get("name") == workflow_name]
+
+    async def list_artifacts(self, run_id: int) -> list[dict]:
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/runs/{run_id}/artifacts"
+            )
+            resp.raise_for_status()
+            return resp.json().get("artifacts", [])
+
+    async def fetch_artifact(self, artifact_id: int) -> list[dict[str, str]]:
+        """Download and extract a GitHub Actions artifact ZIP.
+
+        Returns list of {"filename": str, "content": str} for security-relevant
+        file types (.sarif, .xml, .json) only.
+        """
+        async with httpx.AsyncClient(
+            headers=self._headers,
+            follow_redirects=True,
+            timeout=60,
+        ) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/artifacts/{artifact_id}/zip"
+            )
+            resp.raise_for_status()
+
+        zip_bytes = resp.content
+        if len(zip_bytes) > _MAX_ZIP_BYTES:
+            raise ValueError(
+                f"Artifact ZIP too large: {len(zip_bytes)} bytes (limit {_MAX_ZIP_BYTES})"
+            )
+
+        return self._extract_security_files(zip_bytes)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _extract_security_files(self, zip_bytes: bytes) -> list[dict[str, str]]:
+        results: list[dict[str, str]] = []
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            for info in zf.infolist():
+                # Zip Slip: reject absolute paths and directory traversal
+                if info.filename.startswith("/") or ".." in Path(info.filename).parts:
+                    continue
+
+                # Extension filter — only security-relevant files
+                if Path(info.filename).suffix.lower() not in _ALLOWED_EXTENSIONS:
+                    continue
+
+                # Zip Bomb: skip oversized entries
+                if info.file_size > _MAX_FILE_BYTES:
+                    continue
+
+                with zf.open(info) as f:
+                    content = f.read(_MAX_FILE_BYTES).decode("utf-8", errors="replace")
+
+                results.append({"filename": info.filename, "content": content})
+
+        return results

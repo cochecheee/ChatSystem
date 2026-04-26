@@ -12,6 +12,9 @@ mcp/venv/
 mcp/env/
 mcp/.pytest_cache/
 mcp/findings.db
+mcp/mcp.db
+mcp/test.db
+mcp/**/__pycache__/
 
 # Node.js (dashboard/)
 dashboard/node_modules/

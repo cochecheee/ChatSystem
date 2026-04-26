@@ -13,7 +13,8 @@
   - Playwright E2E: `TEST_MODE=1` bypass Gemini, mock GitHub API qua `page.route()`, SQLite `:memory:`.
 
 ## Current Task
-- Finalize planning cho tất cả phases trước khi bắt đầu code.
+- Phase 3, Plan 03-01: Gemini Client Integration & Mocking Infrastructure.
+- Phase 2 integration fixes đang hoàn thiện (xem Completed bên dưới).
 
 ## Key Decisions
 
@@ -56,9 +57,17 @@
 - **Frontend:** Vitest + React Testing Library.
 - **E2E:** Playwright.
 
+## Completed
+- Phase 1: ✅ Scaffold, requirements, dev env setup
+- Phase 2, 02-01: ✅ FastAPI + SQLAlchemy DB layer (Project, Artifact, Finding models)
+- Phase 2, 02-02: ✅ GitHubClient (artifact fetch + Zip Slip/Bomb protection), ScrubbingService (PII + secrets), InjectionGuardrail
+- Phase 2, 02-03: ✅ SarifNormalizer, SpotBugsXMLNormalizer, ESLintNormalizer, DepCheckNormalizer, TrivyJsonNormalizer, NormalizerFactory (smart JSON detection), DataEnricher (CWE/OWASP 2021/CVSS)
+- Phase 2, 02-04: ✅ SecurityProcessor (end-to-end pipeline), GitHubPoller (background task, last_processed_run_id), REST API (POST /artifacts/process, GET /findings, POST /projects), E2E tests
+- Phase 2, integration fixes: ✅ Smart JSON routing (DepCheck/Trivy/SARIF-in-JSON/metadata skip), artifact name filtering (_SECURITY_ARTIFACT_NAMES), POST /webhook/run-complete endpoint
+- Phase 4: ✅ CI pipeline đã build và running trên repo SAST_CICD (6 tools: Semgrep, CodeQL, SpotBugs, ESLint-SARIF, Trivy, OWASP Dep-Check). Pipeline có 3 security gates + SonarCloud + webhook notify đến MCP Gateway.
+
 ## Blockers
-- Chưa có GitHub PAT cho Artifact Fetcher (cần cấu hình sau khi có repo).
-- Chưa có Gemini API Key (user cấu hình qua `.env`).
+- Không còn blockers — GitHub PAT và Gemini API Key đã cấu hình trong .env.
 
 ### ChatOps Commands (Final Assignment)
 - **Phase 5** (simple read-only, frontend calls API trực tiếp): `/status`, `/results`

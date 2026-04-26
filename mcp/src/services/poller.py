@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from ..core.config import settings
+from ..core.db import AsyncSessionLocal
+from ..models.entities import Project
+from .github_client import GitHubClient
+from .processor import SecurityProcessor
+
+log = logging.getLogger(__name__)
+
+
+class GitHubPoller:
+    """Background task — polls GitHub for new completed workflow runs every N seconds."""
+
+    def __init__(
+        self,
+        processor: SecurityProcessor | None = None,
+        github_client: GitHubClient | None = None,
+        session_factory: async_sessionmaker | None = None,
+    ) -> None:
+        self.processor = processor or SecurityProcessor()
+        self.github_client = github_client or GitHubClient()
+        self.session_factory = session_factory or AsyncSessionLocal
+        self.interval = settings.POLLING_INTERVAL_SECONDS
+        self.workflow_name = settings.POLLING_WORKFLOW_NAME
+        self.branch = settings.POLLING_BRANCH
+        self._github_url = (
+            f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
+        )
+
+    # ------------------------------------------------------------------
+
+    async def start(self) -> None:
+        log.info(
+            "Poller started — interval=%ds workflow=%r branch=%r",
+            self.interval,
+            self.workflow_name,
+            self.branch,
+        )
+        while True:
+            await asyncio.sleep(self.interval)
+            try:
+                await self._poll()
+            except Exception as exc:
+                log.error("Polling error: %s", exc)
+
+    # ------------------------------------------------------------------
+
+    async def _poll(self) -> None:
+        async with self.session_factory() as session:
+            project = await self._get_or_create_project(session)
+            last_run_id = project.last_processed_run_id or 0
+
+            runs = await self.github_client.list_workflow_runs(
+                self.workflow_name, self.branch
+            )
+            new_runs = [
+                r
+                for r in runs
+                if r["id"] > last_run_id and r.get("conclusion") == "success"
+            ]
+
+            if not new_runs:
+                log.debug("No new workflow runs since run_id=%d", last_run_id)
+                return
+
+            for run in sorted(new_runs, key=lambda r: r["id"]):
+                log.info("Processing workflow run %d", run["id"])
+                try:
+                    await self.processor.process_run(project.id, run["id"])
+                    project.last_processed_run_id = run["id"]
+                    await session.commit()
+                except Exception as exc:
+                    log.error("Failed to process run %d: %s", run["id"], exc)
+
+    # ------------------------------------------------------------------
+
+    async def _get_or_create_project(self, session) -> Project:
+        result = await session.execute(
+            select(Project).where(Project.github_url == self._github_url)
+        )
+        project = result.scalar_one_or_none()
+        if project is None:
+            project = Project(
+                name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
+                github_url=self._github_url,
+            )
+            session.add(project)
+            await session.commit()
+            await session.refresh(project)
+            log.info("Created project for %s", self._github_url)
+        return project
