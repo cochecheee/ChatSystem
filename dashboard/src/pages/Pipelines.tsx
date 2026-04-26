@@ -34,26 +34,27 @@ const SEV_COLOR: Record<string, string> = {
   info:     'var(--fg-3, #888)',
 };
 
+const SAST_NAMES = new Set([
+  'semgrep-report', 'codeql-report', 'dep-check-report',
+  'trivy-report', 'eslint-report', 'spotbugs-report',
+]);
+
+function isSastArtifact(name: string) {
+  return SAST_NAMES.has(name) || name.startsWith('trivy-image-scan-');
+}
+
 // ── Severity board cards ──────────────────────────────────────────────────────
 
 function SeverityBoard({ findings }: { findings: Finding[] }) {
   const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
   for (const f of findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
 
-  const items: [string, string][] = [
-    ['critical', 'Critical'],
-    ['high', 'High'],
-    ['medium', 'Medium'],
-    ['low', 'Low'],
-    ['info', 'Info'],
-  ];
-
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
-      {items.map(([sev, label]) => (
-        <div key={sev} className="card card-pad" style={{ borderTop: `3px solid ${SEV_COLOR[sev]}` }}>
-          <div style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: SEV_COLOR[sev], marginTop: 4 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 14 }}>
+      {(['critical', 'high', 'medium', 'low', 'info'] as const).map(sev => (
+        <div key={sev} className="card card-pad" style={{ borderTop: `3px solid ${SEV_COLOR[sev]}`, padding: '10px 12px' }}>
+          <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sev}</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: SEV_COLOR[sev], marginTop: 2 }}>
             {counts[sev]}
           </div>
         </div>
@@ -78,8 +79,8 @@ function ToolBreakdown({ findings }: { findings: Finding[] }) {
   if (tools.length === 0) return null;
 
   return (
-    <div className="card card-pad" style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+    <div className="card card-pad" style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
         Findings by Tool
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
@@ -89,31 +90,23 @@ function ToolBreakdown({ findings }: { findings: Finding[] }) {
           return (
             <div key={tool}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 12, fontWeight: 600 }}>{tool}</span>
-                <span className="muted" style={{ fontSize: 11.5 }}>
-                  {total} {total === 1 ? 'finding' : 'findings'}
-                </span>
+                <span className="tool-tag">{tool}</span>
+                <span className="muted" style={{ fontSize: 11 }}>{total}</span>
               </div>
-              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--surface-2)' }}>
+              <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--surface-2)' }}>
                 {(['critical', 'high', 'medium', 'low', 'info'] as const).map(sev => {
                   const c = counts[sev] ?? 0;
                   if (!c) return null;
-                  const pct = (c / maxTotal) * 100;
                   return (
-                    <div
-                      key={sev}
-                      title={`${c} ${sev}`}
-                      style={{ width: `${pct}%`, background: SEV_COLOR[sev], minWidth: c > 0 ? 4 : 0 }}
-                    />
+                    <div key={sev} title={`${c} ${sev}`}
+                      style={{ width: `${(c / maxTotal) * 100}%`, background: SEV_COLOR[sev], minWidth: 4 }} />
                   );
                 })}
               </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 10.5, color: 'var(--fg-3)' }}>
+              <div style={{ display: 'flex', gap: 6, marginTop: 3, fontSize: 10, color: 'var(--fg-3)' }}>
                 {(['critical', 'high', 'medium', 'low'] as const).map(sev =>
                   counts[sev] ? (
-                    <span key={sev}>
-                      <span style={{ color: SEV_COLOR[sev] }}>●</span> {counts[sev]} {sev}
-                    </span>
+                    <span key={sev}><span style={{ color: SEV_COLOR[sev] }}>●</span> {counts[sev]} {sev}</span>
                   ) : null
                 )}
               </div>
@@ -125,56 +118,51 @@ function ToolBreakdown({ findings }: { findings: Finding[] }) {
   );
 }
 
-// ── Top findings list ─────────────────────────────────────────────────────────
+// ── Top findings ──────────────────────────────────────────────────────────────
 
 function TopFindings({ findings }: { findings: Finding[] }) {
   const top = [...findings]
     .sort((a, b) => {
-      const sevDiff = (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9);
-      if (sevDiff !== 0) return sevDiff;
-      return (b.cvss_score ?? 0) - (a.cvss_score ?? 0);
+      const d = (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9);
+      return d !== 0 ? d : (b.cvss_score ?? 0) - (a.cvss_score ?? 0);
     })
     .slice(0, 10);
 
   if (top.length === 0) return null;
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
+    <div className="card" style={{ marginBottom: 14 }}>
       <div className="card-header">
-        <div className="h3">Top Findings (by severity)</div>
-        <span className="muted" style={{ fontSize: 11.5 }}>{top.length} của {findings.length}</span>
+        <div className="h3">Top Findings</div>
+        <span className="muted" style={{ fontSize: 11 }}>{top.length} / {findings.length}</span>
       </div>
       <table className="table">
         <thead>
           <tr>
-            <th style={{ width: 90 }}>Severity</th>
+            <th style={{ width: 80 }}>Severity</th>
             <th>Rule</th>
             <th>Tool</th>
             <th>File</th>
-            <th className="num" style={{ width: 70 }}>CVSS</th>
+            <th className="num" style={{ width: 60 }}>CVSS</th>
           </tr>
         </thead>
         <tbody>
           {top.map(f => (
             <tr key={f.id}>
-              <td><span className={`chip dot sev-${f.severity}`} style={{ fontSize: 10.5 }}>{f.severity}</span></td>
+              <td><span className={`chip dot sev-${f.severity}`} style={{ fontSize: 10 }}>{f.severity}</span></td>
               <td>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{f.rule_id}</span>
-                <div className="muted" style={{ fontSize: 11, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 380 }}>
+                <span className="mono" style={{ fontSize: 11, fontWeight: 600 }}>{f.rule_id}</span>
+                <div className="muted" style={{ fontSize: 10, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 340 }}>
                   {f.message.split('\n')[0]}
                 </div>
               </td>
-              <td><span className="tool-tag">{f.tool}</span></td>
-              <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+              <td><span className="tool-tag" style={{ fontSize: 10 }}>{f.tool}</span></td>
+              <td className="mono" style={{ fontSize: 10, color: 'var(--fg-3)' }}>
                 {f.file_path.split('/').pop()}{f.line_number ? `:${f.line_number}` : ''}
               </td>
               <td className="num">
                 {f.cvss_score != null && (
-                  <span className="mono" style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: f.cvss_score >= 7 ? SEV_COLOR.high : 'var(--fg-3)',
-                  }}>
+                  <span className="mono" style={{ fontSize: 10.5, fontWeight: 700, color: f.cvss_score >= 7 ? SEV_COLOR.high : 'var(--fg-3)' }}>
                     {f.cvss_score.toFixed(1)}
                   </span>
                 )}
@@ -187,90 +175,104 @@ function TopFindings({ findings }: { findings: Finding[] }) {
   );
 }
 
-// ── RunDetail ─────────────────────────────────────────────────────────────────
+// ── Run detail panel ──────────────────────────────────────────────────────────
 
-function RunDetail({ run, onBack }: { run: WorkflowRun; onBack: () => void }) {
+function RunPanel({ run }: { run: WorkflowRun }) {
   const [artifacts, setArtifacts] = useState<WorkflowArtifact[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [loadingA, setLoadingA] = useState(true);
   const [loadingF, setLoadingF] = useState(true);
+  const [loadingA, setLoadingA] = useState(true);
   const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessMsg, setReprocessMsg] = useState('');
 
-  const loadFindings = () => {
+  const loadFindings = (runId: number) => {
     setLoadingF(true);
-    api.github.runFindings(run.id)
+    api.github.runFindings(runId)
       .then(setFindings)
       .catch(() => setFindings([]))
       .finally(() => setLoadingF(false));
   };
 
   useEffect(() => {
+    setFindings([]);
+    setArtifacts([]);
+    setReprocessMsg('');
+    loadFindings(run.id);
     setLoadingA(true);
     api.github.artifacts(run.id)
       .then(setArtifacts)
       .catch(() => setArtifacts([]))
       .finally(() => setLoadingA(false));
-    loadFindings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.id]);
 
   const handleReprocess = async () => {
     if (!confirm(`Xoá findings cũ và xử lý lại run #${run.run_number}?`)) return;
     setReprocessing(true);
+    setReprocessMsg('');
     try {
-      await api.github.reprocessRun(run.id);
-      // Backend returns 202 — poll for new findings after a short delay.
-      setTimeout(loadFindings, 4000);
+      const res = await api.github.reprocessRun(run.id);
+      setReprocessMsg(`Đang xử lý ${res.deleted_artifacts} artifact cũ — kết quả sẽ cập nhật sau ~10s…`);
+      setTimeout(() => loadFindings(run.id), 10_000);
     } catch (e) {
-      alert(`Lỗi reprocess: ${e}`);
+      setReprocessMsg(`Lỗi: ${e}`);
     } finally {
       setReprocessing(false);
     }
   };
 
-  const hasFindings = findings.length > 0;
-
   return (
-    <div className="content">
-      <div className="page-header">
+    <div style={{ padding: '20px 24px', overflowY: 'auto', height: '100%' }}>
+      {/* Run header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <button className="btn ghost" onClick={onBack} style={{ marginBottom: 8 }}>
-            <Icon name="arrow_right" size={13} style={{ transform: 'rotate(180deg)' }} /> Back
-          </button>
-          <h1 className="h1">{run.name} #{run.run_number}</h1>
-          <div className="sub" style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-            <span className={`chip dot ${conclusionClass(run)}`}>{conclusionLabel(run)}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Icon name="branch" size={11} />{run.head_branch}
+          <h2 className="h2" style={{ marginBottom: 4 }}>{run.name} <span className="muted">#{run.run_number}</span></h2>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className={`chip dot ${conclusionClass(run)}`} style={{ fontSize: 10.5 }}>{conclusionLabel(run)}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+              <Icon name="branch" size={11} style={{ color: 'var(--fg-3)' }} />{run.head_branch}
             </span>
-            <span className="mono">{run.head_sha?.slice(0, 7)}</span>
-            <span>{timeAgo(run.created_at)}</span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{run.head_sha?.slice(0, 7)}</span>
+            <span className="muted" style={{ fontSize: 11 }}>{timeAgo(run.created_at)}</span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={handleReprocess} disabled={reprocessing}>
-            <Icon name="refresh" size={13} /> {reprocessing ? 'Đang xử lý…' : 'Reprocess'}
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <button className="btn ghost sm" onClick={handleReprocess} disabled={reprocessing}>
+            <Icon name="refresh" size={12} /> {reprocessing ? 'Đang xử lý…' : 'Reprocess'}
           </button>
           {run.html_url && (
-            <a href={run.html_url} target="_blank" rel="noreferrer" className="btn">
-              <Icon name="external" size={13} /> View on GitHub
+            <a href={run.html_url} target="_blank" rel="noreferrer" className="btn ghost sm">
+              <Icon name="external" size={12} /> GitHub
             </a>
           )}
         </div>
       </div>
 
-      {/* Boards: only show when we have findings for this run */}
-      {loadingF && <div className="empty">Đang tải kết quả scan…</div>}
+      {reprocessMsg && (
+        <div style={{ background: 'var(--accent-tint)', border: '1px solid var(--accent)', borderRadius: 6, padding: '8px 12px', marginBottom: 14, fontSize: 12 }}>
+          {reprocessMsg}
+        </div>
+      )}
 
-      {!loadingF && !hasFindings && (
-        <div className="card card-pad" style={{ marginBottom: 16 }}>
-          <div className="empty" style={{ padding: '20px 0' }}>
-            Chưa có finding nào được lưu cho run này. Có thể CI chưa hoàn tất hoặc webhook chưa gọi MCP Gateway.
+      {/* Boards */}
+      {loadingF && <div className="empty" style={{ padding: '32px 0' }}>Đang tải kết quả scan…</div>}
+
+      {!loadingF && findings.length === 0 && (
+        <div className="card card-pad" style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '20px 0' }}>
+            <Icon name="alert" size={22} style={{ color: 'var(--fg-4)' }} />
+            <div className="muted" style={{ fontSize: 13, textAlign: 'center' }}>
+              Chưa có findings cho run này.<br />
+              Có thể artifacts đã hết hạn (retention-days: 1) hoặc CI chưa kích hoạt webhook.
+            </div>
+            <button className="btn sm" onClick={handleReprocess} disabled={reprocessing}>
+              <Icon name="refresh" size={12} /> Thử Reprocess
+            </button>
           </div>
         </div>
       )}
 
-      {!loadingF && hasFindings && (
+      {!loadingF && findings.length > 0 && (
         <>
           <SeverityBoard findings={findings} />
           <ToolBreakdown findings={findings} />
@@ -278,48 +280,39 @@ function RunDetail({ run, onBack }: { run: WorkflowRun; onBack: () => void }) {
         </>
       )}
 
-      <div className="card" style={{ marginBottom: 20 }}>
+      {/* Artifacts */}
+      <div className="card">
         <div className="card-header">
           <div className="h3">Artifacts</div>
-          <span className="muted" style={{ fontSize: 11.5 }}>{artifacts.length} artifacts</span>
+          <span className="muted" style={{ fontSize: 11 }}>{loadingA ? '…' : `${artifacts.length} total`}</span>
         </div>
         {loadingA ? (
-          <div className="empty">Loading artifacts…</div>
+          <div className="empty">Loading…</div>
         ) : artifacts.length === 0 ? (
-          <div className="empty">No artifacts found</div>
+          <div className="empty">No artifacts</div>
         ) : (
           <table className="table">
             <thead>
               <tr>
                 <th>Name</th>
                 <th className="num">Size</th>
-                <th>Security</th>
+                <th>Type</th>
               </tr>
             </thead>
             <tbody>
-              {artifacts.map(a => {
-                const isSec = ['semgrep-report', 'codeql-report', 'dep-check-report', 'trivy-report', 'eslint-report', 'spotbugs-report'].includes(a.name)
-                  || a.name.startsWith('trivy-image-scan-');
-                return (
-                  <tr key={a.id}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="tool-tag">{a.name}</span>
-                      </div>
-                    </td>
-                    <td className="num mono" style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
-                      {(a.size_in_bytes / 1024).toFixed(1)} KB
-                    </td>
-                    <td>
-                      {isSec ? (
-                        <span className="chip sev-high" style={{ fontSize: 10.5 }}>SAST</span>
-                      ) : (
-                        <span className="chip" style={{ fontSize: 10.5 }}>—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {artifacts.map(a => (
+                <tr key={a.id}>
+                  <td><span className="tool-tag">{a.name}</span></td>
+                  <td className="num mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                    {(a.size_in_bytes / 1024).toFixed(1)} KB
+                  </td>
+                  <td>
+                    {isSastArtifact(a.name)
+                      ? <span className="chip sev-high" style={{ fontSize: 10 }}>SAST</span>
+                      : <span className="chip" style={{ fontSize: 10 }}>—</span>}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
@@ -333,97 +326,116 @@ function RunDetail({ run, onBack }: { run: WorkflowRun; onBack: () => void }) {
 export function PagePipelines() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<WorkflowRun | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   useEffect(() => {
-    api.github.runs().then(r => { setRuns(r); setLoading(false); }).catch(() => setLoading(false));
+    api.github.runs()
+      .then(r => {
+        setRuns(r);
+        setLoading(false);
+        // Auto-select latest run
+        if (r.length > 0) setSelectedId(prev => prev ?? r[0].id);
+      })
+      .catch(() => setLoading(false));
     const id = setInterval(() => api.github.runs().then(setRuns).catch(() => {}), 30_000);
     return () => clearInterval(id);
   }, []);
 
-  // Aggregate stats for the list view
-  const stats = useMemo(() => {
-    const total = runs.length;
-    const passed = runs.filter(r => r.conclusion === 'success').length;
-    const failed = runs.filter(r => r.conclusion === 'failure').length;
-    const running = runs.filter(r => r.status === 'in_progress').length;
-    return { total, passed, failed, running };
-  }, [runs]);
+  const selected = runs.find(r => r.id === selectedId) ?? null;
 
-  if (selected) return <RunDetail run={selected} onBack={() => setSelected(null)} />;
+  const stats = useMemo(() => ({
+    total: runs.length,
+    passed: runs.filter(r => r.conclusion === 'success').length,
+    failed: runs.filter(r => r.conclusion === 'failure').length,
+    running: runs.filter(r => r.status === 'in_progress').length,
+  }), [runs]);
 
   return (
-    <div className="content">
-      <div className="page-header">
-        <div>
-          <h1 className="h1">Pipelines</h1>
-          <div className="sub">CI/CD runs from GitHub Actions · {runs.length} recent</div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', overflow: 'hidden' }}>
+      {/* Header + KPI row */}
+      <div style={{ padding: '16px 24px 12px', flexShrink: 0, borderBottom: '1px solid var(--line)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div>
+            <h1 className="h1">Pipelines</h1>
+            <div className="sub">GitHub Actions · {runs.length} recent runs</div>
+          </div>
+          <button className="btn ghost sm" onClick={() => {
+            setLoading(true);
+            api.github.runs().then(r => { setRuns(r); setLoading(false); }).catch(() => setLoading(false));
+          }}>
+            <Icon name="refresh" size={13} /> Refresh
+          </button>
         </div>
-        <button className="btn" onClick={() => { setLoading(true); api.github.runs().then(r => { setRuns(r); setLoading(false); }).catch(() => setLoading(false)); }}>
-          <Icon name="refresh" /> Refresh
-        </button>
+
+        {!loading && runs.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+            <div className="card card-pad" style={{ padding: '8px 12px' }}>
+              <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Total</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.total}</div>
+            </div>
+            <div className="card card-pad" style={{ padding: '8px 12px', borderTop: `2px solid ${SEV_COLOR.low}` }}>
+              <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Passed</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: SEV_COLOR.low }}>{stats.passed}</div>
+            </div>
+            <div className="card card-pad" style={{ padding: '8px 12px', borderTop: `2px solid ${SEV_COLOR.critical}` }}>
+              <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Failed</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: SEV_COLOR.critical }}>{stats.failed}</div>
+            </div>
+            <div className="card card-pad" style={{ padding: '8px 12px' }}>
+              <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Running</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.running}</div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {!loading && runs.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
-          <div className="card card-pad">
-            <div style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Total</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.total}</div>
-          </div>
-          <div className="card card-pad" style={{ borderTop: `3px solid ${SEV_COLOR.low}` }}>
-            <div style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Passed</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: SEV_COLOR.low }}>{stats.passed}</div>
-          </div>
-          <div className="card card-pad" style={{ borderTop: `3px solid ${SEV_COLOR.critical}` }}>
-            <div style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Failed</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: SEV_COLOR.critical }}>{stats.failed}</div>
-          </div>
-          <div className="card card-pad">
-            <div style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Running</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.running}</div>
-          </div>
-        </div>
-      )}
+      {/* Split: left = run list, right = detail panel */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
-      <div className="card">
-        {loading ? (
-          <div className="empty">Loading runs…</div>
-        ) : runs.length === 0 ? (
-          <div className="empty">No completed runs found — check GITHUB_TOKEN and repo config</div>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th>Run</th>
-                <th>Branch</th>
-                <th>SHA</th>
-                <th className="num">Started</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map(r => (
-                <tr key={r.id} className="row-clickable" onClick={() => setSelected(r)}>
-                  <td><span className={`chip dot ${conclusionClass(r)}`}>{conclusionLabel(r)}</span></td>
-                  <td>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span className="mono" style={{ fontSize: 12 }}>#{r.run_number}</span>
-                      <span className="muted" style={{ fontSize: 11 }}>{r.name}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <Icon name="branch" size={11} style={{ color: 'var(--fg-3)' }} />
-                      <span className="mono" style={{ fontSize: 11.5 }}>{r.head_branch}</span>
-                    </span>
-                  </td>
-                  <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{r.head_sha?.slice(0, 7)}</td>
-                  <td className="num muted" style={{ fontSize: 11.5 }}>{timeAgo(r.created_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        {/* Left: run list */}
+        <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {loading && <div className="empty">Loading runs…</div>}
+          {!loading && runs.length === 0 && (
+            <div className="empty" style={{ fontSize: 12 }}>No runs — check GITHUB_TOKEN</div>
+          )}
+          {runs.map(r => (
+            <div
+              key={r.id}
+              className={`vuln-row${r.id === selectedId ? ' active' : ''}`}
+              style={{ cursor: 'pointer', padding: '10px 14px' }}
+              onClick={() => setSelectedId(r.id)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+                <span className={`chip dot ${conclusionClass(r)}`} style={{ fontSize: 10 }}>{conclusionLabel(r)}</span>
+                <span className="mono" style={{ fontSize: 11.5, fontWeight: 600 }}>#{r.run_number}</span>
+                {r.id === runs[0]?.id && (
+                  <span className="chip" style={{ fontSize: 9.5, marginLeft: 'auto' }}>latest</span>
+                )}
+              </div>
+              <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.name}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: 10.5, color: 'var(--fg-3)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <Icon name="branch" size={10} />{r.head_branch}
+                </span>
+                <span>{timeAgo(r.created_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Right: detail panel */}
+        <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+          {selected ? (
+            <RunPanel key={selected.id} run={selected} />
+          ) : (
+            <div className="empty" style={{ marginTop: 80 }}>
+              {loading ? 'Đang tải…' : 'Chọn một pipeline run để xem kết quả'}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
