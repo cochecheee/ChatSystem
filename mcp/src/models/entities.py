@@ -58,4 +58,14 @@ class Finding(Base):
     status: Mapped[str] = mapped_column(String(30), default="pending_review", nullable=False)
     ai_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Approval audit trail
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Revoke audit trail
+    revoke_justification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revoked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="findings")

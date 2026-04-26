@@ -46,6 +46,21 @@ class GitHubClient:
             runs = resp.json().get("workflow_runs", [])
             return [r for r in runs if r.get("name") == workflow_name]
 
+    async def dispatch_workflow(self, workflow_filename: str, ref: str = "main") -> None:
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.post(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/workflows/{workflow_filename}/dispatches",
+                json={"ref": ref},
+            )
+            resp.raise_for_status()
+
+    async def rerun_workflow(self, run_id: int) -> None:
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.post(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/runs/{run_id}/rerun"
+            )
+            resp.raise_for_status()
+
     async def list_artifacts(self, run_id: int) -> list[dict]:
         async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
             resp = await client.get(

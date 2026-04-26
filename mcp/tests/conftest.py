@@ -2,19 +2,22 @@ import os
 import uuid
 
 # Must be set before any project imports so pydantic-settings picks up the test DB
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test.db"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["APP_ENV"] = "testing"
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
-from src.core.db import init_db  # noqa: E402
+from src.core.db import Base, engine, init_db  # noqa: E402
 from src.main import app  # noqa: E402
 
 
 @pytest_asyncio.fixture
 async def client():
-    await init_db()  # ASGITransport doesn't trigger lifespan — init manually
+    # Fresh schema each test — drop_all + create_all avoids stale column issues
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await init_db()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 

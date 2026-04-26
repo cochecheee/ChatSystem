@@ -35,6 +35,12 @@ class FindingOut(BaseModel):
     status: str
     raw_data: dict[str, Any] | None
     ai_analysis: dict[str, Any] | None
+    justification: str | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    revoke_justification: str | None = None
+    revoked_by: str | None = None
+    revoked_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -97,6 +103,37 @@ class AnalysisResult(BaseModel):
     severity: str
     cwe_reference: str
     confidence: str
+
+
+# ---------------------------------------------------------------------------
+# ChatOps
+# ---------------------------------------------------------------------------
+
+class CommandRequest(BaseModel):
+    command: str                        # "/explain", "/fix", "/approve", etc.
+    finding_id: int | None = None
+    run_id: int | None = None
+    justification: str | None = None
+
+
+class CommandResponse(BaseModel):
+    status: str                         # "ok" | "error"
+    message: str
+    data: dict[str, Any] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+class TokenRequest(BaseModel):
+    username: str
+    role: str = "developer"             # "developer" | "security_lead" | "admin"
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 def compute_dedup_hash(rule_id: str, file_path: str, message: str) -> str:
