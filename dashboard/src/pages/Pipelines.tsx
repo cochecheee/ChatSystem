@@ -43,6 +43,48 @@ function isSastArtifact(name: string) {
   return SAST_NAMES.has(name) || name.startsWith('trivy-image-scan-');
 }
 
+// ── CI/CD categorisation ──────────────────────────────────────────────────────
+
+const CD_KEYWORDS = ['cd', 'deploy', 'release', 'publish', 'staging', 'production', 'prod'];
+
+function categorizeRun(run: WorkflowRun): 'ci' | 'cd' {
+  const n = (run.name ?? '').toLowerCase();
+  // Tokenize on non-alphanumeric so 'cd' matches 'CD' but not 'codeql' or 'cdn'
+  const tokens = n.split(/[^a-z0-9]+/).filter(Boolean);
+  for (const kw of CD_KEYWORDS) {
+    if (tokens.includes(kw)) return 'cd';
+  }
+  // Fallback substring check for compound names like "deploy-prod"
+  if (CD_KEYWORDS.some(kw => kw.length >= 4 && n.includes(kw))) return 'cd';
+  return 'ci';
+}
+
+// ── Section header (sticky within scrollable sidebar) ─────────────────────────
+
+function SectionHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div style={{
+      padding: '10px 14px 6px',
+      fontSize: 'var(--ts-xs)',
+      fontWeight: 700,
+      color: 'var(--fg-3)',
+      textTransform: 'uppercase',
+      letterSpacing: '0.08em',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderBottom: '1px solid var(--line)',
+      background: 'var(--bg-elev)',
+      position: 'sticky',
+      top: 0,
+      zIndex: 1,
+    }}>
+      <span>{label}</span>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-4)', fontWeight: 600 }}>{count}</span>
+    </div>
+  );
+}
+
 // ── Severity board cards ──────────────────────────────────────────────────────
 
 function SeverityBoard({ findings }: { findings: Finding[] }) {
@@ -203,7 +245,6 @@ function RunPanel({ run }: { run: WorkflowRun }) {
       .then(setArtifacts)
       .catch(() => setArtifacts([]))
       .finally(() => setLoadingA(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.id]);
 
   const handleReprocess = async () => {
@@ -326,18 +367,57 @@ function RunPanel({ run }: { run: WorkflowRun }) {
 export function PagePipelines() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  useEffect(() => {
+  const refresh = () => {
+    setLoading(true);
+    setFetchError(null);
+    setRuns([]);  // clear stale list so tab activation never shows stale "No runs"
     api.github.runs()
-      .then(r => {
-        setRuns(r);
+      .then(arr => {
+        setRuns(arr);
         setLoading(false);
-        // Auto-select latest run
-        if (r.length > 0) setSelectedId(prev => prev ?? r[0].id);
+        // Auto-select latest CI run; keep current selection if it still exists
+        setSelectedId(prev => {
+          if (prev != null && arr.some(r => r.id === prev)) return prev;
+          const latestCi = arr.find(r => categorizeRun(r) === 'ci');
+          const latestCd = arr.find(r => categorizeRun(r) === 'cd');
+          return latestCi?.id ?? latestCd?.id ?? arr[0]?.id ?? null;
+        });
       })
-      .catch(() => setLoading(false));
-    const id = setInterval(() => api.github.runs().then(setRuns).catch(() => {}), 30_000);
+      .catch(e => {
+        console.error('[Pipelines] fetch error:', e);
+        setFetchError(String(e));
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    // On mount (fires on every tab activation since pages remount via App.tsx switch),
+    // fetch runs and auto-select latest CI run. setRuns([]) + setLoading are called only
+    // in callbacks to avoid the react-hooks/set-state-in-effect lint rule.
+    api.github.runs()
+      .then(arr => {
+        setRuns(arr);
+        setLoading(false);
+        setSelectedId(prev => {
+          if (prev != null && arr.some(r => r.id === prev)) return prev;
+          const latestCi = arr.find(r => categorizeRun(r) === 'ci');
+          const latestCd = arr.find(r => categorizeRun(r) === 'cd');
+          return latestCi?.id ?? latestCd?.id ?? arr[0]?.id ?? null;
+        });
+      })
+      .catch(e => {
+        console.error('[Pipelines] fetch error:', e);
+        setFetchError(String(e));
+        setLoading(false);
+      });
+    const id = setInterval(() => {
+      api.github.runs()
+        .then(arr => setRuns(arr))
+        .catch(() => {});
+    }, 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -350,6 +430,43 @@ export function PagePipelines() {
     running: runs.filter(r => r.status === 'in_progress').length,
   }), [runs]);
 
+  // Split runs into CI and CD buckets
+  const { ciRuns, cdRuns } = useMemo(() => {
+    const ci: WorkflowRun[] = [];
+    const cd: WorkflowRun[] = [];
+    for (const r of runs) {
+      (categorizeRun(r) === 'cd' ? cd : ci).push(r);
+    }
+    return { ciRuns: ci, cdRuns: cd };
+  }, [runs]);
+
+  // Inline run-row renderer used in both CI and CD sections
+  const renderRunRow = (r: WorkflowRun, isLatest: boolean) => (
+    <div
+      key={r.id}
+      className={`vuln-row${r.id === selectedId ? ' active' : ''}`}
+      style={{ cursor: 'pointer', padding: '10px 14px' }}
+      onClick={() => setSelectedId(r.id)}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+        <span className={`chip dot ${conclusionClass(r)}`} style={{ fontSize: 10 }}>{conclusionLabel(r)}</span>
+        <span className="mono" style={{ fontSize: 11.5, fontWeight: 600 }}>#{r.run_number}</span>
+        {isLatest && (
+          <span className="chip" style={{ fontSize: 9.5, marginLeft: 'auto' }}>latest</span>
+        )}
+      </div>
+      <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {r.name}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: 10.5, color: 'var(--fg-3)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <Icon name="branch" size={10} />{r.head_branch}
+        </span>
+        <span>{timeAgo(r.created_at)}</span>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', overflow: 'hidden' }}>
       {/* Header + KPI row */}
@@ -359,10 +476,7 @@ export function PagePipelines() {
             <h1 className="h1">Pipelines</h1>
             <div className="sub">GitHub Actions · {runs.length} recent runs</div>
           </div>
-          <button className="btn ghost sm" onClick={() => {
-            setLoading(true);
-            api.github.runs().then(r => { setRuns(r); setLoading(false); }).catch(() => setLoading(false));
-          }}>
+          <button className="btn ghost sm" onClick={refresh}>
             <Icon name="refresh" size={13} /> Refresh
           </button>
         </div>
@@ -392,37 +506,31 @@ export function PagePipelines() {
       {/* Split: left = run list, right = detail panel */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
-        {/* Left: run list */}
+        {/* Left: run list split into CI / CD sections */}
         <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--line)', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           {loading && <div className="empty">Loading runs…</div>}
-          {!loading && runs.length === 0 && (
+          {!loading && fetchError && (
+            <div className="empty" style={{ color: 'var(--err-fg)', padding: 12, fontSize: 11, wordBreak: 'break-all' }}>
+              Error: {fetchError}
+            </div>
+          )}
+          {!loading && !fetchError && runs.length === 0 && (
             <div className="empty" style={{ fontSize: 12 }}>No runs — check GITHUB_TOKEN</div>
           )}
-          {runs.map(r => (
-            <div
-              key={r.id}
-              className={`vuln-row${r.id === selectedId ? ' active' : ''}`}
-              style={{ cursor: 'pointer', padding: '10px 14px' }}
-              onClick={() => setSelectedId(r.id)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
-                <span className={`chip dot ${conclusionClass(r)}`} style={{ fontSize: 10 }}>{conclusionLabel(r)}</span>
-                <span className="mono" style={{ fontSize: 11.5, fontWeight: 600 }}>#{r.run_number}</span>
-                {r.id === runs[0]?.id && (
-                  <span className="chip" style={{ fontSize: 9.5, marginLeft: 'auto' }}>latest</span>
-                )}
-              </div>
-              <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {r.name}
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: 10.5, color: 'var(--fg-3)' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <Icon name="branch" size={10} />{r.head_branch}
-                </span>
-                <span>{timeAgo(r.created_at)}</span>
-              </div>
-            </div>
-          ))}
+
+          {!loading && !fetchError && runs.length > 0 && (
+            <>
+              <SectionHeader label="CI" count={ciRuns.length} />
+              {ciRuns.length === 0
+                ? <div className="empty" style={{ padding: '8px 12px', fontSize: 11 }}>No CI runs</div>
+                : ciRuns.map((r, idx) => renderRunRow(r, idx === 0))}
+
+              <SectionHeader label="CD" count={cdRuns.length} />
+              {cdRuns.length === 0
+                ? <div className="empty" style={{ padding: '8px 12px', fontSize: 11 }}>No CD runs</div>
+                : cdRuns.map((r, idx) => renderRunRow(r, idx === 0))}
+            </>
+          )}
         </div>
 
         {/* Right: detail panel */}
