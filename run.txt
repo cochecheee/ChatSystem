@@ -1,6 +1,8 @@
 # WINDOWS
 .venv\Scripts\activate
 uvicorn src.main:app --reload --port 8000
+
+#GIT BASH
 D:/School/DoAnTotNghiep/ngrok-v3-stable-windows-amd64/ngrok.exe  http 8000
 
 npm run dev

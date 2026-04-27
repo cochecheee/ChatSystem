@@ -33,18 +33,26 @@ class GitHubClient:
 
     async def list_workflow_runs(
         self,
-        workflow_name: str,
-        branch: str,
+        workflow_name: str = "",
+        branch: str = "",
         status: str = "completed",
     ) -> list[dict]:
+        params: dict[str, str | int] = {"per_page": 30}
+        if branch:
+            params["branch"] = branch
+        if status:
+            params["status"] = status
         async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
             resp = await client.get(
                 f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/runs",
-                params={"branch": branch, "status": status, "per_page": 20},
+                params=params,
             )
             resp.raise_for_status()
             runs = resp.json().get("workflow_runs", [])
-            return [r for r in runs if r.get("name") == workflow_name]
+        # Filter by workflow name only when explicitly specified
+        if workflow_name:
+            runs = [r for r in runs if r.get("name") == workflow_name]
+        return runs
 
     async def dispatch_workflow(self, workflow_filename: str, ref: str = "main") -> None:
         async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:

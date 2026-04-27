@@ -4,6 +4,8 @@
 - **Phase:** Phase 1 (Core System Initialization) → chuẩn bị Phase 2.
 - **Progress:** Phase 1 hoàn thành scaffold. Đang discuss và finalize planning trước khi implement.
 
+Last activity: 2026-04-28 - Completed quick task 260428-29v: Fix pipeline tab refetch on tab activation + CI/CD split sidebar
+
 ## Data Strategy
 - **Development & Production:** Dùng data thật — GitHub CI artifacts thật + Gemini API thật.
   - Cần cấu hình `.env` với `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GEMINI_API_KEY` thật trước khi chạy.
@@ -68,6 +70,12 @@
 
 ## Blockers
 - Không còn blockers — GitHub PAT và Gemini API Key đã cấu hình trong .env.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260428-29v | Fix pipeline tab: refetch on tab activation + CI/CD split sidebar | 2026-04-28 | 8abee9e | [260428-29v-fix-pipeline-tab-1-refetch-on-tab-activa](.//quick/260428-29v-fix-pipeline-tab-1-refetch-on-tab-activa/) |
 
 ### ChatOps Commands (Final Assignment)
 - **Phase 5** (simple read-only, frontend calls API trực tiếp): `/status`, `/results`

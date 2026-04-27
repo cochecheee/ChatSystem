@@ -43,7 +43,7 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function PageOverview({ onNav, onOpenVuln: _onOpenVuln }: Props) {
+export function PageOverview({ onNav, onOpenVuln }: Props) {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -69,6 +69,14 @@ export function PageOverview({ onNav, onOpenVuln: _onOpenVuln }: Props) {
   );
   const critHigh = (counts.critical || 0) + (counts.high || 0);
   const passRate = runs.length ? Math.round(runs.filter(r => r.conclusion === 'success').length / runs.length * 100) : 0;
+
+  const recentCritHigh = findings
+    .filter(f => f.severity === 'critical' || f.severity === 'high')
+    .sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === 'critical' ? -1 : 1;
+      return b.id - a.id;
+    })
+    .slice(0, 5);
 
   const topRules = Object.entries(
     findings.reduce((acc, f) => { acc[f.rule_id] = (acc[f.rule_id] || 0) + 1; return acc; }, {} as Record<string, number>)
@@ -229,6 +237,52 @@ export function PageOverview({ onNav, onOpenVuln: _onOpenVuln }: Props) {
                   </td>
                   <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{r.head_sha?.slice(0, 7)}</td>
                   <td className="num muted" style={{ fontSize: 11.5 }}>{timeAgo(r.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="card-header">
+          <div>
+            <div className="h3">Recent critical &amp; high findings</div>
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>Top priority — needs immediate attention</div>
+          </div>
+          <button className="btn ghost sm" onClick={() => onNav('vulns')}>
+            View all <Icon name="arrow_right" size={12} />
+          </button>
+        </div>
+        {recentCritHigh.length === 0 ? (
+          <div className="empty" style={{ padding: '40px 20px' }}>
+            <Icon name="shield" size={24} style={{ color: 'var(--sev-low-fg)', marginBottom: 8 }} />
+            <div style={{ color: 'var(--sev-low-fg)', fontWeight: 500 }}>No critical or high findings</div>
+          </div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Severity</th>
+                <th>Rule</th>
+                <th>File</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentCritHigh.map(f => (
+                <tr key={f.id} className="row-clickable" onClick={() => { onNav('vulns'); onOpenVuln?.(f.id); }}>
+                  <td><span className={`chip dot sev-${f.severity}`}>{f.severity}</span></td>
+                  <td className="mono" style={{ fontSize: 11.5, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.rule_id}>{f.rule_id}</td>
+                  <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                    {f.file_path.split('/').pop()}{f.line_number ? `:${f.line_number}` : ''}
+                  </td>
+                  <td>
+                    {f.status === 'APPROVED' && <span className="chip" style={{ background: 'rgba(67,160,71,0.15)', color: 'var(--sev-low-fg)', fontSize: 10 }}>Approved</span>}
+                    {f.status === 'REVOKED'  && <span className="chip" style={{ background: 'rgba(229,57,53,0.15)', color: 'var(--sev-crit-fg)', fontSize: 10 }}>Revoked</span>}
+                    {f.status === 'ai_analyzed' && <span className="chip" style={{ background: 'var(--accent-tint)', color: 'var(--accent-2)', fontSize: 10 }}>AI analyzed</span>}
+                    {f.status === 'pending_review' && <span className="chip" style={{ fontSize: 10 }}>Pending</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

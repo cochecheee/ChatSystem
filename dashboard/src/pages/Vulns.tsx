@@ -4,6 +4,22 @@ import { Icon } from '../components/Icon';
 import type { AnalysisResult, Finding, Project } from '../types';
 import { SEVERITY_ORDER } from '../types';
 
+// Dependency-scanner tools — findings from these are CVE/package-update type
+const DEP_SCAN_TOOLS = new Set(['trivy', 'dep-check', 'dependency-check', 'snyk', 'owasp-dep-check', 'owasp-dependency-check', 'grype']);
+function isDepScan(tool: string) {
+  return DEP_SCAN_TOOLS.has(tool.toLowerCase()) || tool.toLowerCase().includes('dep');
+}
+
+// Extract package metadata from raw_data (field names vary by tool)
+function pkgMeta(f: Finding) {
+  const d = f.raw_data ?? {};
+  const name = (d.PkgName ?? d.package_name ?? d.packageName ?? d.component ?? '') as string;
+  const current = (d.InstalledVersion ?? d.installed_version ?? d.current_version ?? d.version ?? '') as string;
+  const fixed = (d.FixedVersion ?? d.fixed_version ?? d.fix_version ?? d.patchedVersions ?? '') as string;
+  const cveId = (d.VulnerabilityID ?? d.vulnerability_id ?? '') as string || (f.rule_id.match(/^(CVE|GHSA|PRISMA|SNYK)-/i) ? f.rule_id : '');
+  return { name, current, fixed, cveId };
+}
+
 function SevChip({ sev }: { sev: string }) {
   return <span className={`chip dot sev-${sev}`}>{sev}</span>;
 }
@@ -32,6 +48,45 @@ function DiffView({ diff }: { diff: string }) {
           );
         })}
       </pre>
+    </div>
+  );
+}
+
+// Prominent update card shown at top of detail for CVE/dep-scan findings
+function CveUpdateCard({ finding }: { finding: Finding }) {
+  const { name, current, fixed, cveId } = pkgMeta(finding);
+  const manifest = finding.file_path.split('/').pop() ?? finding.file_path;
+  const displayName = name || manifest;
+
+  return (
+    <div className="cve-update-card">
+      <div className="cve-update-header">
+        <Icon name="download" size={11} />
+        Dependency update required
+      </div>
+      <div className="cve-pkg-row">
+        <span className="cve-pkg-name">{displayName}</span>
+        {current ? (
+          <span className="cve-version current">{current}</span>
+        ) : null}
+        {(current || fixed) && <span className="cve-arrow">→</span>}
+        {fixed ? (
+          <span className="cve-version fixed">{fixed}</span>
+        ) : (
+          <span className="cve-version unknown">check latest</span>
+        )}
+      </div>
+      {(cveId || finding.cwe_id) && (
+        <div className="cve-id-row">
+          {cveId && <span className="cve-id-badge">{cveId}</span>}
+          {finding.cwe_id && cveId !== finding.cwe_id && (
+            <span className="cve-id-badge">{finding.cwe_id}</span>
+          )}
+          {finding.cvss_score != null && (
+            <span className="chip" style={{ fontSize: 11 }}>CVSS {finding.cvss_score}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -216,89 +271,121 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
 }) {
   const owasp = finding.raw_data?.owasp_category as string | undefined;
   const cweName = finding.raw_data?.cwe_name as string | undefined;
+  const depScan = isDepScan(finding.tool);
+
+  const SEV_FG: Record<string, string> = {
+    critical: 'var(--sev-crit-fg)', high: 'var(--sev-high-fg)',
+    medium:   'var(--sev-med-fg)',  low:  'var(--sev-low-fg)',
+    info:     'var(--sev-info-fg)',
+  };
+  const SEV_BG: Record<string, string> = {
+    critical: 'var(--sev-crit-bg)', high: 'var(--sev-high-bg)',
+    medium:   'var(--sev-med-bg)',  low:  'var(--sev-low-bg)',
+    info:     'var(--sev-info-bg)',
+  };
+  const sevFg = SEV_FG[finding.severity] ?? 'var(--fg-3)';
+  const sevBg = SEV_BG[finding.severity] ?? 'var(--bg-muted)';
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: showAI ? 'minmax(0,1fr) 360px' : '1fr', height: '100%', minHeight: 0 }}>
-      <div style={{ overflowY: 'auto', padding: '24px 28px 40px', minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <SevChip sev={finding.severity} />
-              <span className="tool-tag">{finding.tool}</span>
-              {finding.cwe_id && <span className="chip">{finding.cwe_id}</span>}
-              {finding.status === 'ai_analyzed' && (
-                <span className="chip" style={{ background: 'var(--accent-tint)', color: 'var(--accent-2)', fontSize: 10 }}>AI analyzed</span>
-              )}
-              {finding.status === 'APPROVED' && (
-                <span className="chip" style={{ background: 'rgba(67,160,71,0.15)', color: 'var(--sev-low-fg)', fontSize: 10 }}>Approved</span>
-              )}
-              {finding.status === 'REVOKED' && (
-                <span className="chip" style={{ background: 'rgba(229,57,53,0.15)', color: 'var(--sev-crit-fg)', fontSize: 10 }}>Revoked</span>
-              )}
-            </div>
-            <h2 className="h2" style={{ lineHeight: 1.4 }}>{finding.message}</h2>
-          </div>
-          <button className="btn sm" style={{ flexShrink: 0, marginLeft: 12 }} onClick={onToggleAI}>
-            <Icon name="sparkle" size={12} /> {showAI ? 'Hide AI' : 'Ask AI'}
-          </button>
-        </div>
-
-        <div className="card card-pad" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {([
-              ['Rule', finding.rule_id],
-              ['File', `${finding.file_path}${finding.line_number ? `:${finding.line_number}` : ''}`],
-              ['Tool', finding.tool],
-              ['Status', finding.status],
-              ['CWE', finding.cwe_id],
-              ['CVSS', finding.cvss_score != null ? String(finding.cvss_score) : null],
-              ['Normalized', finding.normalized_at ? new Date(finding.normalized_at).toLocaleString() : null],
-            ] as [string, string | null | undefined][]).filter(([, v]) => v).map(([k, v]) => (
-              <div key={k}>
-                <div style={{ color: 'var(--fg-3)', fontSize: 11, marginBottom: 2 }}>{k}</div>
-                <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>{v}</div>
+      <div style={{ overflowY: 'auto', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* Severity accent header */}
+        <div style={{ background: sevBg, flexShrink: 0 }}>
+          <div style={{ height: 4, background: sevFg }} />
+          <div style={{ padding: '18px 28px 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <SevChip sev={finding.severity} />
+                <span className="tool-tag">{finding.tool}</span>
+                {!depScan && finding.cwe_id && <span className="chip">{finding.cwe_id}</span>}
+                {finding.status === 'ai_analyzed' && (
+                  <span className="chip" style={{ background: 'var(--accent-tint)', color: 'var(--accent-2)', fontSize: 10 }}>AI analyzed</span>
+                )}
+                {finding.status === 'APPROVED' && (
+                  <span className="chip" style={{ background: 'rgba(67,160,71,0.15)', color: 'var(--sev-low-fg)', fontSize: 10 }}>Approved</span>
+                )}
+                {finding.status === 'REVOKED' && (
+                  <span className="chip" style={{ background: 'rgba(229,57,53,0.15)', color: 'var(--sev-crit-fg)', fontSize: 10 }}>Revoked</span>
+                )}
               </div>
-            ))}
+              <h2 className="h2" style={{ lineHeight: 1.4 }}>{finding.message}</h2>
+            </div>
+            <button className="btn sm" style={{ flexShrink: 0, marginLeft: 12 }} onClick={onToggleAI}>
+              <Icon name="sparkle" size={12} /> {showAI ? 'Hide AI' : 'Ask AI'}
+            </button>
           </div>
         </div>
 
-        {(owasp || cweName) && (
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            {owasp && (
-              <>
-                <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>OWASP Top 10 2021</div>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{owasp}</div>
-              </>
-            )}
-            {cweName && (
-              <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: owasp ? 4 : 0 }}>{cweName}</div>
-            )}
-          </div>
-        )}
+        <div style={{ padding: '20px 28px 40px', flex: 1 }}>
+          {/* CVE update card — replaces metadata clutter for dep-scan findings */}
+          {depScan && <CveUpdateCard finding={finding} />}
 
-        {(finding.approved_by || finding.revoked_by) && (
+          {/* Metadata grid — simplified for dep-scan (no redundant CVE fields) */}
           <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Audit Trail
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {(depScan
+                ? [
+                    ['Manifest', finding.file_path],
+                    ['Tool', finding.tool],
+                    ['Status', finding.status],
+                    ['Detected', finding.normalized_at ? new Date(finding.normalized_at).toLocaleString() : null],
+                  ]
+                : [
+                    ['Rule', finding.rule_id],
+                    ['File', `${finding.file_path}${finding.line_number ? `:${finding.line_number}` : ''}`],
+                    ['Tool', finding.tool],
+                    ['Status', finding.status],
+                    ['CWE', finding.cwe_id],
+                    ['CVSS', finding.cvss_score != null ? String(finding.cvss_score) : null],
+                    ['Normalized', finding.normalized_at ? new Date(finding.normalized_at).toLocaleString() : null],
+                  ]
+              ).filter(([_k, v]) => v).map(([k, v]) => (
+                <div key={k as string}>
+                  <div style={{ color: 'var(--fg-3)', fontSize: 11, marginBottom: 2 }}>{k}</div>
+                  <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>{v}</div>
+                </div>
+              ))}
             </div>
-            {finding.approved_by && (
-              <div style={{ fontSize: 12, marginBottom: 6 }}>
-                <span style={{ color: 'var(--fg-3)' }}>Approved by </span>
-                <strong>{finding.approved_by}</strong>
-                {finding.approved_at && <span style={{ color: 'var(--fg-3)' }}> · {new Date(finding.approved_at).toLocaleString()}</span>}
-                {finding.justification && <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--fg-3)' }}>"{finding.justification}"</div>}
-              </div>
-            )}
-            {finding.revoked_by && (
-              <div style={{ fontSize: 12 }}>
-                <span style={{ color: 'var(--fg-3)' }}>Revoked by </span>
-                <strong>{finding.revoked_by}</strong>
-                {finding.revoked_at && <span style={{ color: 'var(--fg-3)' }}> · {new Date(finding.revoked_at).toLocaleString()}</span>}
-                {finding.revoke_justification && <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--fg-3)' }}>"{finding.revoke_justification}"</div>}
-              </div>
-            )}
           </div>
-        )}
+
+          {!depScan && (owasp || cweName) && (
+            <div className="card card-pad" style={{ marginBottom: 16 }}>
+              {owasp && (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>OWASP Top 10 2021</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{owasp}</div>
+                </>
+              )}
+              {cweName && (
+                <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: owasp ? 4 : 0 }}>{cweName}</div>
+              )}
+            </div>
+          )}
+
+          {(finding.approved_by || finding.revoked_by) && (
+            <div className="card card-pad" style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Audit Trail
+              </div>
+              {finding.approved_by && (
+                <div style={{ fontSize: 12, marginBottom: 6 }}>
+                  <span style={{ color: 'var(--fg-3)' }}>Approved by </span>
+                  <strong>{finding.approved_by}</strong>
+                  {finding.approved_at && <span style={{ color: 'var(--fg-3)' }}> · {new Date(finding.approved_at).toLocaleString()}</span>}
+                  {finding.justification && <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--fg-3)' }}>"{finding.justification}"</div>}
+                </div>
+              )}
+              {finding.revoked_by && (
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ color: 'var(--fg-3)' }}>Revoked by </span>
+                  <strong>{finding.revoked_by}</strong>
+                  {finding.revoked_at && <span style={{ color: 'var(--fg-3)' }}> · {new Date(finding.revoked_at).toLocaleString()}</span>}
+                  {finding.revoke_justification && <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--fg-3)' }}>"{finding.revoke_justification}"</div>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {showAI && (
@@ -312,6 +399,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'sast' | 'deps'>('sast');
   const [projectFilter, setProjectFilter] = useState<number | 'all'>('all');
   const [sevFilter, setSevFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -342,7 +430,6 @@ export function PageVulns({ initialId }: { initialId?: number }) {
 
   useEffect(() => { if (initialId != null) setSelectedId(initialId); }, [initialId]);
 
-  // Fetch individual finding from GET /findings/{id} when selection changes
   useEffect(() => {
     if (selectedId == null) { setSelectedFinding(null); return; }
     const cached = findings.find(f => f.id === selectedId);
@@ -356,14 +443,30 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  const tools = Array.from(new Set(findings.map(f => f.tool))).sort();
+  // Split findings by type
+  const sastFindings = findings.filter(f => !isDepScan(f.tool));
+  const depFindings  = findings.filter(f =>  isDepScan(f.tool));
+  const activePool   = viewMode === 'sast' ? sastFindings : depFindings;
 
-  const filtered = findings
+  const tools = Array.from(new Set(activePool.map(f => f.tool))).sort();
+  const sevCounts = activePool.reduce(
+    (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
+    {} as Record<string, number>
+  );
+  // Dep tab: also count by package manifest file for grouping hint
+  const depSevCounts = depFindings.reduce(
+    (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
+    {} as Record<string, number>
+  );
+
+  const filtered = activePool
     .filter(f => {
       if (sevFilter !== 'all' && f.severity !== sevFilter) return false;
       if (toolFilter !== 'all' && f.tool !== toolFilter) return false;
-      if (statusFilter === 'pending' && f.status !== 'pending_review') return false;
-      if (statusFilter === 'analyzed' && f.status !== 'ai_analyzed') return false;
+      if (statusFilter === 'pending'  && f.status !== 'pending_review') return false;
+      if (statusFilter === 'analyzed' && f.status !== 'ai_analyzed')    return false;
+      if (statusFilter === 'approved' && f.status !== 'APPROVED')       return false;
+      if (statusFilter === 'revoked'  && f.status !== 'REVOKED')        return false;
       if (search) {
         const q = search.toLowerCase();
         if (!`${f.message} ${f.file_path} ${f.rule_id} ${f.tool}`.toLowerCase().includes(q)) return false;
@@ -374,21 +477,53 @@ export function PageVulns({ initialId }: { initialId?: number }) {
 
   const selected = selectedFinding ?? filtered[0] ?? null;
 
+  // Reset selectedId when switching tabs so a stale selection doesn't show wrong detail
+  const switchTab = (mode: 'sast' | 'deps') => {
+    setViewMode(mode);
+    setSevFilter('all');
+    setStatusFilter('all');
+    setToolFilter('all');
+    setSearch('');
+    setSelectedId(null);
+    setSelectedFinding(null);
+  };
+
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <div className="vuln-split" style={{ flex: 1, minWidth: 0 }}>
 
         <div className="vuln-list-pane" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ padding: '16px 16px 10px', flexShrink: 0 }}>
-            <h1 className="h1" style={{ fontSize: 17 }}>Vulnerabilities</h1>
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              {loading ? 'Loading…' : `${filtered.length} / ${findings.length} findings`}
-            </div>
-            {projects.length > 1 && (
+          {/* Tab switcher */}
+          <div className="tabs" style={{ padding: '0 14px', flexShrink: 0 }}>
+            <button
+              className={`tab${viewMode === 'sast' ? ' active' : ''}`}
+              onClick={() => switchTab('sast')}
+            >
+              Findings
+              <span className="count">{loading ? '…' : sastFindings.length}</span>
+            </button>
+            <button
+              className={`tab${viewMode === 'deps' ? ' active' : ''}`}
+              onClick={() => switchTab('deps')}
+            >
+              Dependencies
+              {!loading && depFindings.length > 0 && (
+                <span className="count" style={
+                  (depSevCounts.critical ?? 0) + (depSevCounts.high ?? 0) > 0
+                    ? { color: 'var(--sev-crit-fg)' } : {}
+                }>{depFindings.length}</span>
+              )}
+            </button>
+          </div>
+
+          {/* Project selector */}
+          {projects.length > 1 && (
+            <div style={{ padding: '6px 12px 0', flexShrink: 0 }}>
               <select
                 style={{
-                  marginTop: 8, width: '100%', padding: '5px 8px', background: 'var(--surface-2)',
+                  width: '100%', padding: '5px 8px', background: 'var(--bg-elev)',
                   border: '1px solid var(--line)', borderRadius: 6, color: 'var(--fg)', fontSize: 11.5, outline: 'none',
+                  font: 'inherit',
                 }}
                 value={projectFilter}
                 onChange={e => setProjectFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
@@ -396,44 +531,103 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                 <option value="all">All projects</option>
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-            )}
-          </div>
-
-          <div style={{ padding: '0 12px 10px', flexShrink: 0 }}>
-            <div className="search-box" style={{ width: '100%' }}>
-              <Icon name="search" size={13} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rule, file, message…" />
-            </div>
-          </div>
-
-          <div className="filter-bar" style={{ padding: '4px 12px', flexShrink: 0 }}>
-            {(['all', 'critical', 'high', 'medium', 'low'] as const).map(s => (
-              <button key={s} className={`filter-pill${sevFilter === s ? ' active' : ''}`} onClick={() => setSevFilter(s)}>{s}</button>
-            ))}
-          </div>
-
-          {tools.length > 1 && (
-            <div className="filter-bar" style={{ padding: '3px 12px', borderTop: 0, flexShrink: 0, flexWrap: 'wrap' }}>
-              <button className={`filter-pill${toolFilter === 'all' ? ' active' : ''}`} onClick={() => setToolFilter('all')}>all tools</button>
-              {tools.map(t => (
-                <button key={t} className={`filter-pill${toolFilter === t ? ' active' : ''}`} onClick={() => setToolFilter(t)}>{t}</button>
-              ))}
             </div>
           )}
 
-          <div className="filter-bar" style={{ padding: '3px 12px', borderTop: 0, flexShrink: 0 }}>
-            {[['all', 'All'], ['pending', 'Pending'], ['analyzed', 'AI Analyzed']].map(([v, l]) => (
-              <button key={v} className={`filter-pill${statusFilter === v ? ' active' : ''}`} onClick={() => setStatusFilter(v)}>{l}</button>
+          {/* Search */}
+          <div style={{ padding: '8px 12px 6px', flexShrink: 0 }}>
+            <div className="search-box" style={{ width: '100%' }}>
+              <Icon name="search" size={13} />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder={viewMode === 'deps' ? 'Package, CVE, manifest…' : 'Rule, file, message…'}
+              />
+            </div>
+          </div>
+
+          {/* Severity summary bar */}
+          {!loading && activePool.length > 0 && (
+            <div className="sev-summary-bar">
+              {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
+                const cnt = sevCounts[sev] ?? 0;
+                if (cnt === 0) return null;
+                return (
+                  <button
+                    key={sev}
+                    className={`sev-summary-chip sev-${sev}${sevFilter === sev ? ' active' : ''}`}
+                    onClick={() => setSevFilter(prev => prev === sev ? 'all' : sev)}
+                    title={`Filter to ${sev} only — click again to clear`}
+                  >
+                    <span className="sev-summary-label">{sev[0].toUpperCase() + sev.slice(1)}</span>
+                    <span className="sev-summary-count">{cnt}</span>
+                  </button>
+                );
+              })}
+              {sevFilter !== 'all' && (
+                <button
+                  className="sev-summary-chip"
+                  style={{ background: 'var(--bg-muted)', color: 'var(--fg-3)' }}
+                  onClick={() => setSevFilter('all')}
+                  title="Clear severity filter"
+                >
+                  ✕ all
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Compact filter toolbar */}
+          <div className="filter-toolbar">
+            {/* Tool select — only on SAST tab when multiple tools present */}
+            {viewMode === 'sast' && tools.length > 1 && (
+              <>
+                <select value={toolFilter} onChange={e => setToolFilter(e.target.value)} title="Filter by tool">
+                  <option value="all">All tools</option>
+                  {tools.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <span className="tb-sep" />
+              </>
+            )}
+            {/* On deps tab: tool select for scanner (trivy vs dep-check etc) */}
+            {viewMode === 'deps' && tools.length > 1 && (
+              <>
+                <select value={toolFilter} onChange={e => setToolFilter(e.target.value)} title="Scanner">
+                  <option value="all">All scanners</option>
+                  {tools.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <span className="tb-sep" />
+              </>
+            )}
+            {([
+              ['all',      'All'],
+              ['pending',  'Pending'],
+              ['analyzed', 'AI'],
+              ['approved', 'OK'],
+              ['revoked',  'Revoked'],
+            ] as [string, string][]).map(([v, l]) => (
+              <button key={v} className={`tb-pill${statusFilter === v ? ' active' : ''}`} onClick={() => setStatusFilter(v)}>{l}</button>
             ))}
           </div>
 
+          {/* Finding list */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {loading && <div className="empty">Loading…</div>}
-            {!loading && filtered.length === 0 && <div className="empty">No findings match filters</div>}
-            {filtered.map(f => (
+            {!loading && filtered.length === 0 && (
+              <div className="empty">
+                {activePool.length === 0
+                  ? viewMode === 'deps'
+                    ? 'No dependency vulnerabilities found'
+                    : 'No SAST findings found'
+                  : 'No findings match filters'}
+              </div>
+            )}
+
+            {viewMode === 'sast' && filtered.map(f => (
               <div
                 key={f.id}
                 data-testid="finding-row"
+                data-sev={f.severity}
                 className={`vuln-row${selectedId === f.id ? ' active' : ''}`}
                 onClick={() => setSelectedId(f.id)}
               >
@@ -447,9 +641,50 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                   {f.status === 'ai_analyzed' && (
                     <Icon name="sparkle" size={11} style={{ color: 'var(--accent)', marginLeft: 2 }} />
                   )}
+                  {f.status === 'APPROVED' && <span className="row-status-badge approved">OK</span>}
+                  {f.status === 'REVOKED'  && <span className="row-status-badge revoked">Rev</span>}
                 </div>
               </div>
             ))}
+
+            {viewMode === 'deps' && filtered.map(f => {
+              const { name, current, fixed, cveId } = pkgMeta(f);
+              const displayName = name || f.file_path.split('/').pop() || f.rule_id;
+              const manifest = f.file_path.split('/').pop() ?? '';
+              return (
+                <div
+                  key={f.id}
+                  data-testid="finding-row"
+                  data-sev={f.severity}
+                  className={`vuln-row dep-row${selectedId === f.id ? ' active' : ''}`}
+                  onClick={() => setSelectedId(f.id)}
+                >
+                  {/* Line 1: severity + package name + CVE ID */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <SevChip sev={f.severity} />
+                    <span className="vuln-row-title" style={{ margin: 0, flex: 1 }}>{displayName}</span>
+                    {cveId && (
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', flexShrink: 0 }}>{cveId}</span>
+                    )}
+                  </div>
+                  {/* Line 2: version arrow + manifest file + status */}
+                  <div className="vuln-row-meta">
+                    {current || fixed ? (
+                      <span className="mono" style={{ fontSize: 10.5 }}>
+                        {current && <span style={{ color: 'var(--sev-crit-fg)' }}>{current}</span>}
+                        {current && fixed && <span style={{ color: 'var(--fg-4)', margin: '0 4px' }}>→</span>}
+                        {fixed && <span style={{ color: 'var(--sev-low-fg)', fontWeight: 600 }}>{fixed}</span>}
+                      </span>
+                    ) : (
+                      <span className="tool-tag">{f.tool}</span>
+                    )}
+                    {manifest && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{manifest}</span>}
+                    {f.status === 'APPROVED' && <span className="row-status-badge approved">OK</span>}
+                    {f.status === 'REVOKED'  && <span className="row-status-badge revoked">Rev</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 

@@ -78,7 +78,7 @@ async def list_projects(session: AsyncSession = Depends(get_session)) -> list[Pr
 
 @router.get("/github/runs", summary="List recent workflow runs from GitHub")
 async def list_github_runs(
-    branch: str = "main",
+    branch: str = "",
     status: str = "completed",
     github: GitHubClient = Depends(get_github_client),
 ) -> list[dict]:
@@ -87,7 +87,7 @@ async def list_github_runs(
     """
     try:
         return await github.list_workflow_runs(
-            workflow_name=settings.POLLING_WORKFLOW_NAME,
+            workflow_name="",
             branch=branch,
             status=status,
         )
