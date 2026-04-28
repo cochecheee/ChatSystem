@@ -378,7 +378,7 @@ All colors, type scale, and spacing are already defined in `tokens.css`. Key tok
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `--surface-1`/`--surface-2` be kept as aliases or should all usages be migrated to `--bg-elev`/`--bg-muted`?**
    - What we know: 10 usage sites; both approaches are equivalent
