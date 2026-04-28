@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import type { AnalysisResult, Finding, Project } from '../types';
 import { SEVERITY_ORDER } from '../types';
@@ -21,7 +22,7 @@ function pkgMeta(f: Finding) {
 }
 
 function SevChip({ sev }: { sev: string }) {
-  return <span className={`chip dot sev-${sev}`}>{sev}</span>;
+  return <Badge variant={sev as 'critical' | 'high' | 'medium' | 'low' | 'info'} dot>{sev}</Badge>;
 }
 
 function DiffView({ diff }: { diff: string }) {

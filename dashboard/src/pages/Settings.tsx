@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { AlertBanner } from '../components/AlertBanner';
+import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { StatusDot } from '../components/StatusDot';
 import type { Project } from '../types';
 
 function ToggleRow({ label, sub, on }: { label: string; sub: string; on: boolean }) {
@@ -70,7 +73,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
         onChange={e => setUrl(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
       />
-      {error && <div style={{ color: 'var(--sev-crit-fg)', fontSize: 11 }}>{error}</div>}
+      {error && <AlertBanner type="error" message={error} onDismiss={() => setError('')} />}
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn primary sm" onClick={handleSubmit} disabled={loading}>
           {loading ? 'Đang lưu…' : 'Save'}
@@ -113,10 +116,7 @@ export function PageSettings() {
 
       {/* Backend health banner */}
       <div className="card" style={{ marginBottom: 20, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{
-          width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-          background: health === 'ok' ? 'var(--sev-low-fg)' : health === 'error' ? 'var(--sev-crit-fg)' : 'var(--fg-4)',
-        }} />
+        <StatusDot status={health === 'ok' ? 'ok' : health === 'error' ? 'error' : 'info'} />
         <div>
           <div style={{ fontSize: 13, fontWeight: 500 }}>Backend API — GET /health</div>
           <div className="muted" style={{ fontSize: 11 }}>
@@ -124,11 +124,10 @@ export function PageSettings() {
             {' · '}<span className="mono">{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</span>
           </div>
         </div>
-        <span
-          className={`chip dot ${health === 'ok' ? 'status-passed' : health === 'error' ? 'status-failed' : 'status-running'}`}
-          style={{ marginLeft: 'auto', fontSize: 10 }}
-        >
-          {health}
+        <span style={{ marginLeft: 'auto' }}>
+          <Badge variant={health === 'ok' ? 'passed' : health === 'error' ? 'failed' : 'running'}>
+            {health}
+          </Badge>
         </span>
       </div>
 
