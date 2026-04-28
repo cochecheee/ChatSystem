@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface StatusDotProps {
   status: 'ok' | 'error' | 'warn' | 'info' | 'critical' | 'high' | 'medium' | 'low';
   label?: string;

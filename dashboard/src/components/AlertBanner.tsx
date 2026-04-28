@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface AlertBannerProps {
   type: 'error' | 'success' | 'info' | 'warning';
   message: string;
