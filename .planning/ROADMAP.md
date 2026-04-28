@@ -25,8 +25,8 @@ Milestone 2 — MVP Hardening & Feature Completion. Fix all known MVP issues and
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Design system foundation — tokens, reusable components, remove toast notifications
-- [ ] 01-02: Page cleanup pass — audit and remove redundant elements, standardize layouts
+- [x] 01-01: Design system foundation — tokens, reusable components, remove toast notifications
+- [x] 01-02: Page cleanup pass — audit and remove redundant elements, standardize layouts
 
 ### Phase 2: Pipeline Visibility
 **Goal**: Pipeline page shows all GitHub workflow runs with real-time status, branch filtering, trend charts, and per-run summaries
