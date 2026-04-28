@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { Toaster } from 'sonner';
 import { api } from './api/client';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
 import { PageChat } from './pages/Chat';
@@ -8,13 +7,13 @@ import { PagePipelines } from './pages/Pipelines';
 import { PageReports } from './pages/Reports';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
-import { notify, updateCritHighBaseline } from './utils/toast';
 
 export default function App() {
   const [active, setActive] = useState<PageId>('overview');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [openVulnId, setOpenVulnId] = useState<number | undefined>();
   const [vulnCount, setVulnCount] = useState(0);
+  const [newCritHighCount, setNewCritHighCount] = useState(0);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -23,17 +22,18 @@ export default function App() {
   const critHighRef = useRef(0);
 
   useEffect(() => {
-    const fetch = () => {
+    const fetchData = () => {
       api.findings.list({ limit: 200 }).then(f => {
         setVulnCount(f.length);
         const critHigh = f.filter(x => x.severity === 'critical' || x.severity === 'high').length;
-        notify.newFindings(critHigh);
-        if (critHighRef.current === 0) updateCritHighBaseline(critHigh);
+        if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
+          setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));
+        }
         critHighRef.current = critHigh;
       }).catch(() => {});
     };
-    fetch();
-    const id = setInterval(fetch, 60_000);
+    fetchData();
+    const id = setInterval(fetchData, 60_000);
     return () => clearInterval(id);
   }, []);
 
@@ -68,11 +68,12 @@ export default function App() {
             onNav={onNav}
             theme={theme}
             onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+            newCritHighCount={newCritHighCount}
+            onClearCritHigh={() => setNewCritHighCount(0)}
           />
           {page}
         </div>
       </div>
-      <Toaster position="bottom-right" richColors />
     </>
   );
 }

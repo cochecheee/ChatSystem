@@ -3,7 +3,7 @@ import { api, getAuthToken, setAuthToken } from '../api/client';
 import { ApprovalDialog } from '../components/modals/ApprovalDialog';
 import { RevokeDialog } from '../components/modals/RevokeDialog';
 import { Icon } from '../components/Icon';
-import { notify } from '../utils/toast';
+// notify removed — toast.ts deleted in 01-01; Chat feedback will use AlertBanner in 01-02
 import type { CommandResponse } from '../types';
 
 interface Message {
@@ -119,7 +119,7 @@ export function PageChat() {
     setMessages(m => m.map((msg, i) => i === m.length - 1 && msg.role === 'ai' ? { ...msg, text, loading: false } : msg));
 
   const handleReport = async () => {
-    notify.processing('Đang tạo báo cáo…');
+    addMsg({ role: 'ai', text: '⏳ Đang tạo báo cáo…', loading: true });
     try {
       const token = getAuthToken();
       const res = await fetch(api.chat.reportUrl(), {
@@ -133,18 +133,11 @@ export function PageChat() {
       a.download = 'security-report.html';
       a.click();
       URL.revokeObjectURL(url);
-      notify.dismissProcessing();
-      notify.report(() => {
-        const a2 = document.createElement('a');
-        a2.href = url;
-        a2.download = 'security-report.html';
-        a2.click();
-      });
+      setMessages(m => m.filter(msg => !msg.loading));
       addMsg({ role: 'ai', text: 'Báo cáo HTML đã được tải xuống thành công.' });
     } catch (e) {
-      notify.dismissProcessing();
-      notify.commandError(`Lỗi tạo báo cáo: ${e}`);
-      addMsg({ role: 'ai', text: `Lỗi: ${e}` });
+      setMessages(m => m.filter(msg => !msg.loading));
+      addMsg({ role: 'ai', text: `Lỗi tạo báo cáo: ${e}` });
     }
   };
 
@@ -181,7 +174,6 @@ export function PageChat() {
       };
 
       const res: CommandResponse = await api.chat.command(req);
-      notify.commandSuccess(res.message);
 
       let text = res.message;
       if (res.data?.explanation_vi) {
@@ -196,7 +188,6 @@ export function PageChat() {
       replaceLastAi(text);
     } catch (e) {
       const msg = String(e);
-      notify.commandError(msg);
       replaceLastAi(`Lỗi: ${msg}`);
     }
   };
@@ -239,7 +230,6 @@ export function PageChat() {
   const handleApproveConfirm = async (justification: string) => {
     if (approvalId === null) return;
     const res = await api.chat.command({ command: '/approve', finding_id: approvalId, justification });
-    notify.commandSuccess(res.message);
     addMsg({ role: 'ai', text: res.message });
     setApprovalId(null);
   };
@@ -247,7 +237,6 @@ export function PageChat() {
   const handleRevokeConfirm = async (justification: string) => {
     if (revokeId === null) return;
     const res = await api.chat.command({ command: '/revoke', finding_id: revokeId, justification });
-    notify.commandSuccess(res.message);
     addMsg({ role: 'ai', text: res.message });
     setRevokeId(null);
   };

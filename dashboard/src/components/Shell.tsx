@@ -86,9 +86,11 @@ interface TopbarProps {
   onNav: (id: PageId) => void;
   theme: string;
   onToggleTheme: () => void;
+  newCritHighCount?: number;
+  onClearCritHigh?: () => void;
 }
 
-export function Topbar({ active, onNav, theme, onToggleTheme }: TopbarProps) {
+export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, onClearCritHigh }: TopbarProps) {
   const crumbs = CRUMB[active] ?? [];
   return (
     <div className="topbar">
@@ -106,8 +108,11 @@ export function Topbar({ active, onNav, theme, onToggleTheme }: TopbarProps) {
           <input placeholder="Search vulnerabilities, runs…" readOnly />
           <span className="kbd">⌘K</span>
         </div>
-        <button className="btn ghost" style={{ padding: 6 }}>
+        <button className="btn ghost" style={{ padding: 6, position: 'relative' }} onClick={onClearCritHigh}>
           <Icon name="bell" size={15} />
+          {(newCritHighCount ?? 0) > 0 && (
+            <span className="notif-dot">{newCritHighCount}</span>
+          )}
         </button>
         <button className="btn" onClick={onToggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀' : '☾'}
