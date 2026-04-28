@@ -67,7 +67,7 @@ export function ActionDialog({
     >
       <div
         style={{
-          background: 'var(--surface-1)', border: '1px solid var(--line)',
+          background: 'var(--bg-elev)', border: '1px solid var(--line)',
           borderRadius: 10, padding: '24px 28px', width: 440, maxWidth: '90vw',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
         }}

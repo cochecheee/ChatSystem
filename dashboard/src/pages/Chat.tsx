@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, getAuthToken, setAuthToken } from '../api/client';
+import { AlertBanner } from '../components/AlertBanner';
 import { ApprovalDialog } from '../components/modals/ApprovalDialog';
 import { RevokeDialog } from '../components/modals/RevokeDialog';
 import { Icon } from '../components/Icon';
-// notify removed — toast.ts deleted in 01-01; Chat feedback will use AlertBanner in 01-02
 import type { CommandResponse } from '../types';
 
 interface Message {
@@ -48,7 +48,7 @@ function LoginOverlay({ onLogin }: { onLogin: () => void }) {
       background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
     }}>
       <div style={{
-        background: 'var(--surface-1)', border: '1px solid var(--line)',
+        background: 'var(--bg-elev)', border: '1px solid var(--line)',
         borderRadius: 12, padding: '28px 32px', width: 340,
         boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
       }}>
@@ -63,7 +63,7 @@ function LoginOverlay({ onLogin }: { onLogin: () => void }) {
         <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--fg-3)' }}>Username</label>
         <input
           style={{
-            width: '100%', padding: '7px 10px', background: 'var(--surface-2)',
+            width: '100%', padding: '7px 10px', background: 'var(--bg-muted)',
             border: '1px solid var(--line)', borderRadius: 6, color: 'var(--fg)',
             fontSize: 13, marginBottom: 12, outline: 'none',
           }}
@@ -76,7 +76,7 @@ function LoginOverlay({ onLogin }: { onLogin: () => void }) {
         <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--fg-3)' }}>Role</label>
         <select
           style={{
-            width: '100%', padding: '7px 10px', background: 'var(--surface-2)',
+            width: '100%', padding: '7px 10px', background: 'var(--bg-muted)',
             border: '1px solid var(--line)', borderRadius: 6, color: 'var(--fg)',
             fontSize: 13, marginBottom: 16, outline: 'none',
           }}
@@ -107,6 +107,9 @@ export function PageChat() {
   const [authed, setAuthed] = useState(!!getAuthToken());
   const [approvalId, setApprovalId] = useState<number | null>(null);
   const [revokeId, setRevokeId] = useState<number | null>(null);
+  const [cmdStatus, setCmdStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [reportStatus, setReportStatus] = useState<{ type: 'success' | 'error'; msg: string; downloadUrl?: string } | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -119,7 +122,8 @@ export function PageChat() {
     setMessages(m => m.map((msg, i) => i === m.length - 1 && msg.role === 'ai' ? { ...msg, text, loading: false } : msg));
 
   const handleReport = async () => {
-    addMsg({ role: 'ai', text: '⏳ Đang tạo báo cáo…', loading: true });
+    setReportLoading(true);
+    setReportStatus(null);
     try {
       const token = getAuthToken();
       const res = await fetch(api.chat.reportUrl(), {
@@ -128,16 +132,11 @@ export function PageChat() {
       if (!res.ok) throw new Error(`${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'security-report.html';
-      a.click();
-      URL.revokeObjectURL(url);
-      setMessages(m => m.filter(msg => !msg.loading));
-      addMsg({ role: 'ai', text: 'Báo cáo HTML đã được tải xuống thành công.' });
+      setReportLoading(false);
+      setReportStatus({ type: 'success', msg: 'Báo cáo đã sẵn sàng', downloadUrl: url });
     } catch (e) {
-      setMessages(m => m.filter(msg => !msg.loading));
-      addMsg({ role: 'ai', text: `Lỗi tạo báo cáo: ${e}` });
+      setReportLoading(false);
+      setReportStatus({ type: 'error', msg: `Lỗi tạo báo cáo: ${e}` });
     }
   };
 
@@ -186,9 +185,11 @@ export function PageChat() {
         text += `\n\n**Remediation:**\n\`\`\`diff\n${res.data.remediation_diff}\n\`\`\``;
       }
       replaceLastAi(text);
+      setCmdStatus({ type: 'success', msg: res.message });
     } catch (e) {
       const msg = String(e);
       replaceLastAi(`Lỗi: ${msg}`);
+      setCmdStatus({ type: 'error', msg });
     }
   };
 
@@ -229,15 +230,23 @@ export function PageChat() {
 
   const handleApproveConfirm = async (justification: string) => {
     if (approvalId === null) return;
-    const res = await api.chat.command({ command: '/approve', finding_id: approvalId, justification });
-    addMsg({ role: 'ai', text: res.message });
+    try {
+      const res = await api.chat.command({ command: '/approve', finding_id: approvalId, justification });
+      setCmdStatus({ type: 'success', msg: res.message });
+    } catch (e) {
+      setCmdStatus({ type: 'error', msg: String(e) });
+    }
     setApprovalId(null);
   };
 
   const handleRevokeConfirm = async (justification: string) => {
     if (revokeId === null) return;
-    const res = await api.chat.command({ command: '/revoke', finding_id: revokeId, justification });
-    addMsg({ role: 'ai', text: res.message });
+    try {
+      const res = await api.chat.command({ command: '/revoke', finding_id: revokeId, justification });
+      setCmdStatus({ type: 'success', msg: res.message });
+    } catch (e) {
+      setCmdStatus({ type: 'error', msg: String(e) });
+    }
     setRevokeId(null);
   };
 
@@ -261,6 +270,38 @@ export function PageChat() {
           )}
         </div>
       </div>
+
+      {cmdStatus && (
+        <AlertBanner
+          type={cmdStatus.type}
+          message={cmdStatus.msg}
+          onDismiss={() => setCmdStatus(null)}
+        />
+      )}
+      {reportStatus && (
+        <AlertBanner
+          type={reportStatus.type}
+          message={reportStatus.msg}
+          onDismiss={() => setReportStatus(null)}
+          action={reportStatus.downloadUrl
+            ? {
+                label: 'Tải xuống',
+                onClick: () => {
+                  const a = document.createElement('a');
+                  a.href = reportStatus.downloadUrl!;
+                  a.download = '';
+                  a.click();
+                },
+              }
+            : undefined}
+        />
+      )}
+      {reportLoading && (
+        <AlertBanner
+          type="info"
+          message="Đang tạo báo cáo…"
+        />
+      )}
 
       <div className="ai-messages" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {messages.map((m, i) => (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, getAuthToken } from '../api/client';
+import { AlertBanner } from '../components/AlertBanner';
 import { SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { Finding, Project } from '../types';
@@ -115,12 +116,7 @@ export function PageReports() {
       </div>
 
       {downloadError && (
-        <div style={{
-          background: 'rgba(229,57,53,0.1)', border: '1px solid var(--sev-crit-fg)',
-          borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--sev-crit-fg)',
-        }}>
-          {downloadError}
-        </div>
+        <AlertBanner type="error" message={downloadError} onDismiss={() => setDownloadError('')} />
       )}
 
       <div className="kpi-grid" style={{ marginBottom: 20 }}>
