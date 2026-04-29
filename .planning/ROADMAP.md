@@ -57,8 +57,8 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — SARIF relatedLocations fallback, DepCheck version fields, fixture-based tests (DATA-01, DATA-02)
-- [ ] 03-02-PLAN.md — GitHubClient.fetch_file_content, LLMAnalysisService source enrichment with scrubbing (DATA-03)
+- [x] 03-01-PLAN.md — SARIF relatedLocations fallback, DepCheck version fields, fixture-based tests (DATA-01, DATA-02)
+- [x] 03-02-PLAN.md — GitHubClient.fetch_file_content, LLMAnalysisService source enrichment with scrubbing (DATA-03)
 - [ ] 03-03-PLAN.md — CveSummaryPanel, upgradeCmd helper, upgrade chip in dep row (CVE-01, CVE-02, CVE-03, CVE-04)
 
 ### Phase 4: AI Auto-Fix + Chat Commands
