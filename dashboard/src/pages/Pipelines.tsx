@@ -537,7 +537,13 @@ export function PagePipelines() {
       {r.id === selectedId && (() => {
         const cached = findingCountCache.get(r.id);
         const isLoadingThis = loadingCounts.has(r.id);
-        const counts = cached ?? { critical: 0, high: 0, medium: 0, low: 0 };
+        const rawCounts = cached ?? { critical: 0, high: 0, medium: 0, low: 0 };
+        const counts: Record<string, number> = {
+          critical: rawCounts.critical,
+          high: rawCounts.high,
+          medium: rawCounts.medium,
+          low: rawCounts.low,
+        };
         return (
           <>
             <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0' }} />
