@@ -57,9 +57,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: SARIF and artifact parser fixes with fixture-based tests
-- [ ] 03-02: AI context enrichment with source file fetching
-- [ ] 03-03: CVE tab and Dependencies view with upgrade suggestions
+- [ ] 03-01-PLAN.md — SARIF relatedLocations fallback, DepCheck version fields, fixture-based tests (DATA-01, DATA-02)
+- [ ] 03-02-PLAN.md — GitHubClient.fetch_file_content, LLMAnalysisService source enrichment with scrubbing (DATA-03)
+- [ ] 03-03-PLAN.md — CveSummaryPanel, upgradeCmd helper, upgrade chip in dep row (CVE-01, CVE-02, CVE-03, CVE-04)
 
 ### Phase 4: AI Auto-Fix + Chat Commands
 **Goal**: Repair all 7 chat commands; implement full AI auto-fix pipeline (read code → generate patch → preview diff → push PR)
@@ -99,6 +99,6 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. UI/UX Overhaul | 2/2 | Complete | 2026-04-28 |
 | 2. Pipeline Visibility | 0/3 | Planned | - |
-| 3. Data Pipeline Fix + CVE Isolation | 0/3 | Not started | - |
+| 3. Data Pipeline Fix + CVE Isolation | 0/3 | Planned | - |
 | 4. AI Auto-Fix + Chat Commands | 0/3 | Not started | - |
 | 5. DAST Roadmap + Polish | 0/2 | Not started | - |
