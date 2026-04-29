@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.entities import Finding
 from ...models.schemas import AnalysisResult
+from ..github_client import GitHubClient
+from ...core.guardrails import ScrubbingService
 from .client import GeminiClient
 from .prompts import build_prompt
 from .schemas import AnalysisOutput
@@ -27,8 +29,14 @@ def _extract_context(source_code: str | None, line_number: int | None) -> str:
 
 
 class LLMAnalysisService:
-    def __init__(self, client: GeminiClient | None = None) -> None:
+    def __init__(
+        self,
+        client: GeminiClient | None = None,
+        github_client: GitHubClient | None = None,
+    ) -> None:
         self._client = client or GeminiClient()
+        self._github_client = github_client or GitHubClient()
+        self._scrubber = ScrubbingService()
 
     async def analyze_finding(
         self,
@@ -38,6 +46,25 @@ class LLMAnalysisService:
         source_code: str | None = None
         raw = finding.raw_data or {}
         source_code = raw.get("source_code")
+
+        # Fetch live from GitHub if not cached and path is a real source file
+        if (
+            not source_code
+            and finding.file_path
+            and finding.file_path not in ("unknown", "")
+            and not finding.file_path.endswith((".jar", ".class", ".war", ".ear"))
+        ):
+            try:
+                fetched = await self._github_client.fetch_file_content(finding.file_path)
+                if fetched:
+                    # Scrub for PII/secrets before storing or passing to Gemini
+                    source_code = self._scrubber.scrub_content(fetched)
+                    raw = dict(finding.raw_data or {})
+                    raw["source_code"] = source_code
+                    finding.raw_data = raw
+                    # session.commit() at end of method persists the cache
+            except Exception as exc:
+                log.warning("Could not fetch source for finding %d: %s", finding.id, exc)
 
         code_context = _extract_context(source_code, finding.line_number)
 
