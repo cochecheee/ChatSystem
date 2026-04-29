@@ -50,8 +50,8 @@ export const api = {
       post<Project>('/projects', { name, github_url }),
   },
   github: {
-    runs: (status = 'completed') =>
-      get<WorkflowRun[]>('/github/runs', { status }),
+    runs: (branch?: string) =>
+      get<WorkflowRun[]>('/github/runs', branch ? { branch } : {}),
     artifacts: (runId: number) =>
       get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
     runFindings: (runId: number) =>
