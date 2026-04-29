@@ -190,3 +190,38 @@ async def test_no_status_param_when_empty():
     assert "status" not in call_kwargs.get("params", {}), (
         "Empty status must not be forwarded to GitHub API"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: nested directory path extraction (DATA-02)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_nested_path_extraction():
+    """Artifact ZIP with nested directory: all security files should be returned."""
+    import json as _json
+    sarif_content = _json.dumps({"version": "2.1.0", "runs": []})
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("results/codeql/java/codeql-results.sarif", sarif_content)
+        zf.writestr("results/semgrep/semgrep-report.sarif", sarif_content)
+    zip_bytes = buf.getvalue()
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.content = zip_bytes
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_artifact(artifact_id=101)
+
+    filenames = [r["filename"] for r in result]
+    assert "results/codeql/java/codeql-results.sarif" in filenames
+    assert "results/semgrep/semgrep-report.sarif" in filenames

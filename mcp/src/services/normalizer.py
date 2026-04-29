@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -211,18 +212,36 @@ class SarifNormalizer(BaseNormalizer):
     @staticmethod
     def _extract_location(result: dict[str, Any]) -> tuple[str, int | None]:
         locations = result.get("locations") or []
-        if not isinstance(locations, list) or not locations:
-            return "unknown", None
-        loc = locations[0]
-        if not isinstance(loc, dict):
-            return "unknown", None
-        pl = loc.get("physicalLocation") or {}
-        if not isinstance(pl, dict):
-            return "unknown", None
-        artifact_loc = pl.get("artifactLocation") or {}
-        uri = artifact_loc.get("uri") if isinstance(artifact_loc, dict) else None
-        region = pl.get("region") or {}
-        line = region.get("startLine") if isinstance(region, dict) else None
+        uri: str | None = None
+        line: int | None = None
+
+        if isinstance(locations, list) and locations:
+            loc = locations[0]
+            if isinstance(loc, dict):
+                pl = loc.get("physicalLocation") or {}
+                if isinstance(pl, dict):
+                    artifact_loc = pl.get("artifactLocation") or {}
+                    uri = artifact_loc.get("uri") if isinstance(artifact_loc, dict) else None
+                    region = pl.get("region") or {}
+                    line = region.get("startLine") if isinstance(region, dict) else None
+
+        # Fallback: if primary location is empty/unknown, try relatedLocations[0]
+        if not uri or uri == "unknown":
+            related = result.get("relatedLocations") or []
+            if isinstance(related, list) and related:
+                rel = related[0]
+                if isinstance(rel, dict):
+                    pl2 = rel.get("physicalLocation") or {}
+                    if isinstance(pl2, dict):
+                        artifact_loc2 = pl2.get("artifactLocation") or {}
+                        fb_uri = artifact_loc2.get("uri") if isinstance(artifact_loc2, dict) else None
+                        if fb_uri:
+                            uri = fb_uri
+                        region2 = pl2.get("region") or {}
+                        fb_line = region2.get("startLine") if isinstance(region2, dict) else None
+                        if fb_line is not None:
+                            line = fb_line
+
         return uri or "unknown", line
 
     @staticmethod
@@ -351,6 +370,12 @@ class ESLintNormalizer(BaseNormalizer):
 # OWASP Dependency-Check JSON  (dep-check-report artifact)
 # ---------------------------------------------------------------------------
 
+def _parse_purl_version(purl: str) -> str | None:
+    """Extract version from a Package URL string: pkg:ecosystem/group/artifact@version"""
+    match = re.search(r"@([^?#]+)", purl)
+    return match.group(1) if match else None
+
+
 class DepCheckNormalizer(BaseNormalizer):
     TOOL_NAME = "dependency-check"
 
@@ -360,6 +385,15 @@ class DepCheckNormalizer(BaseNormalizer):
 
         for dep in data.get("dependencies", []):
             file_path = dep.get("fileName") or dep.get("filePath") or "unknown"
+
+            # Extract package version from PURL (packages[].id)
+            pkg_name: str = dep.get("fileName", "")
+            installed_version: str | None = None
+            for pkg in dep.get("packages") or []:
+                pkg_id = pkg.get("id", "")
+                if pkg_id:
+                    installed_version = _parse_purl_version(pkg_id)
+                    break
 
             for vuln in dep.get("vulnerabilities", []):
                 rule_id = vuln.get("name") or "unknown-cve"
@@ -389,6 +423,9 @@ class DepCheckNormalizer(BaseNormalizer):
                         cvss_score=cvss_score,
                         raw_data={
                             "source": vuln.get("source"),
+                            "pkg_name": pkg_name,
+                            "installed_version": installed_version,
+                            "fixed_version": None,  # DepCheck JSON does not include a fixed version
                             "dedup_hash": dedup,
                         },
                     )
