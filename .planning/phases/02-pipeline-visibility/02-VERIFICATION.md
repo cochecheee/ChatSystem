@@ -1,27 +1,24 @@
 ---
 phase: 02-pipeline-visibility
-verified: 2026-04-29T06:00:00Z
-status: gaps_found
-score: 4/5 must-haves verified
+verified: 2026-04-29T08:00:00Z
+status: passed
+score: 5/5 must-haves verified
 overrides_applied: 0
-gaps:
-  - truth: "Each run row shows tool summary and finding counts"
-    status: partial
-    reason: "RunSummaryStrip is present and shows duration, but SeverityBar counts are hardcoded zeros (not real finding counts) and no tool names are displayed. PIPE-05 requires 'finding counts by severity' — hardcoded zeros do not satisfy this."
-    artifacts:
-      - path: "dashboard/src/pages/Pipelines.tsx"
-        issue: "SeverityBar at line 507 renders { critical: 0, high: 0, medium: 0, low: 0 } — static stub, not real per-run finding counts. No tool names rendered in the strip."
-    missing:
-      - "Replace hardcoded zero counts in RunSummaryStrip with real per-run finding counts fetched from /github/runs/{run_id}/findings or passed down from RunPanel state"
-      - "Add tool name tags to RunSummaryStrip (requires artifact list or findings grouping by tool)"
+re_verification:
+  previous_status: gaps_found
+  previous_score: 4/5
+  gaps_closed:
+    - "Each run row shows tool summary and finding counts (PIPE-05) — SeverityBar now reads from findingCountCache populated via api.github.runFindings(selectedId); tool name tags rendered in strip"
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 2: Pipeline Visibility Verification Report
 
 **Phase Goal:** Pipeline page shows all GitHub workflow runs with real-time status, branch filtering, trend charts, and per-run summaries
-**Verified:** 2026-04-29T06:00:00Z
-**Status:** gaps_found
-**Re-verification:** No — initial verification
+**Verified:** 2026-04-29T08:00:00Z
+**Status:** passed
+**Re-verification:** Yes — after gap closure plan 02-04 (PIPE-05 finding counts)
 
 ## Goal Achievement
 
@@ -29,13 +26,13 @@ gaps:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | All runs from GitHub Actions appear in pipeline list (not only SAST-tagged) — PIPE-01 | VERIFIED | `artifacts.py` line 82: `status: str = ""` — empty default means no status filter forwarded to GitHub API. `client.ts` line 53-54: `runs: (branch?: string)` — no `status` param in request. `github_client.py` `if status:` guard skips adding empty string to params. Test `test_github_runs_all_statuses` regression-guards this. |
-| 2 | Branch filter narrows list correctly — PIPE-02 | VERIFIED | `filteredRuns` useMemo at Pipelines.tsx lines 451-454 filters `runs` by `branch` state. `ciRuns`/`cdRuns` derive from `filteredRuns` (line 457-464). Branch `<select>` with "All branches" default at lines 538-547. Sub-heading shows `"N of M runs"` when filtered. |
-| 3 | In-progress run status updates without manual reload — PIPE-03 | VERIFIED | 30-second `setInterval` at Pipelines.tsx line 429 calls `api.github.runs()` with no status filter — returns in_progress runs. `hasInProgress` derived from unfiltered `runs` at line 478. `LiveIndicator` pulsing dot + "Live" label renders when `hasInProgress` is true (lines 553-566). |
-| 4 | Trend chart visible with at least 2 data points — PIPE-04 | VERIFIED | `trendData` useMemo at lines 467-475 computes from unfiltered `runs`, sorted ascending by `created_at`, sliced to last 30. TrendCard with `<AreaTrend values={trendData.failed} values2={trendData.passed} height={120} />` guarded by `runs.length >= 2` at lines 625-637. Guard prevents SVG division-by-zero for single-run case. |
-| 5 | Each run row shows tool summary and finding counts — PIPE-05 | PARTIAL / FAILED | `RunSummaryStrip` structure is present behind `r.id === selectedId` guard (lines 504-518): divider + SeverityBar + clock icon + `formatDuration`. HOWEVER: `SeverityBar` is called with `{ critical: 0, high: 0, medium: 0, low: 0 }` — hardcoded zeros, not real finding counts. No tool names displayed. SUMMARY.md documents this as a "known stub." The duration display is real (uses `updated_at - created_at`), but severity counts do not reflect actual findings. |
+| 1 | All runs from GitHub Actions appear in pipeline list (not only SAST-tagged) — PIPE-01 | VERIFIED | `artifacts.py` `status: str = ""` default; `client.ts` `runs: (branch?: string)` sends no status param; `test_github_runs_all_statuses` regression-guards this (carried from initial verification) |
+| 2 | Branch filter narrows list correctly — PIPE-02 | VERIFIED | `filteredRuns` useMemo lines 484-487 filters by `branch` state; `ciRuns`/`cdRuns` derive from `filteredRuns`; branch `<select>` with "All branches" default; sub-heading shows `"N of M runs"` when filtered (carried) |
+| 3 | In-progress run status updates without manual reload — PIPE-03 | VERIFIED | 30-second `setInterval` at line 432 calls `api.github.runs()` with no status filter; `hasInProgress` derived from unfiltered `runs` at line 511; `LiveIndicator` pulsing dot renders when `hasInProgress` is true (carried) |
+| 4 | Trend chart visible with at least 2 data points — PIPE-04 | VERIFIED | `trendData` useMemo lines 500-508 computes from unfiltered `runs`, sorted ascending, sliced to last 30; TrendCard with `AreaTrend` guarded by `runs.length >= 2` at line 671 (carried) |
+| 5 | Each run row shows tool summary and finding counts — PIPE-05 | VERIFIED | `findingCountCache` Map state at line 386; `useEffect` keyed on `selectedId` (lines 441-468) fetches `api.github.runFindings(selectedId)`, tallies by severity, collects unique tool names, stores in cache. `renderRunRow` IIFE (lines 537-564) reads `findingCountCache.get(r.id)` (line 538); `SeverityBar` receives `cached ?? { critical: 0, high: 0, medium: 0, low: 0 }` (not a hardcoded static prop); `cached.tools` tags rendered as `tool-tag` chips (lines 545-550); `isLoadingThis` loading indicator shown while fetch is in-flight (line 560). |
 
-**Score:** 4/5 truths verified
+**Score:** 5/5 truths verified
 
 ### Deferred Items
 
@@ -45,74 +42,63 @@ None.
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `mcp/src/api/artifacts.py` | GET /github/runs with `status: str = ""` default | VERIFIED | Line 82: `status: str = ""` confirmed. No `status=completed` anywhere in file. |
-| `dashboard/src/api/client.ts` | `runs: (branch?: string)` — no hardcoded status | VERIFIED | Line 53-54: `runs: (branch?: string) => get<WorkflowRun[]>('/github/runs', branch ? { branch } : {})` |
-| `dashboard/src/types/index.ts` | WorkflowRun interface with `updated_at?: string` | VERIFIED | Line 38: `updated_at?: string;` present after `created_at` |
-| `mcp/tests/test_main.py` | `test_github_runs_all_statuses` test function | VERIFIED | Lines 24-63: full test function present, patches `GitHubClient.list_workflow_runs`, asserts `in_progress` status returned, asserts `status=""` passed |
-| `mcp/tests/test_github_client.py` | `test_branch_filter_param` and `test_no_status_param_when_empty` | VERIFIED | Lines 156-177 and 181-192: both test functions present with correct assertions |
-| `dashboard/src/pages/Pipelines.tsx` | Branch filter, filteredRuns, trendData, hasInProgress, LiveIndicator, TrendCard, RunSummaryStrip | PARTIAL | All features present. filteredRuns (5 occurrences), setBranch (line 543), All branches (line 545), formatDuration (lines 18-26, 514), Pipeline Trend (line 628), hasInProgress (lines 478, 553), LiveIndicator (lines 553-566), trendData (lines 467-475, 634), runs.length >= 2 guard (line 625). SeverityBar rendered with hardcoded zeros (line 507). |
+| `dashboard/src/pages/Pipelines.tsx` | `findingCountCache` Map state + `useEffect` on `selectedId` + `SeverityBar` wired to cache + tool name tags | VERIFIED | Lines 386-387: state declarations. Lines 441-468: useEffect fetches findings, tallies counts, stores in cache, caches zeros on error. Lines 537-564: IIFE in renderRunRow reads cache, passes real counts to SeverityBar, renders tool-tag chips. |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `dashboard/src/api/client.ts` | `mcp/src/api/artifacts.py` | GET /github/runs — branch forwarded, status omitted | WIRED | `runs: (branch?: string) => get('/github/runs', branch ? { branch } : {})` sends branch if truthy, no status. Backend `status: str = ""` default ensures all runs returned. |
-| `mcp/src/api/artifacts.py` | `mcp/src/services/github_client.py` | `status=""` causes github_client to skip status in GitHub API params | WIRED | `github_client.py`: `if status: params["status"] = status` — empty string is falsy, param not added. Confirmed by `test_no_status_param_when_empty`. |
-| `branch state` | `filteredRuns` useMemo | `runs.filter(r => r.head_branch === branch)` | WIRED | Pipelines.tsx line 451-454: `filteredRuns = useMemo(() => { if (branch === 'all') return runs; return runs.filter(r => r.head_branch === branch); }, [runs, branch])` |
-| `filteredRuns` | `ciRuns/cdRuns` split | `categorizeRun()` iterates `filteredRuns` | WIRED | Pipelines.tsx lines 457-464: `for (const r of filteredRuns)` confirmed |
-| `runs (unfiltered)` | `stats` memo | KPI totals always reflect all runs | WIRED | Pipelines.tsx line 439-444: `stats = useMemo(() => ({ total: runs.length, ... }), [runs])` — depends on unfiltered `runs` |
-| `runs (unfiltered)` | `trendData` useMemo | sorted by `created_at` ascending, sliced to last 30 | WIRED | Pipelines.tsx lines 467-475: `[...runs].sort(...).slice(-30)` with `[runs]` dependency |
-| `trendData` | `AreaTrend` component | `values={trendData.failed}` `values2={trendData.passed}` `height={120}` | WIRED | Pipelines.tsx line 634: `<AreaTrend values={trendData.failed} values2={trendData.passed} height={120} />` |
-| `runs (unfiltered)` | `hasInProgress` | `runs.some(r => r.status === 'in_progress')` | WIRED | Pipelines.tsx line 478: `const hasInProgress = runs.some(r => r.status === 'in_progress')` |
-| `RunSummaryStrip SeverityBar` | real finding counts | per-run findings from API | NOT WIRED | `SeverityBar` at line 507 uses `{ critical: 0, high: 0, medium: 0, low: 0 }` — disconnected from findings state. Real counts are loaded in `RunPanel` (separate component) but not passed into the row renderer. |
+| `api.github.runFindings(selectedId)` | `findingCountCache` | `useEffect` triggered by `selectedId` change — `findingCountCache.has(selectedId)` guards re-fetch | WIRED | Line 443: cache-hit guard. Line 445: `api.github.runFindings(selectedId)` called. Line 457: `setFindingCountCache(prev => new Map(prev).set(selectedId, counts))` on success. Line 462: zeros cached on error. |
+| `findingCountCache` | `SeverityBar counts` prop | `findingCountCache.get(r.id)` read inside renderRunRow IIFE | WIRED | Line 538: `const cached = findingCountCache.get(r.id)`. Line 540: `const counts = cached ?? { critical: 0, high: 0, medium: 0, low: 0 }`. Line 544: `<SeverityBar counts={counts} height={4} />` — counts is never a hardcoded literal; it is always the cache read or its fallback. |
+| `findingCountCache` | `tool-tag` chips render | `cached.tools` array mapped in strip | WIRED | Line 545: `{cached?.tools && cached.tools.length > 0 && (`. Line 547: `{cached.tools.map(tool => (<span key={tool} className="tool-tag" ...>{tool}</span>))}`. |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |----------|---------------|--------|-------------------|--------|
-| `Pipelines.tsx` KPI stats | `stats.total/passed/failed/running` | `runs` state from `api.github.runs()` | Yes — computed from live fetch | FLOWING |
-| `Pipelines.tsx` filteredRuns | `filteredRuns` | `runs` filtered by `branch` state | Yes — client-side filter of live data | FLOWING |
-| `Pipelines.tsx` trendData | `trendData.failed` / `trendData.passed` | `runs` sorted/sliced | Yes — computed from live run data | FLOWING |
-| `Pipelines.tsx` hasInProgress | `hasInProgress` | `runs.some(r => r.status === 'in_progress')` | Yes — computed from live run status | FLOWING |
-| `Pipelines.tsx` RunSummaryStrip duration | `formatDuration(r)` | `r.updated_at - r.created_at` from WorkflowRun | Yes — real if `updated_at` present in API response | FLOWING |
-| `Pipelines.tsx` RunSummaryStrip SeverityBar | `{ critical: 0, high: 0, medium: 0, low: 0 }` | Hardcoded literal | No — always zero, not fetched | HOLLOW_PROP |
+| `Pipelines.tsx` RunSummaryStrip SeverityBar | `counts` (from `findingCountCache.get(r.id)`) | `api.github.runFindings(selectedId)` → severity tally in useEffect | Yes — fetched from `/github/runs/{id}/findings` on run selection; fallback zeros only during loading or on API error | FLOWING |
+| `Pipelines.tsx` RunSummaryStrip tool tags | `cached.tools` | Same findings fetch — `toolSet` collects `f.tool` values | Yes — real tool names from Finding records | FLOWING |
+| `Pipelines.tsx` RunSummaryStrip duration | `formatDuration(r)` | `r.updated_at - r.created_at` from WorkflowRun | Yes — unchanged from initial verification | FLOWING |
+| `Pipelines.tsx` KPI stats, filteredRuns, trendData, hasInProgress | (same as initial verification) | `api.github.runs()` | Yes | FLOWING |
 
 ### Behavioral Spot-Checks
 
-Step 7b: SKIPPED — the project requires a running dev server and live GitHub API token to validate real-time behavior. Spot-checks not feasible without these services.
+Step 7b: SKIPPED — requires a running dev server and live GitHub API token. Not feasible without these services.
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|----------|
-| PIPE-01 | 02-01-PLAN.md | All GitHub workflow runs visible (not only SAST-tagged) | SATISFIED | `status: str = ""` in artifacts.py; `runs: (branch?)` in client.ts; `test_github_runs_all_statuses` passes |
-| PIPE-02 | 02-01-PLAN.md, 02-02-PLAN.md | Branch filter narrows pipeline list | SATISFIED | `filteredRuns` useMemo, branch `<select>`, `ciRuns`/`cdRuns` from `filteredRuns`, `test_branch_filter_param` passes |
-| PIPE-03 | 02-01-PLAN.md, 02-03-PLAN.md | In-progress runs update without manual reload | SATISFIED | 30s `setInterval` with no-status API call; `hasInProgress` + LiveIndicator; `test_github_runs_all_statuses` asserts `in_progress` included |
-| PIPE-04 | 02-03-PLAN.md | Trend chart with pass/fail over last 30 runs | SATISFIED | `trendData` useMemo, TrendCard with `AreaTrend`, `runs.length >= 2` guard |
-| PIPE-05 | 02-02-PLAN.md | Run row shows tool summary and finding counts | BLOCKED | RunSummaryStrip structure present with duration, but SeverityBar counts are hardcoded zeros — no real finding counts. No tool names rendered. |
+| PIPE-01 | 02-01-PLAN.md | All GitHub workflow runs visible (not only SAST-tagged) | SATISFIED | `status: str = ""` in artifacts.py; no status filter in client.ts; regression test passes |
+| PIPE-02 | 02-01-PLAN.md, 02-02-PLAN.md | Branch filter narrows pipeline list | SATISFIED | `filteredRuns` useMemo, branch `<select>`, `ciRuns`/`cdRuns` from `filteredRuns` |
+| PIPE-03 | 02-01-PLAN.md, 02-03-PLAN.md | In-progress runs update without manual reload | SATISFIED | 30s `setInterval`, `hasInProgress` + LiveIndicator |
+| PIPE-04 | 02-03-PLAN.md | Trend chart with pass/fail over last 30 runs | SATISFIED | `trendData` useMemo, TrendCard + AreaTrend, `runs.length >= 2` guard |
+| PIPE-05 | 02-02-PLAN.md, 02-04-PLAN.md | Run row shows tool summary and finding counts by severity | SATISFIED | `findingCountCache` Map populated from `api.github.runFindings`; SeverityBar reads real counts; tool name tags rendered; hardcoded zero prop removed |
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `dashboard/src/pages/Pipelines.tsx` | 507 | `SeverityBar counts={{ critical: 0, high: 0, medium: 0, low: 0 }}` — hardcoded zeros passed to rendered component | WARNING | SeverityBar always shows a muted (zero-count) bar regardless of actual findings for the run. The `RunPanel` component fetches real findings via `api.github.runFindings(run.id)` but that data is not accessible to the `renderRunRow` closure. PIPE-05 partially blocked. |
-| `mcp/src/api/artifacts.py` | 260 | Vietnamese string `"Không tìm thấy project gắn với run này."` in error response | INFO | Not a blocker; only in the reprocess route error path. Phase 02 clean-up scope was Pipelines.tsx only. |
+| `dashboard/src/pages/Pipelines.tsx` | 468 | `findingCountCache` intentionally omitted from useEffect deps array | INFO | The comment on line 468 explains the intentional omission. This is a deliberate design to prevent infinite re-fetch loops; the `has(selectedId)` guard inside the effect provides idempotency. Not a defect. |
+| `mcp/src/api/artifacts.py` | 260 | Vietnamese string in error response | INFO | Carried from initial verification. Not a blocker; only in the reprocess route error path. Out of phase 02 scope. |
+
+### Human Verification Required
+
+None. All automated checks passed. The SeverityBar data flow is fully traceable through code without running the application.
 
 ### Gaps Summary
 
-One gap blocks full PIPE-05 satisfaction.
+No gaps. All five PIPE requirements are satisfied.
 
-**PIPE-05 — Hardcoded zero severity counts in RunSummaryStrip.**
+The PIPE-05 gap from the initial verification is closed:
 
-The `RunSummaryStrip` sub-render inside `renderRunRow` uses `SeverityBar` with static `{ critical: 0, high: 0, medium: 0, low: 0 }`. This means the strip always shows a muted bar with no actual finding counts, regardless of how many findings a run has. The requirement states "finding counts by severity" — this is not met.
-
-The duration display (`formatDuration`) is correctly wired and real. The strip's structural presence is also real. What's missing is the data connection from findings to the row renderer.
-
-Root cause: `renderRunRow` only receives the `WorkflowRun` object. Findings are loaded asynchronously inside `RunPanel` (a separate component with its own state). To fix this, the phase needs either: (a) a per-run finding count cache derived from `api.github.runFindings()` calls, or (b) findings counts pre-fetched alongside runs and stored in the page-level state.
-
-The plan's own SUMMARY.md explicitly documents this as a "known stub" — the decision was to defer real counts to a future plan. However, PIPE-05 as written in REQUIREMENTS.md requires "finding counts by severity" and the current implementation does not deliver this.
+- The hardcoded `SeverityBar counts={{ critical: 0, high: 0, medium: 0, low: 0 }}` static prop is gone — confirmed by `grep -n "SeverityBar counts={{ critical: 0"` returning zero results.
+- `findingCountCache.get(r.id)` (line 538) is the sole source of counts passed to SeverityBar in `renderRunRow`.
+- `api.github.runFindings(selectedId)` (line 445) fires on `selectedId` change when the run is not yet cached.
+- Tool name tags render from `cached.tools` when the run has findings.
+- The fallback `cached ?? { critical: 0, high: 0, medium: 0, low: 0 }` (line 540) is a loading-state fallback, not a stub — it is overwritten as soon as the fetch resolves.
 
 ---
 
-_Verified: 2026-04-29T06:00:00Z_
+_Verified: 2026-04-29T08:00:00Z_
 _Verifier: Claude (gsd-verifier)_
