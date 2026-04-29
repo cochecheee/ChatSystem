@@ -497,3 +497,51 @@ def test_sarif_semgrep_related_locations():
     assert len(findings) == 1
     assert findings[0].file_path == "src/app.py"
     assert findings[0].line_number == 12
+
+
+# ---------------------------------------------------------------------------
+# DepCheckNormalizer — version fields (Task 2, DATA-01)
+# ---------------------------------------------------------------------------
+
+# ── DepCheck version fields ────────────────────────────────────────────────
+DEP_CHECK_JSON_WITH_PURL = json.dumps({
+    "dependencies": [{
+        "fileName": "log4j-1.2.17.jar",
+        "filePath": "/app/libs/log4j-1.2.17.jar",
+        "packages": [{"id": "pkg:maven/log4j/log4j@1.2.17"}],
+        "vulnerabilities": [{
+            "name": "CVE-2019-17571",
+            "severity": "CRITICAL",
+            "description": "Deserialization vulnerability in log4j",
+            "source": "NVD",
+        }]
+    }]
+})
+
+def test_depcheck_stores_pkg_version_fields():
+    findings = DepCheckNormalizer().normalize(DEP_CHECK_JSON_WITH_PURL, artifact_id=4)
+    assert len(findings) >= 1
+    f = findings[0]
+    assert f.raw_data["pkg_name"] != ""
+    assert f.raw_data["installed_version"] == "1.2.17"
+    assert "fixed_version" in f.raw_data
+
+
+DEP_CHECK_JSON_NO_PURL = json.dumps({
+    "dependencies": [{
+        "fileName": "commons-codec.jar",
+        "filePath": "/app/libs/commons-codec.jar",
+        "vulnerabilities": [{
+            "name": "CVE-2020-XXXX",
+            "severity": "HIGH",
+            "description": "Example vulnerability",
+            "source": "NVD",
+        }]
+    }]
+})
+
+def test_depcheck_missing_purl_graceful():
+    findings = DepCheckNormalizer().normalize(DEP_CHECK_JSON_NO_PURL, artifact_id=4)
+    assert len(findings) >= 1
+    assert findings[0].raw_data.get("installed_version") is None
+    assert "fixed_version" in findings[0].raw_data

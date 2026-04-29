@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -369,6 +370,12 @@ class ESLintNormalizer(BaseNormalizer):
 # OWASP Dependency-Check JSON  (dep-check-report artifact)
 # ---------------------------------------------------------------------------
 
+def _parse_purl_version(purl: str) -> str | None:
+    """Extract version from a Package URL string: pkg:ecosystem/group/artifact@version"""
+    match = re.search(r"@([^?#]+)", purl)
+    return match.group(1) if match else None
+
+
 class DepCheckNormalizer(BaseNormalizer):
     TOOL_NAME = "dependency-check"
 
@@ -378,6 +385,15 @@ class DepCheckNormalizer(BaseNormalizer):
 
         for dep in data.get("dependencies", []):
             file_path = dep.get("fileName") or dep.get("filePath") or "unknown"
+
+            # Extract package version from PURL (packages[].id)
+            pkg_name: str = dep.get("fileName", "")
+            installed_version: str | None = None
+            for pkg in dep.get("packages") or []:
+                pkg_id = pkg.get("id", "")
+                if pkg_id:
+                    installed_version = _parse_purl_version(pkg_id)
+                    break
 
             for vuln in dep.get("vulnerabilities", []):
                 rule_id = vuln.get("name") or "unknown-cve"
@@ -407,6 +423,9 @@ class DepCheckNormalizer(BaseNormalizer):
                         cvss_score=cvss_score,
                         raw_data={
                             "source": vuln.get("source"),
+                            "pkg_name": pkg_name,
+                            "installed_version": installed_version,
+                            "fixed_version": None,  # DepCheck JSON does not include a fixed version
                             "dedup_hash": dedup,
                         },
                     )
