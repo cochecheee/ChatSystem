@@ -146,3 +146,47 @@ async def test_fetch_artifact_raises_on_oversized_zip():
         client = GitHubClient(token="tok", owner="owner", repo="repo")
         with pytest.raises(ValueError, match="too large"):
             await client.fetch_artifact(artifact_id=101)
+
+
+# ---------------------------------------------------------------------------
+# Tests: branch filter param (PIPE-02)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_branch_filter_param():
+    """PIPE-02: list_workflow_runs must forward the branch param to GitHub API."""
+    runs = [
+        {"name": "CI", "id": 10, "head_branch": "feature/x"},
+        {"name": "CI", "id": 11, "head_branch": "main"},
+    ]
+    mock_http = _mock_client(json_data={"workflow_runs": runs})
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.list_workflow_runs(workflow_name="", branch="feature/x", status="")
+
+    # Verify branch was passed as a query param to the GitHub API call
+    mock_http.get.assert_called_once()
+    call_kwargs = mock_http.get.call_args.kwargs
+    assert "params" in call_kwargs, "branch must be passed via params dict"
+    assert call_kwargs["params"].get("branch") == "feature/x"
+
+    # Verify status was NOT added to params when empty
+    assert "status" not in call_kwargs["params"], (
+        "status must not appear in GitHub API params when empty string passed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_status_param_when_empty():
+    """PIPE-01/PIPE-03: When status='' is passed, GitHub API params must not include status."""
+    mock_http = _mock_client(json_data={"workflow_runs": []})
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        await client.list_workflow_runs(workflow_name="", branch="", status="")
+
+    call_kwargs = mock_http.get.call_args.kwargs
+    assert "status" not in call_kwargs.get("params", {}), (
+        "Empty status must not be forwarded to GitHub API"
+    )

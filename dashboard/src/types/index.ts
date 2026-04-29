@@ -35,6 +35,7 @@ export interface WorkflowRun {
   conclusion: string | null;
   status: string;
   created_at: string;
+  updated_at?: string;
   head_branch: string;
   head_sha: string;
   run_number: number;
