@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import { SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { Finding, WorkflowArtifact, WorkflowRun } from '../types';
 import { SEVERITY_ORDER } from '../types';
@@ -12,6 +13,16 @@ function timeAgo(iso: string) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+function formatDuration(run: WorkflowRun): string {
+  if (!run.updated_at || !run.created_at) return '—';
+  const ms = new Date(run.updated_at).getTime() - new Date(run.created_at).getTime();
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}m`;
+  return `${m}m ${s % 60}s`;
 }
 
 function conclusionClass(r: WorkflowRun) {
@@ -369,6 +380,8 @@ export function PagePipelines() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // PIPE-02: branch filter state
+  const [branch, setBranch] = useState<string>('all');
 
   const refresh = () => {
     setLoading(true);
@@ -430,15 +443,25 @@ export function PagePipelines() {
     running: runs.filter(r => r.status === 'in_progress').length,
   }), [runs]);
 
-  // Split runs into CI and CD buckets
+  const branchOptions = useMemo(
+    () => [...new Set(runs.map(r => r.head_branch))].sort(),
+    [runs],
+  );
+
+  const filteredRuns = useMemo(() => {
+    if (branch === 'all') return runs;
+    return runs.filter(r => r.head_branch === branch);
+  }, [runs, branch]);
+
+  // Split runs into CI and CD buckets (from filteredRuns for PIPE-02)
   const { ciRuns, cdRuns } = useMemo(() => {
     const ci: WorkflowRun[] = [];
     const cd: WorkflowRun[] = [];
-    for (const r of runs) {
+    for (const r of filteredRuns) {
       (categorizeRun(r) === 'cd' ? cd : ci).push(r);
     }
     return { ciRuns: ci, cdRuns: cd };
-  }, [runs]);
+  }, [filteredRuns]);
 
   // Inline run-row renderer used in both CI and CD sections
   const renderRunRow = (r: WorkflowRun, isLatest: boolean) => (
@@ -464,6 +487,21 @@ export function PagePipelines() {
         </span>
         <span>{timeAgo(r.created_at)}</span>
       </div>
+      {r.id === selectedId && (
+        <>
+          <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0' }} />
+          <SeverityBar counts={{ critical: 0, high: 0, medium: 0, low: 0 }} height={4} />
+          <div style={{
+            display: 'flex', gap: 8, marginTop: 4,
+            fontSize: 'var(--ts-xs)', color: 'var(--fg-3)', alignItems: 'center'
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <Icon name="clock" size={10} />
+              <span className="mono">{formatDuration(r)}</span>
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 
@@ -474,30 +512,49 @@ export function PagePipelines() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <div>
             <h1 className="h1">Pipelines</h1>
-            <div className="sub">GitHub Actions · {runs.length} recent runs</div>
+            <div className="sub">
+              GitHub Actions ·{' '}
+              {branch === 'all'
+                ? `${runs.length} recent runs`
+                : `${filteredRuns.length} of ${runs.length} runs`}
+            </div>
           </div>
-          <button className="btn ghost sm" onClick={refresh}>
-            <Icon name="refresh" size={13} /> Refresh
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="branch" size={11} style={{ color: 'var(--fg-3)' }} />
+              <select
+                className="filter-toolbar select"
+                style={{ maxWidth: 140 }}
+                value={branch}
+                onChange={e => setBranch(e.target.value)}
+              >
+                <option value="all">All branches</option>
+                {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+            <button className="btn ghost sm" onClick={refresh}>
+              <Icon name="refresh" size={13} /> Refresh
+            </button>
+          </div>
         </div>
 
         {!loading && runs.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
             <div className="card card-pad" style={{ padding: '8px 12px' }}>
               <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Total</div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.total}</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{stats.total}</div>
             </div>
             <div className="card card-pad" style={{ padding: '8px 12px', borderTop: `2px solid ${SEV_COLOR.low}` }}>
               <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Passed</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: SEV_COLOR.low }}>{stats.passed}</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: SEV_COLOR.low }}>{stats.passed}</div>
             </div>
             <div className="card card-pad" style={{ padding: '8px 12px', borderTop: `2px solid ${SEV_COLOR.critical}` }}>
               <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Failed</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: SEV_COLOR.critical }}>{stats.failed}</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: SEV_COLOR.critical }}>{stats.failed}</div>
             </div>
             <div className="card card-pad" style={{ padding: '8px 12px' }}>
               <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>Running</div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>{stats.running}</div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{stats.running}</div>
             </div>
           </div>
         )}
