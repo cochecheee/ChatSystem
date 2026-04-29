@@ -638,6 +638,11 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             </div>
           </div>
 
+          {/* CVE summary panel — deps tab only */}
+          {!loading && viewMode === 'deps' && depFindings.length > 0 && (
+            <CveSummaryPanel findings={depFindings} />
+          )}
+
           {/* Severity summary bar */}
           {!loading && activePool.length > 0 && (
             <div className="sev-summary-bar">
@@ -774,6 +779,20 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                     {f.status === 'APPROVED' && <span className="row-status-badge approved">OK</span>}
                     {f.status === 'REVOKED'  && <span className="row-status-badge revoked">Rev</span>}
                   </div>
+                  {/* Upgrade command chip */}
+                  {(() => {
+                    const cmd = upgradeCmd(f);
+                    return cmd ? (
+                      <span
+                        className="chip"
+                        style={{ fontSize: 10, cursor: 'pointer', fontFamily: 'monospace', userSelect: 'none', marginTop: 4 }}
+                        title="Click to copy upgrade command"
+                        onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(cmd); }}
+                      >
+                        {cmd}
+                      </span>
+                    ) : null;
+                  })()}
                 </div>
               );
             })}
