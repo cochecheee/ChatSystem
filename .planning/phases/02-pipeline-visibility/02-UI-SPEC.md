@@ -69,7 +69,6 @@ ones suffice.
 | `--ts-xs` | 11px | Badges, labels, section headers |
 | `--ts-sm` | 12px | Table cells, meta, code, filter controls |
 | `--ts-base` | 13px | Body text, run name, list items |
-| `--ts-md` | 15px | Card headings, panel h2 |
 | `--ts-lg` | 20px | Page heading h1 |
 | `--r-1` | 4px | Select inputs, tool-tag |
 | `--r-2` | 6px | Buttons, chips, filter pills |
@@ -125,16 +124,19 @@ no arbitrary pixel values.
 |------------|-------|---------------------|
 | 4px | xs | Gap between icon and text in run row meta |
 | 8px | sm | Gap between chips and meta items within a run row |
-| 12px | md-sm | Filter toolbar padding (horizontal); run row padding (vertical) |
-| 14px | md | Sidebar pane horizontal padding; run row horizontal padding |
-| 16px | md-lg | Section padding, KPI card padding |
-| 20px | lg | Run detail panel content padding |
+| 12px | md-sm (inherited) | Filter toolbar padding (horizontal); run row padding (vertical) — existing: `.filter-toolbar button { padding: 7px 12px }` tokens.css:482; `.vuln-row { padding: 10px 12px }` tokens.css:545 |
+| 16px | md-lg | Sidebar pane horizontal padding; run row horizontal padding; section padding, KPI card padding |
+| 20px | lg (inherited) | Run detail panel content padding — existing: `.card-pad { padding: 20px }` tokens.css:363; `Pipelines.tsx:266 style={{ padding: '20px 24px' }}` |
 | 24px | lg+ | Page header vertical padding (existing: `16px 24px 12px`) |
-| 28px | xl | Detail panel content horizontal padding |
+| 28px | xl (inherited) | Detail panel content horizontal padding — existing: `.detail-main { padding: 24px 28px 48px }` tokens.css:665; `tokens.css:241 padding: 0 28px` |
 | 48px | 2xl | Detail panel bottom scroll padding |
 
 Exceptions: The trend chart area height is 160px (not a spacing value — it is a component
 height dimension). The left sidebar list pane is fixed at 280px wide (existing — do not change).
+
+Note: 12px, 20px, and 28px are inherited from existing CSS rules cited above. They must not be
+introduced as new spacing values in Phase 02 work; they are retained only where those existing
+rules apply.
 
 ---
 
@@ -144,23 +146,26 @@ Source: tokens.css type scale. All 4 type sizes below are EXISTING tokens — do
 
 | Role | Token | Size | Weight | Line Height | Usage in this phase |
 |------|-------|------|--------|-------------|---------------------|
-| Caption / Label | `--ts-xs` | 11px | 600 (section headers) / 500 (chips) | 1.2 | Branch filter label, status chips, section "CI"/"CD" headers, severity chip labels, KPI labels |
+| Caption / Label | `--ts-xs` | 11px | 600 (section headers, chips) | 1.2 | Branch filter label, status chips, section "CI"/"CD" headers, severity chip labels, KPI labels |
 | Meta / Table cell | `--ts-sm` | 12px | 400 | 1.4 | Run number, timeAgo, branch name, artifact size, filter select text, tool summary counts |
-| Body / Run name | `--ts-base` | 13px | 400 (body) / 500 (row title) | 1.55 | Run name in detail panel, workflow name in list row, empty state text |
-| Card heading | `--ts-md` | 15px | 600 | 1.3 | RunPanel h2 heading (`run.name #run_number`) |
+| Body / Run name | `--ts-base` | 13px | 400 (body) / 600 (row title, RunPanel h2) | 1.55 | Run name in detail panel, workflow name in list row, empty state text; RunPanel h2 heading (`run.name #run_number`) at weight 600 |
 | Page heading | `--ts-lg` | 20px | 600 | 1.2 | "Pipelines" page h1 (existing) |
+
+Weights used in this phase: **400** (regular body text, meta, table cells) and **600** (emphasis,
+labels, headings, section headers, RunPanel h2). No other weights are permitted.
 
 Font families:
 - Sans: `var(--font-sans)` — all UI text
 - Mono: `var(--font-mono)` — run numbers (`#1234`), branch names, SHA hashes, duration values, tool tags, chart tick labels
-
-KPI counter size: 18px, weight 700 (existing pattern from Pipelines.tsx KPI cards — not a new token, use inline style matching existing code).
 
 ---
 
 ## Color
 
 Source: tokens.css. 60/30/10 split from existing warm off-white palette.
+
+The RunPanel detail area is the primary visual anchor; the run list sidebar is the secondary
+navigation element.
 
 | Role | Value | Usage |
 |------|-------|-------|
@@ -171,7 +176,7 @@ Source: tokens.css. 60/30/10 split from existing warm off-white palette.
 | Status — failed | `var(--err-fg)` / `var(--err-bg)` | `.status-failed` chip; "Failed" KPI border-top color; error AlertBanner |
 | Status — running | `var(--accent-soft)` / `var(--accent-2)` | `.status-running` chip background/text |
 | Status — warning | `var(--warn-fg)` / `var(--warn-bg)` | `.status-warning` chip |
-| Destructive | `var(--sev-crit-fg)` → `#8C1B1B` | `.btn.danger` — "Reprocess" confirmation dialog only |
+| Destructive | `var(--sev-crit-fg)` → `#8C1B1B` | `.btn.danger` — "Reprocess Run" confirmation dialog only |
 
 **Accent (`#E8632B`) is reserved for these specific elements only:**
 
@@ -180,7 +185,7 @@ Source: tokens.css. 60/30/10 split from existing warm off-white palette.
 3. Selected run row left border (`.vuln-row.active` via `--accent-tint` bg + `--accent` border)
 4. Branch filter `<select>` focus ring: `border-color: var(--accent)` on `:focus`
 5. Active filter toolbar pill (`.filter-toolbar .tb-pill.active` bg `--accent-tint`, border `--accent`, text `--accent-2`)
-6. "Refresh" button — no accent; use `.btn.ghost.sm` (ghost, not accented)
+6. "Refresh Runs" button — no accent; use `.btn.ghost.sm` (ghost, not accented)
 7. AreaTrend chart line — primary series (failed/all runs) uses `var(--accent)` stroke
 8. Trend chart area fill gradient — `var(--accent)` with opacity 0–18% (existing AreaTrend gradient)
 9. Pulsing `.tl-step.running::before` dot animation (existing `.pulse` keyframe uses accent)
@@ -198,7 +203,7 @@ Dark theme: All tokens above auto-resolve via `[data-theme="dark"]` overrides al
 ┌─────────────────────────────────────────────────────────┐
 │  Page header (16px 24px 12px padding, border-bottom)    │
 │  ┌──────────┐  h1 "Pipelines"  ┌──────────────────────┐ │
-│  │ Branch   │  sub: "N runs"   │ [Refresh btn] [●live] │ │
+│  │ Branch   │  sub: "N runs"   │ [Refresh Runs btn] [●live] │ │
 │  │ filter   │                  └──────────────────────┘ │
 │  └──────────┘                                           │
 │  KPI row: Total │ Passed │ Failed │ Running (4 cards)   │
@@ -228,7 +233,7 @@ CSS class. Width: max 140px. Label: none (use `branch` Icon inside the select or
 ### Run row anatomy (existing + additions for PIPE-05)
 
 ```
-┌─ .vuln-row (10px 14px padding) ──────────────────────┐
+┌─ .vuln-row (10px 16px padding) ──────────────────────┐
 │  [●status chip] [#run_number mono] [latest? chip]     │  ← existing
 │  [run.name — muted 11px ellipsis]                     │  ← existing
 │  [⎇ branch-name] [timeAgo]                            │  ← existing
@@ -252,16 +257,16 @@ Chart component: `AreaTrend` from `Charts.tsx`.
 - `values`: array of failed-run counts per run (last 30 runs, index 0 = oldest)
 - `values2`: array of passed-run counts per run (dashed line, `var(--fg-4)` stroke — existing)
 - `height`: 120 (compact — override the default 200px)
-- Card title: "Pipeline Trend" (`.h3` weight 500 at `--ts-base`)
+- Card title: "Pipeline Trend" (`.h3` weight 600 at `--ts-base`)
 - Card subtitle: "Pass / fail over last 30 runs" (`.muted` at `--ts-sm`)
 - Chart width: 100% of card content area
 
 ### Auto-refresh indicator (PIPE-03)
 
-A live-status indicator is shown in the page header right side, adjacent to the Refresh button.
+A live-status indicator is shown in the page header right side, adjacent to the Refresh Runs button.
 It consists of:
 - A 6px circle filled with `var(--accent)`, pulsing via the existing `@keyframes pulse` animation
-- Text "Live" at `--ts-xs` weight 500, color `var(--fg-3)`
+- Text "Live" at `--ts-xs` weight 600, color `var(--fg-3)`
 - The indicator is ONLY visible when `runs.some(r => r.status === 'in_progress')` is true
 - When no in-progress runs exist, the indicator is hidden (`display: none`)
 
@@ -305,11 +310,11 @@ WebSocket or SSE is introduced in Phase 02.
 |---------|----------|
 | Click run row | Sets `selectedId`, highlights row with `active` class + `--accent-tint` bg, loads `RunPanel` for that run |
 
-### Refresh button (existing behavior — do not change)
+### Refresh Runs button (existing behavior — do not change)
 
 | Trigger | Response |
 |---------|----------|
-| Click "Refresh" | Calls `refresh()`, clears stale list, re-fetches all runs, re-auto-selects latest CI run |
+| Click "Refresh Runs" | Calls `refresh()`, clears stale list, re-fetches all runs, re-auto-selects latest CI run |
 
 ### Auto-refresh (existing — do not change the interval)
 
@@ -318,11 +323,11 @@ WebSocket or SSE is introduced in Phase 02.
 | 30s interval fires | `api.github.runs()` called silently; `setRuns(arr)` updates list; `LiveIndicator` visibility derived from updated array |
 | In-progress run completes | Status chip updates from `status-running` to `status-passed` or `status-failed` on next poll |
 
-### Reprocess action (existing — preserve as-is)
+### Reprocess Run action (existing — preserve as-is)
 
 | Trigger | Response |
 |---------|----------|
-| Click "Reprocess" button | `window.confirm()` prompt (existing — do NOT replace with AlertBanner; it is a destructive action requiring positive confirmation) |
+| Click "Reprocess Run" button | `window.confirm()` prompt (existing — do NOT replace with AlertBanner; it is a destructive action requiring positive confirmation) |
 | Confirm | Sets `reprocessing: true`, shows inline accent-tint info div (existing), loads findings after 10s |
 
 ---
@@ -360,6 +365,8 @@ WebSocket or SSE is introduced in Phase 02.
 | Detail panel — no run selected | "Select a pipeline run to view results" (English translation of existing Vietnamese) |
 | Artifacts card — 0 artifacts | "No artifacts" (existing) |
 | Tool summary — no tools | (omit strip entirely — do not show "No tools") |
+| Primary CTA | "Refresh Runs" (ghost button, page header right) |
+| Destructive CTA | "Reprocess Run" (triggers confirm dialog) |
 
 **Language rule:** All UI-facing copy must be in English. The existing Pipelines.tsx has several
 Vietnamese strings (loading messages, confirm dialogs, empty states). Phase 02 work must replace
@@ -386,7 +393,7 @@ these with English equivalents as listed above.
 |-------|--------|
 | No run selected | `.empty` centered: "Select a pipeline run to view results" |
 | Loading findings | `.empty` at 32px top padding: "Loading scan results…" |
-| Zero findings | Card with centered Icon `alert` (22px, `var(--fg-4)`) + muted message + "Try Reprocess" button |
+| Zero findings | Card with centered Icon `alert` (22px, `var(--fg-4)`) + muted message + "Try Reprocess Run" button |
 | Has findings | `SeverityBoard` + `ToolBreakdown` + `TopFindings` (existing) |
 | Reprocessing | Inline accent-tint div with reprocess message (existing pattern) |
 | Trend chart | Shown above run content when >= 2 runs in filtered list |
@@ -447,6 +454,12 @@ visual work uses existing tokens, CSS classes, and in-repo components.
 8. **No new CSS files**: All styles must use existing token variables and class names from
    `tokens.css`. Inline styles using token variables (e.g., `style={{ color: 'var(--fg-3)' }}`)
    follow the existing pattern in Pipelines.tsx and are acceptable.
+
+9. **Font weight rule**: Use only `fontWeight: 400` (regular) or `fontWeight: 600` (emphasis).
+   Do not introduce 500 or 700 in any new code. Any existing 500/700 uses encountered during
+   Phase 02 work should be corrected to 600.
+
+10. **KPI counter**: match existing inline style `fontSize: 18` in Pipelines.tsx — do not change the value, do not add a new token. This is an inherited pattern.
 
 ---
 
