@@ -6,7 +6,7 @@ Milestone 2 — MVP Hardening & Feature Completion. Fix all known MVP issues and
 
 ## Phases
 
-- [ ] **Phase 1: UI/UX Overhaul** - Replace noisy UI with clean GitHub-style design system
+- [x] **Phase 1: UI/UX Overhaul** - Replace noisy UI with clean GitHub-style design system
 - [ ] **Phase 2: Pipeline Visibility** - Full pipeline coverage with real-time status and trend charts
 - [ ] **Phase 3: Data Pipeline Fix + CVE Isolation** - Fix SARIF parsing, enrich AI context, isolate CVE findings
 - [ ] **Phase 4: AI Auto-Fix + Chat Commands** - AI-driven fix pipeline and repair all chat commands
@@ -41,9 +41,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: Backend endpoint for all runs with branch/status filters
-- [ ] 02-02: Frontend pipeline list with filter controls and run summary cards
-- [ ] 02-03: Real-time status refresh and trend chart
+- [ ] 02-01-PLAN.md — Backend status fix, client.ts signature, WorkflowRun type, Wave 0 tests
+- [ ] 02-02-PLAN.md — Frontend branch filter, RunSummaryStrip, English copy, KPI font fix
+- [ ] 02-03-PLAN.md — TrendCard (AreaTrend) and LiveIndicator in Pipelines.tsx
 
 ### Phase 3: Data Pipeline Fix + CVE Isolation
 **Goal**: Fix SARIF/artifact parsing so all findings have full data; isolate CVE noise into a dedicated Dependencies tab
@@ -97,8 +97,8 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. UI/UX Overhaul | 0/2 | Not started | - |
-| 2. Pipeline Visibility | 0/3 | Not started | - |
+| 1. UI/UX Overhaul | 2/2 | Complete | 2026-04-28 |
+| 2. Pipeline Visibility | 0/3 | Planned | - |
 | 3. Data Pipeline Fix + CVE Isolation | 0/3 | Not started | - |
 | 4. AI Auto-Fix + Chat Commands | 0/3 | Not started | - |
 | 5. DAST Roadmap + Polish | 0/2 | Not started | - |
