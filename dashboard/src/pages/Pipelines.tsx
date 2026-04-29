@@ -382,6 +382,9 @@ export function PagePipelines() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   // PIPE-02: branch filter state
   const [branch, setBranch] = useState<string>('all');
+  // PIPE-05: per-run finding count cache — populated on demand when a run is selected
+  const [findingCountCache, setFindingCountCache] = useState<Map<number, { critical: number; high: number; medium: number; low: number; tools: string[] }>>(new Map());
+  const [loadingCounts, setLoadingCounts] = useState<Set<number>>(new Set());
 
   const refresh = () => {
     setLoading(true);
@@ -433,6 +436,36 @@ export function PagePipelines() {
     }, 30_000);
     return () => clearInterval(id);
   }, []);
+
+  // PIPE-05: fetch finding counts for the selected run if not yet cached
+  useEffect(() => {
+    if (selectedId == null) return;
+    if (findingCountCache.has(selectedId)) return;  // already fetched
+    setLoadingCounts(prev => new Set(prev).add(selectedId));
+    api.github.runFindings(selectedId)
+      .then(findings => {
+        const counts = { critical: 0, high: 0, medium: 0, low: 0, tools: [] as string[] };
+        const toolSet = new Set<string>();
+        for (const f of findings) {
+          if (f.severity === 'critical') counts.critical++;
+          else if (f.severity === 'high') counts.high++;
+          else if (f.severity === 'medium') counts.medium++;
+          else if (f.severity === 'low') counts.low++;
+          toolSet.add(f.tool);
+        }
+        counts.tools = [...toolSet].sort();
+        setFindingCountCache(prev => new Map(prev).set(selectedId, counts));
+      })
+      .catch(() => {
+        // On error: cache zeros so we do not retry on every render
+        setFindingCountCache(prev =>
+          new Map(prev).set(selectedId, { critical: 0, high: 0, medium: 0, low: 0, tools: [] })
+        );
+      })
+      .finally(() => {
+        setLoadingCounts(prev => { const s = new Set(prev); s.delete(selectedId); return s; });
+      });
+  }, [selectedId]);  // findingCountCache intentionally omitted — cache-hit check avoids double-fetch
 
   const selected = runs.find(r => r.id === selectedId) ?? null;
 
