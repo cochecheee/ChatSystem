@@ -1,3 +1,4 @@
+import base64
 import io
 import zipfile
 from pathlib import Path
@@ -100,6 +101,38 @@ class GitHubClient:
             )
 
         return self._extract_security_files(zip_bytes)
+
+    async def fetch_file_content(
+        self,
+        file_path: str,
+        ref: str = "main",
+    ) -> str | None:
+        """Fetch decoded text content of a file at a given git ref.
+
+        Returns None on 404, binary files (non-base64 encoding),
+        files > 100 KB, and path traversal attempts.
+        """
+        # Guard: reject path traversal
+        if not file_path or ".." in Path(file_path.lstrip("/")).parts:
+            return None
+
+        clean_path = file_path.lstrip("/")
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/contents/{clean_path}",
+                params={"ref": ref},
+            )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        if data.get("encoding") != "base64" or "content" not in data:
+            return None
+        raw_bytes = base64.b64decode(data["content"])
+        text = raw_bytes.decode("utf-8", errors="replace")
+        return text[:100_000]  # cap at 100 KB to avoid bloating Gemini prompt
 
     # ------------------------------------------------------------------
     # Private helpers
