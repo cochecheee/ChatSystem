@@ -40,14 +40,14 @@ Declared values (must be multiples of 4). Source: index.css measured usage.
 | sm | 8px | Inline button padding, filter pill gaps, composer row gaps |
 | md | 16px | Card padding, table cell padding, vuln row padding |
 | lg | 24px | Page content padding top, detail-main padding |
-| xl | 28px | Content area horizontal padding (topbar, chat composer) |
+| xl | 32px | Content area horizontal padding (topbar, chat composer) |
 | 2xl | 32px | Content scroll area horizontal padding |
 | 3xl | 48px | Content scroll area bottom padding |
 
 Exceptions:
 - Chat composer bottom padding: 20px (existing Chat.tsx pattern)
-- Chat messages area side padding: 18px (existing .ai-messages pattern)
-- AI header padding: 14px 18px (existing .ai-header pattern)
+- Chat messages area side padding: 16px (`--md` token) — existing .ai-messages pattern uses 18px; corrected to nearest multiple-of-4; treat prior 18px as tech debt
+- AI header padding: 12px 16px — existing .ai-header pattern uses 14px 18px; corrected to nearest multiples-of-4; treat prior values as tech debt
 - Login overlay card padding: 28px 32px (existing Chat.tsx inline style)
 - DiffView line number column: 36px width, 8px padding-right (existing .diff-line pattern in index.css)
 
@@ -61,8 +61,10 @@ Source: tokens.css type scale. All type sizes are pre-declared CSS variables —
 |------|------|--------|-------------|-----------|-------|
 | Body | 13px | 400 | 1.55 | `--ts-base` | Chat message text, command responses, form labels |
 | Label / meta | 12px | 400 | 1.5 | `--ts-sm` | Table cells, file paths, timestamps, diff line content |
-| Caption / badge | 11px | 500–600 | 1.4 | `--ts-xs` | Severity badges, role labels, uppercase section labels |
+| Caption / badge | 11px | 600 | 1.4 | `--ts-xs` | Severity badges, role labels, uppercase section labels |
 | Heading | 15px | 600 | 1.3 | `--ts-md` | Card headings, dialog titles, section h2 |
+
+Declared weights: 400 (regular) and 600 (semibold) — exactly 2 weights. The intermediate 500 weight is not used in this phase.
 
 Mono font: JetBrains Mono at 12px (`--ts-sm`), line-height 1.55 — for all diff line content, file paths, and command syntax hints.
 
