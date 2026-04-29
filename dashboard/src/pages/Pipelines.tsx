@@ -259,15 +259,15 @@ function RunPanel({ run }: { run: WorkflowRun }) {
   }, [run.id]);
 
   const handleReprocess = async () => {
-    if (!confirm(`Xoá findings cũ và xử lý lại run #${run.run_number}?`)) return;
+    if (!confirm(`Delete old findings and reprocess run #${run.run_number}?`)) return;
     setReprocessing(true);
     setReprocessMsg('');
     try {
       const res = await api.github.reprocessRun(run.id);
-      setReprocessMsg(`Đang xử lý ${res.deleted_artifacts} artifact cũ — kết quả sẽ cập nhật sau ~10s…`);
+      setReprocessMsg(`Reprocessing ${res.deleted_artifacts} artifacts — results will update in ~10s…`);
       setTimeout(() => loadFindings(run.id), 10_000);
     } catch (e) {
-      setReprocessMsg(`Lỗi: ${e}`);
+      setReprocessMsg(`Reprocess failed: ${e}`);
     } finally {
       setReprocessing(false);
     }
@@ -290,7 +290,7 @@ function RunPanel({ run }: { run: WorkflowRun }) {
         </div>
         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           <button className="btn ghost sm" onClick={handleReprocess} disabled={reprocessing}>
-            <Icon name="refresh" size={12} /> {reprocessing ? 'Đang xử lý…' : 'Reprocess'}
+            <Icon name="refresh" size={12} /> {reprocessing ? 'Reprocessing…' : 'Reprocess'}
           </button>
           {run.html_url && (
             <a href={run.html_url} target="_blank" rel="noreferrer" className="btn ghost sm">
@@ -307,18 +307,18 @@ function RunPanel({ run }: { run: WorkflowRun }) {
       )}
 
       {/* Boards */}
-      {loadingF && <div className="empty" style={{ padding: '32px 0' }}>Đang tải kết quả scan…</div>}
+      {loadingF && <div className="empty" style={{ padding: '32px 0' }}>Loading scan results…</div>}
 
       {!loadingF && findings.length === 0 && (
         <div className="card card-pad" style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '20px 0' }}>
             <Icon name="alert" size={22} style={{ color: 'var(--fg-4)' }} />
             <div className="muted" style={{ fontSize: 13, textAlign: 'center' }}>
-              Chưa có findings cho run này.<br />
-              Có thể artifacts đã hết hạn (retention-days: 1) hoặc CI chưa kích hoạt webhook.
+              No findings for this run.<br />
+              Artifacts may have expired (retention: 1 day) or CI has not triggered a webhook.
             </div>
             <button className="btn sm" onClick={handleReprocess} disabled={reprocessing}>
-              <Icon name="refresh" size={12} /> Thử Reprocess
+              <Icon name="refresh" size={12} /> Reprocess
             </button>
           </div>
         </div>
@@ -596,7 +596,7 @@ export function PagePipelines() {
             <RunPanel key={selected.id} run={selected} />
           ) : (
             <div className="empty" style={{ marginTop: 80 }}>
-              {loading ? 'Đang tải…' : 'Chọn một pipeline run để xem kết quả'}
+              {loading ? 'Loading…' : 'Select a pipeline run to view results'}
             </div>
           )}
         </div>
