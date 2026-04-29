@@ -402,3 +402,98 @@ def test_factory_detects_eslint_array_json():
 def test_factory_skips_unknown_metadata_json():
     with pytest.raises(ValueError, match="Unrecognized"):
         NormalizerFactory.get("metadata.json", METADATA_JSON)
+
+
+# ---------------------------------------------------------------------------
+# SarifNormalizer — relatedLocations fallback (Task 1, DATA-01)
+# ---------------------------------------------------------------------------
+
+# ── CodeQL multi-location fixture ──────────────────────────────────────────
+SARIF_CODEQL_RELATED_LOCATIONS = json.dumps({
+    "version": "2.1.0",
+    "runs": [{
+        "tool": {"driver": {"name": "CodeQL"}},
+        "results": [{
+            "ruleId": "java/path-injection",
+            "level": "error",
+            "message": {"text": "Path injection via user input"},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": ""},
+                    "region": {"startLine": 1}
+                }
+            }],
+            "relatedLocations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/FileController.java"},
+                    "region": {"startLine": 87}
+                }
+            }]
+        }]
+    }]
+})
+
+def test_sarif_codeql_related_locations():
+    findings = SarifNormalizer().normalize(SARIF_CODEQL_RELATED_LOCATIONS, artifact_id=1)
+    assert len(findings) == 1
+    assert findings[0].file_path == "src/FileController.java"
+    assert findings[0].line_number == 87
+
+
+# ── ESLint SARIF variant fixture ───────────────────────────────────────────
+SARIF_ESLINT_VARIANT = json.dumps({
+    "version": "2.1.0",
+    "runs": [{
+        "tool": {"driver": {"name": "ESLint"}},
+        "results": [{
+            "ruleId": "no-eval",
+            "level": "error",
+            "message": {"text": "eval() is dangerous"},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/utils.js"},
+                    "region": {"startLine": 34}
+                }
+            }]
+        }]
+    }]
+})
+
+def test_sarif_eslint_variant():
+    findings = SarifNormalizer().normalize(SARIF_ESLINT_VARIANT, artifact_id=1)
+    assert len(findings) == 1
+    assert findings[0].tool == "eslint"
+    assert findings[0].file_path == "src/utils.js"
+    assert findings[0].line_number == 34
+
+
+# ── Semgrep relatedLocations fallback fixture ──────────────────────────────
+SARIF_SEMGREP_RELATED_LOC = json.dumps({
+    "version": "2.1.0",
+    "runs": [{
+        "tool": {"driver": {"name": "Semgrep"}},
+        "results": [{
+            "ruleId": "python.lang.security.audit.exec-injection",
+            "level": "error",
+            "message": {"text": "exec injection"},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": ""},
+                    "region": {"startLine": 1}
+                }
+            }],
+            "relatedLocations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/app.py"},
+                    "region": {"startLine": 12}
+                }
+            }]
+        }]
+    }]
+})
+
+def test_sarif_semgrep_related_locations():
+    findings = SarifNormalizer().normalize(SARIF_SEMGREP_RELATED_LOC, artifact_id=1)
+    assert len(findings) == 1
+    assert findings[0].file_path == "src/app.py"
+    assert findings[0].line_number == 12

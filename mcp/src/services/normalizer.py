@@ -211,18 +211,36 @@ class SarifNormalizer(BaseNormalizer):
     @staticmethod
     def _extract_location(result: dict[str, Any]) -> tuple[str, int | None]:
         locations = result.get("locations") or []
-        if not isinstance(locations, list) or not locations:
-            return "unknown", None
-        loc = locations[0]
-        if not isinstance(loc, dict):
-            return "unknown", None
-        pl = loc.get("physicalLocation") or {}
-        if not isinstance(pl, dict):
-            return "unknown", None
-        artifact_loc = pl.get("artifactLocation") or {}
-        uri = artifact_loc.get("uri") if isinstance(artifact_loc, dict) else None
-        region = pl.get("region") or {}
-        line = region.get("startLine") if isinstance(region, dict) else None
+        uri: str | None = None
+        line: int | None = None
+
+        if isinstance(locations, list) and locations:
+            loc = locations[0]
+            if isinstance(loc, dict):
+                pl = loc.get("physicalLocation") or {}
+                if isinstance(pl, dict):
+                    artifact_loc = pl.get("artifactLocation") or {}
+                    uri = artifact_loc.get("uri") if isinstance(artifact_loc, dict) else None
+                    region = pl.get("region") or {}
+                    line = region.get("startLine") if isinstance(region, dict) else None
+
+        # Fallback: if primary location is empty/unknown, try relatedLocations[0]
+        if not uri or uri == "unknown":
+            related = result.get("relatedLocations") or []
+            if isinstance(related, list) and related:
+                rel = related[0]
+                if isinstance(rel, dict):
+                    pl2 = rel.get("physicalLocation") or {}
+                    if isinstance(pl2, dict):
+                        artifact_loc2 = pl2.get("artifactLocation") or {}
+                        fb_uri = artifact_loc2.get("uri") if isinstance(artifact_loc2, dict) else None
+                        if fb_uri:
+                            uri = fb_uri
+                        region2 = pl2.get("region") or {}
+                        fb_line = region2.get("startLine") if isinstance(region2, dict) else None
+                        if fb_line is not None:
+                            line = fb_line
+
         return uri or "unknown", line
 
     @staticmethod
