@@ -534,21 +534,34 @@ export function PagePipelines() {
         </span>
         <span>{timeAgo(r.created_at)}</span>
       </div>
-      {r.id === selectedId && (
-        <>
-          <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0' }} />
-          <SeverityBar counts={{ critical: 0, high: 0, medium: 0, low: 0 }} height={4} />
-          <div style={{
-            display: 'flex', gap: 8, marginTop: 4,
-            fontSize: 'var(--ts-xs)', color: 'var(--fg-3)', alignItems: 'center'
-          }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <Icon name="clock" size={10} />
-              <span className="mono">{formatDuration(r)}</span>
-            </span>
-          </div>
-        </>
-      )}
+      {r.id === selectedId && (() => {
+        const cached = findingCountCache.get(r.id);
+        const isLoadingThis = loadingCounts.has(r.id);
+        const counts = cached ?? { critical: 0, high: 0, medium: 0, low: 0 };
+        return (
+          <>
+            <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0' }} />
+            <SeverityBar counts={counts} height={4} />
+            {cached?.tools && cached.tools.length > 0 && (
+              <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                {cached.tools.map(tool => (
+                  <span key={tool} className="tool-tag" style={{ fontSize: 9.5 }}>{tool}</span>
+                ))}
+              </div>
+            )}
+            <div style={{
+              display: 'flex', gap: 8, marginTop: 4,
+              fontSize: 'var(--ts-xs)', color: 'var(--fg-3)', alignItems: 'center'
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <Icon name="clock" size={10} />
+                <span className="mono">{formatDuration(r)}</span>
+              </span>
+              {isLoadingThis && <span style={{ color: 'var(--fg-4)' }}>…</span>}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 
