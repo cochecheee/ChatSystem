@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
-import { SeverityBar } from '../components/Charts';
+import { AreaTrend, SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { Finding, WorkflowArtifact, WorkflowRun } from '../types';
 import { SEVERITY_ORDER } from '../types';
@@ -463,6 +463,20 @@ export function PagePipelines() {
     return { ciRuns: ci, cdRuns: cd };
   }, [filteredRuns]);
 
+  // PIPE-04: trend data from unfiltered runs, chronological, last 30
+  const trendData = useMemo(() => {
+    const sorted = [...runs]
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .slice(-30);
+    return {
+      failed: sorted.map(r => r.conclusion === 'failure' ? 1 : 0),
+      passed: sorted.map(r => r.conclusion === 'success' ? 1 : 0),
+    };
+  }, [runs]);
+
+  // PIPE-03: derive from unfiltered runs — true if any run is in progress
+  const hasInProgress = runs.some(r => r.status === 'in_progress');
+
   // Inline run-row renderer used in both CI and CD sections
   const renderRunRow = (r: WorkflowRun, isLatest: boolean) => (
     <div
@@ -535,6 +549,21 @@ export function PagePipelines() {
             <button className="btn ghost sm" onClick={refresh}>
               <Icon name="refresh" size={13} /> Refresh
             </button>
+            {/* PIPE-03: Live indicator — visible only when in-progress runs are present */}
+            {hasInProgress && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--accent)',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                }} />
+                <span style={{ fontSize: 'var(--ts-xs)', fontWeight: 600, color: 'var(--fg-3)' }}>
+                  Live
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -592,6 +621,20 @@ export function PagePipelines() {
 
         {/* Right: detail panel */}
         <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+          {/* PIPE-04: TrendCard — only when >= 2 runs; guards AreaTrend stepX division by zero */}
+          {runs.length >= 2 && (
+            <div className="card" style={{ margin: '14px 14px 0' }}>
+              <div className="card-header">
+                <div className="h3">Pipeline Trend</div>
+                <span className="muted" style={{ fontSize: 'var(--ts-sm)' }}>
+                  Pass / fail over last 30 runs
+                </span>
+              </div>
+              <div className="card-pad">
+                <AreaTrend values={trendData.failed} values2={trendData.passed} height={120} />
+              </div>
+            </div>
+          )}
           {selected ? (
             <RunPanel key={selected.id} run={selected} />
           ) : (
