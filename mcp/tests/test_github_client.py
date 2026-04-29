@@ -225,3 +225,83 @@ async def test_nested_path_extraction():
     filenames = [r["filename"] for r in result]
     assert "results/codeql/java/codeql-results.sarif" in filenames
     assert "results/semgrep/semgrep-report.sarif" in filenames
+
+
+# ---------------------------------------------------------------------------
+# Tests: fetch_file_content (DATA-03)
+# ---------------------------------------------------------------------------
+
+import base64 as _b64
+
+
+@pytest.mark.asyncio
+async def test_fetch_file_content_returns_decoded_text():
+    encoded = _b64.b64encode(b"hello world\n").decode()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"encoding": "base64", "content": encoded}
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_file_content("src/app.py")
+
+    assert result == "hello world\n"
+
+
+@pytest.mark.asyncio
+async def test_fetch_file_content_404_returns_none():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {}
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_file_content("missing.py")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_file_content_binary_returns_none():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"encoding": "none"}
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_file_content("logo.png")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_file_content_path_traversal_blocked():
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock()
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_file_content("../etc/passwd")
+
+    assert result is None
+    mock_http.get.assert_not_called()
