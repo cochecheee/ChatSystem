@@ -21,6 +21,30 @@ function pkgMeta(f: Finding) {
   return { name, current, fixed, cveId };
 }
 
+function upgradeCmd(f: Finding): string | null {
+  const { name, fixed } = pkgMeta(f);
+  if (!name || !fixed) return null;
+  const manifest = f.file_path.split('/').pop() ?? '';
+  if (manifest.includes('package.json') || manifest.includes('package-lock')) {
+    return `npm install ${name}@${fixed}`;
+  }
+  if (
+    manifest.includes('requirements') ||
+    manifest.includes('Pipfile') ||
+    manifest.endsWith('.txt')
+  ) {
+    return `pip install ${name}==${fixed}`;
+  }
+  if (
+    manifest.endsWith('.gradle') ||
+    manifest.endsWith('pom.xml') ||
+    manifest.endsWith('.jar')
+  ) {
+    return `# Update ${name} to ${fixed} in your build file`;
+  }
+  return `# Upgrade ${name} to ${fixed}`;
+}
+
 function SevChip({ sev }: { sev: string }) {
   return <Badge variant={sev as 'critical' | 'high' | 'medium' | 'low' | 'info'} dot>{sev}</Badge>;
 }
@@ -86,6 +110,73 @@ function CveUpdateCard({ finding }: { finding: Finding }) {
           {finding.cvss_score != null && (
             <span className="chip" style={{ fontSize: 11 }}>CVSS {finding.cvss_score}</span>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CveSummaryPanel({ findings }: { findings: Finding[] }) {
+  const total = findings.length;
+  const bySev = findings.reduce(
+    (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
+    {} as Record<string, number>
+  );
+
+  // Top 10 packages by CVE count
+  const pkgCounts: Record<string, number> = {};
+  for (const f of findings) {
+    const { name } = pkgMeta(f);
+    if (name) pkgCounts[name] = (pkgCounts[name] ?? 0) + 1;
+  }
+  const top10 = Object.entries(pkgCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10);
+
+  return (
+    <div style={{
+      background: 'var(--bg-muted)',
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      padding: '10px 14px',
+      marginBottom: 10,
+    }}>
+      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+        {total} {total === 1 ? 'vulnerability' : 'vulnerabilities'} found
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: top10.length > 0 ? 8 : 0 }}>
+        {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
+          const cnt = bySev[sev] ?? 0;
+          if (cnt === 0) return null;
+          return <SevChip key={sev} sev={sev} />;
+        })}
+        {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
+          const cnt = bySev[sev] ?? 0;
+          if (cnt === 0) return null;
+          return (
+            <span key={`cnt-${sev}`} style={{ fontSize: 11, alignSelf: 'center', color: 'var(--fg-2)' }}>
+              {sev[0].toUpperCase() + sev.slice(1)}: {cnt}
+            </span>
+          );
+        })}
+      </div>
+      {top10.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>
+            Top affected packages
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {top10.map(([pkg, count]) => (
+              <span
+                key={pkg}
+                className="chip"
+                style={{ fontSize: 10 }}
+                title={`${count} CVE${count > 1 ? 's' : ''}`}
+              >
+                {pkg} ({count})
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>
