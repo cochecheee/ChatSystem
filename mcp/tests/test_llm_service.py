@@ -99,3 +99,98 @@ def test_extract_context_clamps_at_start():
     source = "a\nb\nc\nd\ne"
     context = _extract_context(source, 1)
     assert "1 |" in context
+
+
+# ---------------------------------------------------------------------------
+# Tests: fetch_file_content integration in LLMAnalysisService (DATA-03)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_analyze_fetches_source_code_when_missing():
+    mock_client = AsyncMock()
+    mock_client.analyze.return_value = SAMPLE_OUTPUT
+
+    mock_github = AsyncMock()
+    mock_github.fetch_file_content.return_value = "line1\nline2\nline3"
+
+    service = LLMAnalysisService(client=mock_client, github_client=mock_github)
+    finding = _make_finding()
+    finding.raw_data = {}  # no cached source
+
+    session = AsyncMock()
+    await service.analyze_finding(finding, session)
+
+    mock_github.fetch_file_content.assert_called_once_with(finding.file_path)
+    assert finding.raw_data.get("source_code") is not None
+
+
+@pytest.mark.asyncio
+async def test_analyze_skips_fetch_when_source_cached():
+    mock_client = AsyncMock()
+    mock_client.analyze.return_value = SAMPLE_OUTPUT
+
+    mock_github = AsyncMock()
+
+    service = LLMAnalysisService(client=mock_client, github_client=mock_github)
+    finding = _make_finding()
+    finding.raw_data = {"source_code": "def foo(): pass\n"}
+
+    session = AsyncMock()
+    await service.analyze_finding(finding, session)
+
+    mock_github.fetch_file_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_analyze_graceful_404():
+    mock_client = AsyncMock()
+    mock_client.analyze.return_value = SAMPLE_OUTPUT
+
+    mock_github = AsyncMock()
+    mock_github.fetch_file_content.return_value = None
+
+    service = LLMAnalysisService(client=mock_client, github_client=mock_github)
+    finding = _make_finding()
+    finding.raw_data = {}
+
+    session = AsyncMock()
+    result = await service.analyze_finding(finding, session)
+
+    assert result is not None  # no exception raised
+    assert finding.raw_data.get("source_code") is None
+
+
+@pytest.mark.asyncio
+async def test_analyze_skips_fetch_for_binary_file():
+    mock_client = AsyncMock()
+    mock_client.analyze.return_value = SAMPLE_OUTPUT
+
+    mock_github = AsyncMock()
+
+    service = LLMAnalysisService(client=mock_client, github_client=mock_github)
+    finding = _make_finding()
+    finding.file_path = "build/libs/app.jar"
+    finding.raw_data = {}
+
+    session = AsyncMock()
+    await service.analyze_finding(finding, session)
+
+    mock_github.fetch_file_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_analyze_skips_fetch_for_unknown_path():
+    mock_client = AsyncMock()
+    mock_client.analyze.return_value = SAMPLE_OUTPUT
+
+    mock_github = AsyncMock()
+
+    service = LLMAnalysisService(client=mock_client, github_client=mock_github)
+    finding = _make_finding()
+    finding.file_path = "unknown"
+    finding.raw_data = {}
+
+    session = AsyncMock()
+    await service.analyze_finding(finding, session)
+
+    mock_github.fetch_file_content.assert_not_called()
