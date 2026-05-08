@@ -30,8 +30,10 @@
 
 ## Day-by-day
 
-### Day 1 — Thứ Sáu 2026-05-08 (hôm nay) — Cleanup + foundation
+### Day 1 — Thứ Sáu 2026-05-08 — ✅ DONE (vượt scope)
 **Mục tiêu**: cắt sạch mock + tách config khỏi hardcode.
+
+> **Status cuối ngày**: hoàn thành 100% mục tiêu chính + 5 nhóm extras (xem `PROGRESS.md`). 13 commits — 10 trên `ft/imp-fe`, 3 trên ALOUTE `main` (đã push). Backend 200/200 tests, frontend build clean. Còn treo: user chạy `reset_db.py --apply` + verify CI ALOUTE với cache `depcheck-v2`.
 
 | Block | Task | Output |
 |---|---|---|

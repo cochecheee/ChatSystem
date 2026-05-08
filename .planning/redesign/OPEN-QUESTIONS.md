@@ -2,6 +2,31 @@
 
 > Những điểm tao chưa rõ, hoặc có nhiều cách làm và mày phải chốt. Đặt theo thứ tự cần trả lời sớm.
 
+## Trạng thái (2026-05-08 cuối Day 1)
+
+**Đã chốt hết Q1–Q12**:
+- ✅ Q1 = B (multi-tenant nhẹ)
+- ✅ Q2 = CÓ demo Python repo (Day 5)
+- ✅ Q3 = Cấp 2.5 (Docker Hub + GitHub release + minimal composite Action — KHÔNG Helm/full TS Action)
+- ✅ Q4 = Secrets ALOUTE đã có hết (NVD_API_KEY, SONAR_*, DOCKER_*, GEMINI, GITHUB_TOKEN)
+- ✅ Q5 = Public URL dùng cloudflared/ngrok khi demo Day 5
+- ✅ Q6 = AI prompt giữ tiếng Việt, bilingual để V2
+- ✅ Q7 = Giữ free-form chat
+- ✅ Q8 = Audit CSV/PDF để V2
+- ✅ Q9 = Theme verify Day 7
+- ✅ Q10 = Slide outline Day 7, không production
+- ✅ Q11 = **CẮT báo cáo IEEE khỏi tuần này**
+- ✅ Q12 = Không meeting GVHD giữa tuần
+
+**Phát sinh ngoài kế hoạch (đã handle Day 1)**:
+- ✅ SCA không redundant với Vulns → rebuild với real data + group by package
+- ✅ Sidebar badge gây hiểu lầm → bỏ hẳn count
+- ✅ ALOUTE dep-check H2 schema bug → fix workflow
+
+Không còn câu hỏi mở. Sẵn sàng vào Day 2.
+
+---
+
 ---
 
 ## Cần trả lời TRƯỚC khi bắt đầu Day 1
