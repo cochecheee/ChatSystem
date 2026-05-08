@@ -9,7 +9,7 @@
 | File | LOC | Lý do cắt | Risk |
 |---|---|---|---|
 | `dashboard/src/pages/Dast.tsx` | 930 | Mock data, không có DAST backend, OWASP ZAP/Nikto chưa wire | Mất "show breadth" — chấp nhận |
-| `dashboard/src/pages/Sca.tsx` | 417 | Trùng Dependency-Check trong Vulns; mock data | Không, vì đã có Vulns filter by tool |
+| ~~`dashboard/src/pages/Sca.tsx`~~ | ~~417~~ | ~~Trùng Dependency-Check trong Vulns~~ | **CORRECTION 2026-05-08**: SCA KHÔNG redundant — Vulns hardcode `category=sast` (loại tool ∈ DEPS_TOOLS). Tao đã rebuild Sca.tsx với REAL data (commit 8161184), không phải mock. |
 | `dashboard/src/pages/Secrets.tsx` | 469 | Mock; không integrate TruffleHog/Gitleaks | Mất theatre — chấp nhận |
 | `dashboard/src/pages/PRBot.tsx` | 386 | Mâu thuẫn human-in-the-loop principle | Không |
 | `dashboard/src/pages/Governance.tsx` | 305 | Pure decoration | Không |
