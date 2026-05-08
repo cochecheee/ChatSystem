@@ -6,6 +6,7 @@ import { PageChat } from './pages/Chat';
 import { PageOverview } from './pages/Overview';
 import { PagePipelines } from './pages/Pipelines';
 import { PageReports } from './pages/Reports';
+import { PageSCA } from './pages/Sca';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
 
@@ -53,6 +54,7 @@ export default function App() {
     case 'overview':   page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />; break;
     case 'pipelines':  page = <PagePipelines />; break;
     case 'vulns':      page = <PageVulns initialId={openVulnId} />; break;
+    case 'sca':        page = <PageSCA />; break;
     case 'chat':       page = <PageChat />; break;
     case 'reports':    page = <PageReports />; break;
     case 'settings':   page = <PageSettings />; break;
