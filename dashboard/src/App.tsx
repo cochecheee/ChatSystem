@@ -27,8 +27,10 @@ export default function App() {
   useEffect(() => {
     const fetchData = () => {
       api.stats.overview().then(s => {
-        setVulnCount(s.sast_open ?? s.open);
-        setScaCount(s.deps_open ?? 0);
+        // Show actionable count (critical + high) — total open is dominated
+        // by Trivy container OS-CVE noise and gives a misleading badge.
+        setVulnCount(s.sast_critical_high ?? s.sast_open ?? s.open);
+        setScaCount(s.deps_critical_high ?? s.deps_open ?? 0);
         const critHigh = s.critical_high;
         if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
           setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));

@@ -42,6 +42,15 @@ class StatsService:
         deps_approved = await self.findings.count_with_filters(category="deps", status="APPROVED")
         deps_revoked = await self.findings.count_with_filters(category="deps", status="REVOKED")
 
+        # Actionable counts = critical + high. Trivy container scans flood the
+        # raw deps_open with thousands of low/medium OS-level CVEs that drown
+        # signal in noise; the SCA tab defaults to severity ≥ high so the
+        # badge needs to match that bar.
+        sast_crit = await self.findings.count_with_filters(category="sast", severity="critical")
+        sast_high = await self.findings.count_with_filters(category="sast", severity="high")
+        deps_crit = await self.findings.count_with_filters(category="deps", severity="critical")
+        deps_high = await self.findings.count_with_filters(category="deps", severity="high")
+
         return {
             "total": total,
             "critical_high": critical + high,
@@ -53,6 +62,8 @@ class StatsService:
             "open": total - approved - revoked,
             "sast_open": sast_total - sast_approved - sast_revoked,
             "deps_open": deps_total - deps_approved - deps_revoked,
+            "sast_critical_high": sast_crit + sast_high,
+            "deps_critical_high": deps_crit + deps_high,
             "approved": approved,
             "revoked": revoked,
             "pending": pending,

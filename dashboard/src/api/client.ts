@@ -97,6 +97,8 @@ export const api = {
       open: number;
       sast_open: number;
       deps_open: number;
+      sast_critical_high: number;
+      deps_critical_high: number;
       approved: number;
       revoked: number;
       pending: number;
