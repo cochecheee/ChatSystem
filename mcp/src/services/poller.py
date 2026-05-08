@@ -16,7 +16,14 @@ log = logging.getLogger(__name__)
 
 
 class GitHubPoller:
-    """Background task — polls GitHub for new completed workflow runs every N seconds."""
+    """Background task — polls GitHub for new completed workflow runs every N seconds.
+
+    Single-tenant flow scoped to one repo (settings.GITHUB_OWNER/REPO).
+    Multi-project polling is scaffolded in the entity layer (Project
+    has per-tenant credentials + GitHubClient.for_project), but the
+    runtime loop here stays single-tenant until packaging is done and
+    the demo target is verified end-to-end on ALOUTE.
+    """
 
     def __init__(
         self,
@@ -90,6 +97,11 @@ class GitHubPoller:
             project = Project(
                 name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
                 github_url=self._github_url,
+                github_owner=settings.GITHUB_OWNER,
+                github_repo=settings.GITHUB_REPO,
+                github_token=settings.GITHUB_TOKEN,
+                gemini_api_key=settings.GEMINI_API_KEY,
+                gemini_model=settings.GEMINI_MODEL,
             )
             session.add(project)
             await session.commit()

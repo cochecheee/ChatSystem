@@ -92,11 +92,29 @@ b04ae9c ci: bump SAST artifact retention to 30 days
 
 ---
 
-## Day 2 — Sat 2026-05-09 — Multi-tenant backend
+## Day 2 — Sat 2026-05-09 — REVISED: ALOUTE end-to-end + multi-tenant scaffolding
 
-**Mục tiêu**: 1 instance phục vụ N project, mỗi project có own GitHub creds + Gemini key + artifact profile.
+**Plan revision (2026-05-08 evening)**: User decided "trước tiên thực hiện trên ALOUTE thôi, sau khi đóng gói hết mới test tích hợp được trên nhiều project khác nhau". Day 2 multi-tenant runtime is deferred until after packaging.
 
-Kế hoạch theo PLAN-1WEEK.md không đổi. Bắt đầu khi user "go Day 2".
+### Done (cuối Day 1, lan vào Day 2 sớm)
+- ✅ Project entity expanded với 9 multi-tenant columns (defaults backward-compat)
+  - `github_owner`, `github_repo`, `github_token`, `gemini_api_key`, `gemini_model`, `artifact_profile`, `polling_workflow_name`, `polling_branch`, `active`
+- ✅ `mcp/scripts/migrate_v2.py` — idempotent ALTER TABLE + backfill row đầu tiên từ .env
+- ✅ ProjectRepository.create accepts `**fields`, thêm `update()`, `list_active()`
+- ✅ `GitHubClient.for_project(project)` classmethod — sẵn để dùng khi multi-tenant runtime kích hoạt
+- ✅ `ProjectCreate`/`ProjectUpdate`/`ProjectOut` schemas full multi-tenant fields, secrets không expose qua API (chỉ `has_*` boolean)
+- ✅ Poller giữ single-tenant flow — backfill credentials cho Project mới khi tạo từ settings
+- ✅ Backend pytest 200/200 pass
+
+### Day 2-3 còn lại (revised scope)
+- ALOUTE end-to-end: chạy migrate_v2 trên DB thật, verify dashboard load đúng
+- Webhook schema doc (`docs/webhook-schema.md`)
+- Guardrails verify (PII scrub + injection prevention test cases)
+
+### Multi-tenant runtime — deferred to Day 6+
+- Refactor poller `_poll()` thành loop projects (đã có sẵn implementation, đang revert)
+- API endpoints scope per-project
+- Multi-tenant test suite
 
 ---
 

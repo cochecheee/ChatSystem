@@ -51,6 +51,29 @@ class FindingOut(BaseModel):
 class ProjectCreate(BaseModel):
     name: str
     github_url: str
+    github_owner: str = ""
+    github_repo: str = ""
+    github_token: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = ""
+    artifact_profile: str = "github-actions-default"
+    polling_workflow_name: str = "CI Workflow"
+    polling_branch: str = "main"
+    active: bool = True
+
+
+class ProjectUpdate(BaseModel):
+    """Partial update — only fields user wants to change."""
+    name: str | None = None
+    github_owner: str | None = None
+    github_repo: str | None = None
+    github_token: str | None = None
+    gemini_api_key: str | None = None
+    gemini_model: str | None = None
+    artifact_profile: str | None = None
+    polling_workflow_name: str | None = None
+    polling_branch: str | None = None
+    active: bool | None = None
 
 
 class ProjectOut(BaseModel):
@@ -58,6 +81,17 @@ class ProjectOut(BaseModel):
     name: str
     github_url: str
     last_processed_run_id: int | None
+    github_owner: str = ""
+    github_repo: str = ""
+    # NOTE: github_token + gemini_api_key NOT exposed — secrets stay
+    # server-side. UI surfaces "configured" booleans instead.
+    has_github_token: bool = False
+    has_gemini_api_key: bool = False
+    gemini_model: str = ""
+    artifact_profile: str = "github-actions-default"
+    polling_workflow_name: str = "CI Workflow"
+    polling_branch: str = "main"
+    active: bool = True
 
     model_config = {"from_attributes": True}
 

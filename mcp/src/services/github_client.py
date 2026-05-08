@@ -28,6 +28,19 @@ class GitHubClient:
         self.owner = owner or settings.GITHUB_OWNER
         self.repo = repo or settings.GITHUB_REPO
 
+    @classmethod
+    def for_project(cls, project) -> "GitHubClient":
+        """Build a client bound to a Project's stored credentials.
+
+        Used by the poller (Day 2) so a single chat-system instance can
+        scrape multiple repos without resetting global settings.
+        """
+        return cls(
+            token=project.github_token or None,
+            owner=project.github_owner or None,
+            repo=project.github_repo or None,
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------

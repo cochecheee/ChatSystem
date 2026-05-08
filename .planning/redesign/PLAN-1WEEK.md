@@ -6,13 +6,21 @@
 
 **Giả định**: làm full-time, ~6-7h thực sự code/ngày.
 
-**Scope chốt theo OPEN-QUESTIONS đã trả lời**:
-- Q1 = B (multi-tenant nhẹ — extract config per-Project, không full RBAC tách)
-- Q2 = CÓ demo Python repo thứ 2 (lồng vào Day 5)
-- Q3 = Cấp 2.5 (Docker Hub push + GitHub release v0.1.0 + minimal composite Action; KHÔNG Helm, KHÔNG full TS Action)
+**Scope chốt theo OPEN-QUESTIONS đã trả lời** (revised 2026-05-08 cuối Day 1):
+- Q1 = B (multi-tenant nhẹ) — **REVISED: defer multi-tenant runtime, chỉ scaffold entity/migration. Single-tenant ALOUTE end-to-end → đóng gói → mới test multi-project sau.**
+- Q2 = CÓ demo Python repo thứ 2 — **REVISED: chỉ demo sau khi packaging xong (Day 6+ thay vì Day 5)**
+- Q3 = Cấp 2.5 (Docker Hub push + GitHub release v0.1.0 + minimal composite Action)
 - Q11 = **CẮT báo cáo IEEE khỏi scope tuần này** — viết sau 2026-05-15
 - Q12 = không meeting GVHD giữa tuần
 - Secrets: đã có hết
+
+### Revised order (2026-05-08)
+> User feedback: "trước tiên thực hiện trên ALOUTE thôi, sau khi đóng gói hết mới test tích hợp được trên nhiều project khác nhau".
+
+1. ALOUTE end-to-end ổn (single-tenant, đã có infra) — Day 2-3
+2. Đóng gói Docker (Day 4)
+3. Test multi-project bằng cách deploy thêm instance / wire Python repo (Day 5-6)
+4. Composite Action + release + slide (Day 7-8)
 
 ---
 

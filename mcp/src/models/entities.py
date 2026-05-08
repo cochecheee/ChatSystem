@@ -22,7 +22,34 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_processed_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Multi-tenant config (Day 2). One chat-system instance can serve N
+    # repos — each row carries the GitHub creds + AI key + polling and
+    # artifact-profile knobs that used to live on the global settings
+    # singleton. Plain-text storage is intentional for thesis scope; see
+    # PROGRESS.md "credentials" decision.
+    github_owner: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    github_repo: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    github_token: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    gemini_api_key: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    gemini_model: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    artifact_profile: Mapped[str] = mapped_column(
+        String(64), default="github-actions-default", nullable=False,
+    )
+    polling_workflow_name: Mapped[str] = mapped_column(String(255), default="CI Workflow", nullable=False)
+    polling_branch: Mapped[str] = mapped_column(String(255), default="main", nullable=False)
+    active: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)
+
     artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="project")
+
+    # Pydantic ProjectOut reads these via from_attributes — keeps secrets
+    # off the wire while letting the UI render a "configured" indicator.
+    @property
+    def has_github_token(self) -> bool:
+        return bool(self.github_token)
+
+    @property
+    def has_gemini_api_key(self) -> bool:
+        return bool(self.gemini_api_key)
 
 
 class Artifact(Base):

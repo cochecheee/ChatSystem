@@ -49,20 +49,39 @@ class SecurityProcessor:
         self,
         db_artifact_id: int,
         github_artifact_id: int,
+        gh: GitHubClient | None = None,
     ) -> int:
         """Fetch, scrub, normalize, enrich, and store findings for one artifact.
 
-        Returns the number of findings stored.
+        Returns the number of findings stored. Pass `gh` to use a
+        per-project client (Day 2 multi-tenant); omitted falls back to
+        the default singleton.
         """
         async with self.session_factory() as session:
-            return await self._run(session, db_artifact_id, github_artifact_id)
+            return await self._run(session, db_artifact_id, github_artifact_id, gh)
 
-    async def process_run(self, project_id: int, github_run_id: int) -> None:
-        """Fetch security artifacts from a GitHub workflow run and process each one."""
+    async def process_run(
+        self,
+        project_id: int,
+        github_run_id: int,
+        project=None,
+    ) -> None:
+        """Fetch security artifacts from a GitHub workflow run and process each one.
+
+        When `project` is supplied (poller flow), build a per-project
+        GitHubClient and load that project's artifact profile. Otherwise
+        fall back to the default singleton (single-tenant compat).
+        """
         from ..models.entities import Artifact as ArtifactModel
 
-        all_artifacts = await self.github_client.list_artifacts(github_run_id)
-        profile = load_profile()
+        if project is not None:
+            gh = GitHubClient.for_project(project)
+            profile = load_profile(project.artifact_profile or None)
+        else:
+            gh = self.github_client
+            profile = load_profile()
+
+        all_artifacts = await gh.list_artifacts(github_run_id)
         security_artifacts = [
             a for a in all_artifacts if _is_security_artifact(a.get("name", ""), profile)
         ]
@@ -83,7 +102,7 @@ class SecurityProcessor:
                 await session.commit()
                 await session.refresh(db_artifact)
 
-            await self.process_artifact(db_artifact.id, gh_artifact["id"])
+            await self.process_artifact(db_artifact.id, gh_artifact["id"], gh=gh)
 
     # ------------------------------------------------------------------
     # Internal pipeline
@@ -94,13 +113,15 @@ class SecurityProcessor:
         session: AsyncSession,
         db_artifact_id: int,
         github_artifact_id: int,
+        gh: GitHubClient | None = None,
     ) -> int:
         artifact = await session.get(Artifact, db_artifact_id)
         if artifact is None:
             raise ValueError(f"Artifact {db_artifact_id} not found in database")
 
+        client = gh or self.github_client
         try:
-            files = await self.github_client.fetch_artifact(github_artifact_id)
+            files = await client.fetch_artifact(github_artifact_id)
             db_findings = self._build_findings(files, db_artifact_id)
 
             session.add_all(db_findings)
