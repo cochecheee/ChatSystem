@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
+import { AuthProvider } from './features/auth/AuthContext';
 import { PageChat } from './pages/Chat';
 import { PageOverview } from './pages/Overview';
 import { PagePipelines } from './pages/Pipelines';
@@ -10,7 +11,7 @@ import { PageVulns } from './pages/Vulns';
 
 export default function App() {
   const [active, setActive] = useState<PageId>('overview');
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [openVulnId, setOpenVulnId] = useState<number | undefined>();
   const [vulnCount, setVulnCount] = useState(0);
   const [newCritHighCount, setNewCritHighCount] = useState(0);
@@ -23,9 +24,9 @@ export default function App() {
 
   useEffect(() => {
     const fetchData = () => {
-      api.findings.list({ limit: 200 }).then(f => {
-        setVulnCount(f.length);
-        const critHigh = f.filter(x => x.severity === 'critical' || x.severity === 'high').length;
+      api.stats.overview().then(s => {
+        setVulnCount(s.open);
+        const critHigh = s.critical_high;
         if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
           setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));
         }
@@ -49,17 +50,17 @@ export default function App() {
 
   let page;
   switch (active) {
-    case 'overview':  page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />; break;
-    case 'pipelines': page = <PagePipelines />; break;
-    case 'vulns':     page = <PageVulns initialId={openVulnId} />; break;
-    case 'chat':      page = <PageChat />; break;
-    case 'reports':   page = <PageReports />; break;
-    case 'settings':  page = <PageSettings />; break;
-    default:          page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />;
+    case 'overview':   page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />; break;
+    case 'pipelines':  page = <PagePipelines />; break;
+    case 'vulns':      page = <PageVulns initialId={openVulnId} />; break;
+    case 'chat':       page = <PageChat />; break;
+    case 'reports':    page = <PageReports />; break;
+    case 'settings':   page = <PageSettings />; break;
+    default:           page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />;
   }
 
   return (
-    <>
+    <AuthProvider>
       <div className="app-shell">
         <Sidebar active={active} onNav={onNav} vulnCount={vulnCount} />
         <div className="main">
@@ -74,6 +75,6 @@ export default function App() {
           {page}
         </div>
       </div>
-    </>
+    </AuthProvider>
   );
 }

@@ -1,0 +1,27 @@
+# Artifact profile: default for GitHub Actions CI pipelines that follow the
+# ALOUTE_Spring_Thymeleaf_RCE convention.
+#
+# Used by SecurityProcessor to filter which workflow artifacts contain SAST
+# findings (vs build/metadata artifacts like build-classes, gate1-result-*,
+# run-metadata-*).
+#
+# To add support for a different CI/tool layout, copy this file and reference
+# it via the ARTIFACT_PROFILE env var (or per-Project setting once multi-tenant
+# is wired up in Day 2).
+
+name: github-actions-default
+description: Default GitHub Actions artifact names for the Java Spring SAST pipeline.
+
+# Exact artifact names produced by the pipeline.
+exact_names:
+  - spotbugs-report
+  - semgrep-report
+  - codeql-report
+  - dep-check-report
+  - trivy-report
+  - eslint-report
+
+# Prefix-matched names (run number / SHA appended at runtime).
+# e.g. trivy-image-scan-42, trivy-image-scan-100
+prefixes:
+  - trivy-image-scan-

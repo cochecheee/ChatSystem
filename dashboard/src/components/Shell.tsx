@@ -1,35 +1,48 @@
 import { Icon } from './Icon';
 
-export type PageId = 'overview' | 'pipelines' | 'vulns' | 'chat' | 'reports' | 'settings';
+export type PageId =
+  | 'overview'
+  | 'pipelines'
+  | 'vulns'
+  | 'chat'
+  | 'reports'
+  | 'settings';
 
-const NAV = [
+interface NavItem {
+  id: PageId;
+  label: string;
+  icon: string;
+  count?: number;
+}
+
+const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: 'Workspace', items: [
-      { id: 'overview' as PageId, label: 'Overview', icon: 'dashboard' },
-      { id: 'pipelines' as PageId, label: 'Pipelines', icon: 'pipeline' },
-      { id: 'vulns' as PageId, label: 'Vulnerabilities', icon: 'shield' },
+      { id: 'overview', label: 'Overview', icon: 'dashboard' },
+      { id: 'pipelines', label: 'Pipelines', icon: 'pipeline' },
+      { id: 'vulns', label: 'Vulnerabilities', icon: 'shield' },
     ],
   },
   {
     group: 'Assistant', items: [
-      { id: 'chat' as PageId, label: 'AI Assistant', icon: 'chat' },
+      { id: 'chat', label: 'AI Chat', icon: 'chat' },
     ],
   },
   {
-    group: 'Insight', items: [
-      { id: 'reports' as PageId, label: 'Reports', icon: 'report' },
-      { id: 'settings' as PageId, label: 'Settings', icon: 'settings' },
+    group: 'Admin', items: [
+      { id: 'reports', label: 'Reports', icon: 'report' },
+      { id: 'settings', label: 'Settings', icon: 'settings' },
     ],
   },
 ];
 
 const CRUMB: Record<PageId, string[]> = {
-  overview:  ['Workspace', 'Overview'],
-  pipelines: ['Workspace', 'Pipelines'],
-  vulns:     ['Workspace', 'Vulnerabilities'],
-  chat:      ['Assistant', 'AI Assistant'],
-  reports:   ['Insight', 'Reports'],
-  settings:  ['Insight', 'Settings'],
+  overview:   ['Workspace', 'Overview'],
+  pipelines:  ['Workspace', 'Pipelines'],
+  vulns:      ['Workspace', 'Vulnerabilities'],
+  chat:       ['Assistant', 'AI Assistant'],
+  reports:    ['Admin', 'Reports'],
+  settings:   ['Admin', 'Settings'],
 };
 
 interface SidebarProps {
@@ -51,20 +64,21 @@ export function Sidebar({ active, onNav, vulnCount }: SidebarProps) {
       {NAV.map(group => (
         <div key={group.group}>
           <div className="nav-group-label">{group.group}</div>
-          {group.items.map(it => (
-            <div
-              key={it.id}
-              data-nav={it.id}
-              className={`nav-item${active === it.id ? ' active' : ''}`}
-              onClick={() => onNav(it.id)}
-            >
-              <Icon name={it.icon} className="icon" />
-              <span>{it.label}</span>
-              {it.id === 'vulns' && vulnCount > 0 && (
-                <span className="nav-count">{vulnCount}</span>
-              )}
-            </div>
-          ))}
+          {group.items.map(it => {
+            const count = it.id === 'vulns' && vulnCount > 0 ? vulnCount : it.count;
+            return (
+              <div
+                key={it.id}
+                data-nav={it.id}
+                className={`nav-item${active === it.id ? ' active' : ''}`}
+                onClick={() => onNav(it.id)}
+              >
+                <Icon name={it.icon} className="icon" />
+                <span>{it.label}</span>
+                {count != null && <span className="nav-count">{count}</span>}
+              </div>
+            );
+          })}
         </div>
       ))}
       <div className="sidebar-footer">
@@ -72,7 +86,7 @@ export function Sidebar({ active, onNav, vulnCount }: SidebarProps) {
           <div className="avatar">MT</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="user-chip-name">Minh Tran</div>
-            <div className="user-chip-role">SAST_CICD · admin</div>
+            <div className="user-chip-role">fintrace · admin</div>
           </div>
           <Icon name="chevron_down" size={12} style={{ color: 'var(--fg-3)' }} />
         </div>
@@ -97,7 +111,7 @@ export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, 
       <div className="crumbs">
         {crumbs.map((c, i) => (
           <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {i > 0 && <Icon name="chevron_right" size={12} style={{ color: 'var(--fg-4)' }} />}
+            {i > 0 && <Icon name="chevron_right" size={12} className="sep" />}
             <span className={i === crumbs.length - 1 ? 'current' : ''}>{c}</span>
           </span>
         ))}
@@ -105,7 +119,7 @@ export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, 
       <div className="topbar-right">
         <div className="search-box">
           <Icon name="search" size={14} />
-          <input placeholder="Search vulnerabilities, runs…" readOnly />
+          <input placeholder="Search vulnerabilities, repos, runs…" readOnly />
           <span className="kbd">⌘K</span>
         </div>
         <button className="btn ghost" style={{ padding: 6, position: 'relative' }} onClick={onClearCritHigh}>

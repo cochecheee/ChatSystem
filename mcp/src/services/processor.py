@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.db import AsyncSessionLocal
+from ..core.profiles import ArtifactProfile, load_profile
 from ..models.entities import Artifact, Finding
 from ..models.schemas import compute_dedup_hash
 from .enricher import DataEnricher
@@ -15,28 +16,14 @@ from .normalizer import NormalizerFactory
 
 log = logging.getLogger(__name__)
 
-# Artifact names produced by the SAST CI pipeline that contain security findings.
-# Other artifacts (gate1-result-*, run-metadata-*, build-classes) are
-# metadata/build artifacts and must not be processed as security findings.
-_SECURITY_ARTIFACT_NAMES = frozenset({
-    "spotbugs-report",
-    "semgrep-report",
-    "codeql-report",
-    "dep-check-report",
-    "trivy-report",
-    "eslint-report",
-})
 
-# Prefix-matched names — runs append the run_number, e.g. "trivy-image-scan-42".
-_SECURITY_ARTIFACT_PREFIXES: tuple[str, ...] = (
-    "trivy-image-scan-",
-)
+def _is_security_artifact(name: str, profile: ArtifactProfile | None = None) -> bool:
+    """Check whether a workflow artifact name matches the configured profile.
 
-
-def _is_security_artifact(name: str) -> bool:
-    if name in _SECURITY_ARTIFACT_NAMES:
-        return True
-    return any(name.startswith(p) for p in _SECURITY_ARTIFACT_PREFIXES)
+    The profile is loaded once per process (LRU-cached). Passing an explicit
+    profile is intended for Day 2 (per-`Project` profile lookup).
+    """
+    return (profile or load_profile()).matches(name)
 
 
 class SecurityProcessor:
@@ -75,8 +62,9 @@ class SecurityProcessor:
         from ..models.entities import Artifact as ArtifactModel
 
         all_artifacts = await self.github_client.list_artifacts(github_run_id)
+        profile = load_profile()
         security_artifacts = [
-            a for a in all_artifacts if _is_security_artifact(a.get("name", ""))
+            a for a in all_artifacts if _is_security_artifact(a.get("name", ""), profile)
         ]
         log.info(
             "Run %d: %d/%d artifacts are security-relevant",
