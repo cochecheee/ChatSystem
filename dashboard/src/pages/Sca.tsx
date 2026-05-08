@@ -305,13 +305,16 @@ export function PageSCA() {
             </div>
           </div>
 
-          <div className="filter-toolbar" title="Severity floor (default: high+critical)">
-            <span style={{ fontSize: 10.5, color: 'var(--fg-3)', alignSelf: 'center', marginRight: 4 }}>min</span>
+          <div className="filter-toolbar" title="Hiển thị mọi severity từ mức này trở lên">
+            <span style={{ fontSize: 10.5, color: 'var(--fg-3)', alignSelf: 'center', marginRight: 4 }}>
+              Severity ≥
+            </span>
             {SEV_FLOORS.map(s => (
               <button
                 key={s}
                 className={`tb-pill${sevFloor === s ? ' active' : ''}`}
                 onClick={() => setSevFloor(s)}
+                title={`Show ${s} and above`}
               >
                 {s[0].toUpperCase() + s.slice(1)}
               </button>
