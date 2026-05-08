@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.analysis import router as analysis_router
 from .api.artifacts import router as artifacts_router
 from .api.chat import router as chat_router
+from .api.config import router as config_router
+from .api.stats import router as stats_router
 from .core.config import settings
 from .core.db import init_db
 from .models import entities as _entities  # noqa: F401 — registers ORM models with metadata
@@ -55,6 +57,8 @@ app.add_middleware(
 app.include_router(artifacts_router, tags=["core"])
 app.include_router(analysis_router, tags=["ai"])
 app.include_router(chat_router)
+app.include_router(config_router)
+app.include_router(stats_router)
 
 
 @app.get("/")

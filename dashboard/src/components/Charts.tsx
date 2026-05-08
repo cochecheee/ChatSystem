@@ -67,14 +67,15 @@ export function Donut({ counts, size = 120 }: { counts: Record<string, number>; 
     { k: 'medium', v: counts.medium || 0, c: 'var(--sev-med-fg)' },
     { k: 'low', v: counts.low || 0, c: 'var(--sev-low-fg)' },
   ];
-  const total = data.reduce((s, d) => s + d.v, 0) || 1;
+  const total = data.reduce((s, d) => s + d.v, 0);
+  const denom = total || 1; // avoid div-by-zero khi vẽ arcs
   const r = size / 2 - 10, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
   let acc = 0;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--bg-muted)" strokeWidth="14" />
-      {data.map((d, i) => {
-        const len = (d.v / total) * C;
+      {total > 0 && data.map((d, i) => {
+        const len = (d.v / denom) * C;
         const dash = `${len} ${C - len}`;
         const offset = -acc;
         acc += len;

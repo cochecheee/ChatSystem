@@ -5,12 +5,11 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import User, create_access_token, get_current_user
 from ..core.db import get_session
-from ..models.entities import Finding
+from ..repositories import FindingRepository
 from ..models.schemas import (
     CommandRequest,
     CommandResponse,
@@ -61,12 +60,18 @@ async def handle_command(
 
 @router.get("/report")
 async def download_report(
+    project_id: int | None = None,
+    severity: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> Response:
     if current_user.role not in COMMAND_ROLES["report"]:
         raise HTTPException(status_code=403, detail="Không đủ quyền truy cập báo cáo.")
-    html_content = await report_service.generate_html(db)
+    html_content = await report_service.generate_html(
+        db,
+        project_id=project_id,
+        severity=severity,
+    )
     return Response(
         content=html_content,
         media_type="text/html",
@@ -132,9 +137,10 @@ def _suggested_command(text: str) -> str | None:
 
 async def _build_context(db: AsyncSession, finding_id: int | None) -> str:
     parts: list[str] = []
+    repo = FindingRepository(db)
 
     if finding_id is not None:
-        f = await db.get(Finding, finding_id)
+        f = await repo.get(finding_id)
         if f:
             parts.append(
                 f"Finding hiện tại: #{f.id} | tool={f.tool} | rule={f.rule_id} | "
@@ -143,13 +149,7 @@ async def _build_context(db: AsyncSession, finding_id: int | None) -> str:
             )
 
     # Top recent critical/high findings (no JWT info; just stats)
-    result = await db.execute(
-        select(Finding)
-        .where(Finding.severity.in_(["critical", "high"]))
-        .order_by(Finding.id.desc())
-        .limit(5)
-    )
-    recent = list(result.scalars().all())
+    recent = await repo.list_recent_critical(limit=5)
     if recent:
         lines = [
             f"  - #{f.id} [{f.severity}] {f.tool}/{f.rule_id} ({f.file_path})"
@@ -186,6 +186,17 @@ async def chat_message(
             )
 
     return ChatMessageResponse(reply=reply, suggested_command=suggested)
+
+
+class AuthMeResponse(BaseModel):
+    username: str
+    role: str
+
+
+@router.get("/auth/me", response_model=AuthMeResponse, tags=["auth"])
+async def auth_me(current_user: User = Depends(get_current_user)) -> AuthMeResponse:
+    """Validate JWT và trả về user info. Frontend dùng sau reload để check token còn valid."""
+    return AuthMeResponse(username=current_user.username, role=current_user.role)
 
 
 @router.post("/auth/token", response_model=TokenResponse, tags=["auth"])

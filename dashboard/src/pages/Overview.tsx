@@ -3,6 +3,8 @@ import { api } from '../api/client';
 import { AreaTrend, Donut, Heatmap, Sparkline } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { PageId } from '../components/Shell';
+import { useRuns } from '../features/pipelines/useRuns';
+import { usePolling } from '../hooks/usePolling';
 import type { Finding, WorkflowRun } from '../types';
 import type { Project } from '../types';
 
@@ -44,33 +46,68 @@ function timeAgo(iso: string) {
 }
 
 export function PageOverview({ onNav, onOpenVuln }: Props) {
-  const [findings, setFindings] = useState<Finding[]>([]);
-  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const { runs } = useRuns(undefined, 60_000);
   const [projects, setProjects] = useState<Project[]>([]);
   const [healthy, setHealthy] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
-    api.findings.list({ limit: 200 }).then(setFindings).catch(() => {});
-    api.github.runs().then(setRuns).catch(() => {});
-    api.projects.list().then(setProjects).catch(() => {});
+  // Latest scan stats từ BE — pick run mới nhất CÓ findings trong DB (không phải latest GitHub run).
+  const [latestStats, setLatestStats] = useState<{
+    run_id: number | null;
+    run_number: number | null;
+    head_branch: string | null;
+    created_at: string | null;
+    scanned_at: string | null;
+    total: number;
+    critical_high: number;
+    ai_analyzed: number;
+    ai_analyzed_pct: number;
+    by_severity: Record<string, number>;
+    by_status: Record<string, number>;
+    by_tool: Record<string, number>;
+  } | null>(null);
+  const [latestFindings, setLatestFindings] = useState<Finding[]>([]);
+  const [loadingFindings, setLoadingFindings] = useState(false);
 
-    const id = setInterval(() => {
-      api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
-      api.findings.list({ limit: 200 }).then(setFindings).catch(() => {});
-      api.github.runs().then(setRuns).catch(() => {});
-    }, 60_000);
+  // Poll latest scan stats every 60s.
+  useEffect(() => {
+    const fetch = () => {
+      api.stats.latestScan().then(setLatestStats).catch(() => {});
+    };
+    fetch();
+    const id = setInterval(fetch, 60_000);
     return () => clearInterval(id);
   }, []);
 
-  const counts = findings.reduce(
-    (acc, f) => { acc[f.severity] = (acc[f.severity] || 0) + 1; return acc; },
-    {} as Record<string, number>
-  );
-  const critHigh = (counts.critical || 0) + (counts.high || 0);
-  const passRate = runs.length ? Math.round(runs.filter(r => r.conclusion === 'success').length / runs.length * 100) : 0;
+  // Lazy-load full findings list của latest run (cho recent crit/high + top rules).
+  useEffect(() => {
+    if (!latestStats?.run_id) {
+      setLatestFindings([]);
+      return;
+    }
+    setLoadingFindings(true);
+    api.github.runFindings(latestStats.run_id)
+      .then(f => { setLatestFindings(f); setLoadingFindings(false); })
+      .catch(() => setLoadingFindings(false));
+  }, [latestStats?.run_id]);
 
-  const recentCritHigh = findings
+  usePolling(() => {
+    api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
+  }, 60_000);
+
+  useEffect(() => {
+    api.projects.list().then(setProjects).catch(() => {});
+  }, []);
+
+  const counts = latestStats?.by_severity ?? {};
+  const total = latestStats?.total ?? 0;
+  const critHigh = latestStats?.critical_high ?? 0;
+  const aiAnalyzed = latestStats?.ai_analyzed ?? 0;
+  const aiAnalyzedPct = latestStats?.ai_analyzed_pct ?? 0;
+  const passRate = runs.length
+    ? Math.round(runs.filter(r => r.conclusion === 'success').length / runs.length * 100)
+    : 0;
+
+  const recentCritHigh = latestFindings
     .filter(f => f.severity === 'critical' || f.severity === 'high')
     .sort((a, b) => {
       if (a.severity !== b.severity) return a.severity === 'critical' ? -1 : 1;
@@ -79,12 +116,18 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
     .slice(0, 5);
 
   const topRules = Object.entries(
-    findings.reduce((acc, f) => { acc[f.rule_id] = (acc[f.rule_id] || 0) + 1; return acc; }, {} as Record<string, number>)
-  ).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([rule, count]) => ({
-    rule,
-    count,
-    sev: findings.find(f => f.rule_id === rule)?.severity ?? 'info',
-  }));
+    latestFindings.reduce(
+      (acc, f) => { acc[f.rule_id] = (acc[f.rule_id] || 0) + 1; return acc; },
+      {} as Record<string, number>,
+    ),
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([rule, count]) => ({
+      rule,
+      count,
+      sev: latestFindings.find(f => f.rule_id === rule)?.severity ?? 'info',
+    }));
   const maxRuleCount = Math.max(1, ...topRules.map(r => r.count));
 
   return (
@@ -97,11 +140,35 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
               width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
               background: healthy === true ? 'var(--sev-low-fg)' : healthy === false ? 'var(--sev-crit-fg)' : 'var(--fg-4)',
             }} />
-            {projects.map(p => p.name).join(', ') || 'Loading…'} · auto-refresh every 60s
+            {projects.length > 0 ? projects.map(p => p.name).join(', ') : 'No projects connected'}
+            {latestStats?.run_id && (
+              <>
+                <span className="muted">·</span>
+                <span>
+                  Latest scan:{' '}
+                  {latestStats.run_number ? (
+                    <>
+                      <span className="mono">#{latestStats.run_number}</span>
+                      {latestStats.head_branch && (
+                        <> on <span className="mono">{latestStats.head_branch}</span></>
+                      )}
+                      {latestStats.created_at && <> ({timeAgo(latestStats.created_at)})</>}
+                    </>
+                  ) : latestStats.scanned_at ? (
+                    <>
+                      <span className="mono">run {latestStats.run_id}</span>
+                      {' '}({timeAgo(latestStats.scanned_at)})
+                    </>
+                  ) : (
+                    <span className="mono">run {latestStats.run_id}</span>
+                  )}
+                </span>
+              </>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn">
+          <button className="btn" onClick={() => onNav('reports')}>
             <Icon name="download" /> Export
           </button>
           <button className="btn primary" onClick={() => onNav('chat')}>
@@ -112,9 +179,9 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
 
       <div className="kpi-grid">
         {[
-          { label: 'Open findings', value: findings.length, delta: `${critHigh} critical/high`, cls: critHigh > 0 ? 'kpi-delta-up' : 'muted', spark: SPARKS.new },
+          { label: 'Findings (latest scan)', value: loadingFindings ? '…' : total, delta: `${critHigh} critical/high`, cls: critHigh > 0 ? 'kpi-delta-up' : 'muted', spark: SPARKS.new },
           { label: 'Critical & High', value: critHigh, delta: critHigh > 0 ? 'Needs attention' : 'All clear', cls: critHigh > 0 ? 'kpi-delta-up' : 'kpi-delta-down', spark: SPARKS.crit },
-          { label: 'AI analyzed', value: findings.filter(f => f.status === 'ai_analyzed').length, delta: `of ${findings.length} findings`, cls: 'muted', spark: SPARKS.fix },
+          { label: 'AI analyzed', value: aiAnalyzed, delta: total > 0 ? `${aiAnalyzedPct}% of ${total}` : '—', cls: 'muted', spark: SPARKS.fix },
           { label: 'Pipeline runs', value: runs.length, delta: `${passRate}% pass rate`, cls: passRate >= 80 ? 'kpi-delta-down' : 'kpi-delta-up', spark: SPARKS.pipe },
         ].map((k, i) => (
           <div className="kpi" key={i}>

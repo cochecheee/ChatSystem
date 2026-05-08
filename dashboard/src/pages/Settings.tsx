@@ -4,20 +4,67 @@ import { AlertBanner } from '../components/AlertBanner';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import { StatusDot } from '../components/StatusDot';
+import { useAppConfig } from '../features/config/useAppConfig';
+import { useAuth } from '../features/auth/AuthContext';
+import type { AiConfig, GatesConfig, SastToolsConfig } from '../features/config/useAppConfig';
 import type { Project } from '../types';
 
-function ToggleRow({ label, sub, on }: { label: string; sub: string; on: boolean }) {
+interface IntegrationsInfo {
+  github: { configured: boolean; owner: string | null; repo: string | null; polling_interval_seconds: number };
+  gemini: { configured: boolean; model: string };
+  ci_ingest: { api_key_required: boolean; webhook_token_required: boolean };
+}
+
+interface ToggleRowProps {
+  label: string;
+  sub: string;
+  on: boolean;
+  onChange?: (next: boolean) => void;
+  disabled?: boolean;
+}
+
+function ToggleRow({ label, sub, on, onChange, disabled }: ToggleRowProps) {
   const [checked, setChecked] = useState(on);
+  // Sync khi parent thay đổi (config load xong sau mount).
+  useEffect(() => { setChecked(on); }, [on]);
+  const handleClick = () => {
+    if (disabled) return;
+    const next = !checked;
+    setChecked(next);
+    onChange?.(next);
+  };
   return (
-    <div className="toggle-row">
+    <div className="toggle-row" style={disabled ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}>
       <div>
         <div className="tog-label">{label}</div>
         <div className="tog-sub">{sub}</div>
       </div>
-      <div className={`switch${checked ? ' on' : ''}`} onClick={() => setChecked(c => !c)} />
+      <div className={`switch${checked ? ' on' : ''}`} onClick={handleClick} />
     </div>
   );
 }
+
+const SAST_TOOLS: { key: keyof SastToolsConfig; label: string; sub: string }[] = [
+  { key: 'semgrep',          label: 'Semgrep',          sub: 'Static analysis — Java, JS/TS, Python' },
+  { key: 'codeql',           label: 'CodeQL',           sub: 'Deep semantic analysis — Java, JS' },
+  { key: 'spotbugs',         label: 'SpotBugs',         sub: 'Bytecode analysis — Java' },
+  { key: 'eslint',           label: 'ESLint SARIF',     sub: 'Lint + security rules — JS/TS' },
+  { key: 'dependency_check', label: 'OWASP Dep-Check',  sub: 'Dependency vulnerabilities' },
+  { key: 'trivy',            label: 'Trivy',            sub: 'Container & filesystem scan' },
+];
+
+const GATES: { key: keyof Omit<GatesConfig, 'min_cvss_score'>; label: string; sub: string }[] = [
+  { key: 'block_on_critical',   label: 'Block on critical',   sub: 'Fail pipeline nếu có finding critical' },
+  { key: 'block_on_high',       label: 'Block on high',       sub: 'Fail pipeline nếu có finding high' },
+  { key: 'block_on_secrets',    label: 'Block on secrets',    sub: 'Fail nếu phát hiện secrets/credentials' },
+  { key: 'require_ai_analysis', label: 'Require AI analysis', sub: 'Bắt buộc finding nghiêm trọng phải được AI phân tích trước khi merge' },
+];
+
+const AI_TOGGLES: { key: keyof Omit<AiConfig, 'model' | 'max_findings_per_run'>; label: string; sub: string }[] = [
+  { key: 'auto_analyze_critical',  label: 'Auto-analyze critical',  sub: 'Tự động AI phân tích finding critical khi tạo' },
+  { key: 'auto_analyze_high',      label: 'Auto-analyze high',      sub: 'Tự động AI phân tích finding high (tốn token nhiều hơn)' },
+  { key: 'include_source_context', label: 'Include source context', sub: 'Fetch source code từ GitHub kèm vào prompt' },
+];
 
 function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
   const [name, setName] = useState('');
@@ -87,6 +134,10 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
 export function PageSettings() {
   const [health, setHealth] = useState<'ok' | 'error' | 'checking'>('checking');
   const [projects, setProjects] = useState<Project[]>([]);
+  const { config, update } = useAppConfig();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [configError, setConfigError] = useState<string>('');
 
   useEffect(() => {
     api.health()
@@ -95,6 +146,62 @@ export function PageSettings() {
     api.projects.list()
       .then(setProjects)
       .catch(() => {});
+  }, []);
+
+  const requireAdmin = () => {
+    if (!isAdmin) {
+      setConfigError('Chỉ admin mới được sửa config — đăng nhập với role admin ở Chat tab.');
+      return false;
+    }
+    return true;
+  };
+
+  const toggleTool = async (key: keyof SastToolsConfig, next: boolean) => {
+    if (!requireAdmin()) return;
+    try {
+      const current = config.sast_tools ?? ({} as SastToolsConfig);
+      await update('sast_tools', { ...current, [key]: next });
+      setConfigError('');
+    } catch (e) {
+      setConfigError(`Lưu thất bại: ${e}`);
+    }
+  };
+
+  const toggleGate = async (key: keyof GatesConfig, next: boolean) => {
+    if (!requireAdmin()) return;
+    try {
+      const current = config.gates ?? ({} as GatesConfig);
+      await update('gates', { ...current, [key]: next });
+      setConfigError('');
+    } catch (e) {
+      setConfigError(`Lưu thất bại: ${e}`);
+    }
+  };
+
+  const toggleAi = async (key: keyof AiConfig, next: boolean) => {
+    if (!requireAdmin()) return;
+    try {
+      const current = config.ai ?? ({} as AiConfig);
+      await update('ai', { ...current, [key]: next });
+      setConfigError('');
+    } catch (e) {
+      setConfigError(`Lưu thất bại: ${e}`);
+    }
+  };
+
+  const handleDeleteProject = async (id: number, name: string) => {
+    if (!confirm(`Xoá project "${name}"? Tất cả artifacts và findings sẽ mất.`)) return;
+    try {
+      await api.projects.delete(id);
+      setProjects(prev => prev.filter(p => p.id !== id));
+    } catch (e) {
+      setConfigError(`Xoá thất bại: ${e}`);
+    }
+  };
+
+  const [integrations, setIntegrations] = useState<IntegrationsInfo | null>(null);
+  useEffect(() => {
+    api.config.integrations().then(setIntegrations).catch(() => {});
   }, []);
 
   const refreshHealth = () => {
@@ -134,38 +241,117 @@ export function PageSettings() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div>
           <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header"><div className="h3">SAST Tools</div></div>
-            {[
-              { label: 'Semgrep', sub: 'Static analysis — Java, JS/TS, Python' },
-              { label: 'CodeQL', sub: 'Deep semantic analysis — Java, JS' },
-              { label: 'SpotBugs', sub: 'Bytecode analysis — Java' },
-              { label: 'ESLint SARIF', sub: 'Lint + security rules — JS/TS' },
-              { label: 'OWASP Dep-Check', sub: 'Dependency vulnerabilities' },
-              { label: 'Trivy', sub: 'Container & filesystem scan' },
-            ].map(t => <ToggleRow key={t.label} label={t.label} sub={t.sub} on={true} />)}
+            <div className="card-header">
+              <div className="h3">SAST Tools</div>
+              {!isAdmin && <span className="muted" style={{ fontSize: 11 }}>read-only · admin login required</span>}
+            </div>
+            {configError && (
+              <div style={{ padding: '0 16px 8px' }}>
+                <AlertBanner type="error" message={configError} onDismiss={() => setConfigError('')} />
+              </div>
+            )}
+            {SAST_TOOLS.map(t => (
+              <ToggleRow
+                key={t.key}
+                label={t.label}
+                sub={t.sub}
+                on={config.sast_tools?.[t.key] ?? true}
+                onChange={(next) => toggleTool(t.key, next)}
+                disabled={!isAdmin}
+              />
+            ))}
           </div>
 
           <div className="card">
-            <div className="card-header"><div className="h3">Security Gates</div></div>
-            {[
-              { label: 'Gate 1 — SARIF threshold', sub: 'Fail if critical > 0 or high > 3' },
-              { label: 'Gate 2 — SonarCloud QG', sub: 'Quality gate must pass' },
-              { label: 'Gate 3 — Branch protection', sub: 'Require all status checks' },
-            ].map(t => <ToggleRow key={t.label} label={t.label} sub={t.sub} on={true} />)}
+            <div className="card-header">
+              <div className="h3">Security Gates</div>
+              {!isAdmin && <span className="muted" style={{ fontSize: 11 }}>read-only</span>}
+            </div>
+            {GATES.map(g => (
+              <ToggleRow
+                key={g.key}
+                label={g.label}
+                sub={g.sub}
+                on={config.gates?.[g.key] ?? false}
+                onChange={(next) => toggleGate(g.key, next)}
+                disabled={!isAdmin}
+              />
+            ))}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>
+              <div className="tog-label" style={{ marginBottom: 4 }}>Min CVSS score gate</div>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.1}
+                disabled={!isAdmin}
+                value={config.gates?.min_cvss_score ?? 7.0}
+                onChange={async (e) => {
+                  if (!requireAdmin()) return;
+                  const v = parseFloat(e.target.value);
+                  if (isNaN(v)) return;
+                  try {
+                    const current = config.gates ?? ({} as GatesConfig);
+                    await update('gates', { ...current, min_cvss_score: v });
+                  } catch (err) { setConfigError(`Lưu thất bại: ${err}`); }
+                }}
+                style={{
+                  width: 80, padding: '4px 8px', background: 'var(--surface-2)',
+                  border: '1px solid var(--line)', borderRadius: 4, color: 'var(--fg)',
+                  fontSize: 12, outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>fail nếu CVSS ≥ giá trị này</span>
+            </div>
           </div>
         </div>
 
         <div>
           <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header"><div className="h3">AI Analysis</div></div>
-            {[
-              { label: 'Auto-analyze on webhook', sub: 'Analyze new findings automatically' },
-              { label: 'Vietnamese responses', sub: 'Explanation & remediation in Vietnamese' },
-              { label: 'Remediation diff', sub: 'Generate unified diff for each finding' },
-            ].map(t => <ToggleRow key={t.label} label={t.label} sub={t.sub} on={true} />)}
-            <div style={{ padding: '12px 16px' }}>
+            <div className="card-header">
+              <div className="h3">AI Analysis</div>
+              {!isAdmin && <span className="muted" style={{ fontSize: 11 }}>read-only</span>}
+            </div>
+            {AI_TOGGLES.map(t => (
+              <ToggleRow
+                key={t.key}
+                label={t.label}
+                sub={t.sub}
+                on={config.ai?.[t.key] ?? false}
+                onChange={(next) => toggleAi(t.key, next)}
+                disabled={!isAdmin}
+              />
+            ))}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>
               <div className="tog-label" style={{ marginBottom: 4 }}>Gemini Model</div>
-              <div className="tool-tag">gemini-2.5-flash</div>
+              <div className="tool-tag">{config.ai?.model ?? 'gemini-3.1-pro-preview'}</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                Cấu hình qua env <span className="mono">GEMINI_MODEL</span>
+              </div>
+            </div>
+            <div style={{ padding: '0 16px 12px' }}>
+              <div className="tog-label" style={{ marginBottom: 4 }}>Max findings per run</div>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                disabled={!isAdmin}
+                value={config.ai?.max_findings_per_run ?? 50}
+                onChange={async (e) => {
+                  if (!requireAdmin()) return;
+                  const v = parseInt(e.target.value, 10);
+                  if (isNaN(v)) return;
+                  try {
+                    const current = config.ai ?? ({} as AiConfig);
+                    await update('ai', { ...current, max_findings_per_run: v });
+                  } catch (err) { setConfigError(`Lưu thất bại: ${err}`); }
+                }}
+                style={{
+                  width: 80, padding: '4px 8px', background: 'var(--surface-2)',
+                  border: '1px solid var(--line)', borderRadius: 4, color: 'var(--fg)',
+                  fontSize: 12, outline: 'none', fontFamily: 'inherit',
+                }}
+              />
             </div>
           </div>
 
@@ -191,6 +377,14 @@ export function PageSettings() {
                     )}
                   </div>
                   <span className="chip dot status-passed" style={{ fontSize: 10 }}>active</span>
+                  <button
+                    className="btn ghost sm"
+                    style={{ padding: '4px 8px', fontSize: 11 }}
+                    onClick={() => handleDeleteProject(p.id, p.name)}
+                    title="Xoá project (cascade artifacts/findings)"
+                  >
+                    <Icon name="trash" size={12} />
+                  </button>
                 </div>
               ))
             )}
@@ -198,24 +392,60 @@ export function PageSettings() {
           </div>
 
           <div className="card">
-            <div className="card-header"><div className="h3">Integration</div></div>
+            <div className="card-header"><div className="h3">Integrations</div></div>
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[
-                { k: 'MCP Gateway', v: import.meta.env.VITE_API_URL ?? 'http://localhost:8000', icon: 'link' },
-                { k: 'GitHub Repo', v: projects[0]?.github_url?.replace('https://github.com/', '') ?? '—', icon: 'github' },
-                { k: 'Webhook', v: '/webhook/pipeline-complete', icon: 'branch' },
-              ].map(r => (
-                <div key={r.k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Icon name={r.icon} size={14} style={{ color: 'var(--fg-3)' }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>{r.k}</div>
-                    <div className="mono" style={{ fontSize: 12 }}>{r.v}</div>
-                  </div>
-                  <span className={`chip dot ${health === 'ok' ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
-                    {health === 'ok' ? 'active' : 'down'}
-                  </span>
+              {/* MCP Gateway */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon name="link" size={14} style={{ color: 'var(--fg-3)' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>MCP Gateway</div>
+                  <div className="mono" style={{ fontSize: 12 }}>{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</div>
                 </div>
-              ))}
+                <span className={`chip dot ${health === 'ok' ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
+                  {health === 'ok' ? 'active' : 'down'}
+                </span>
+              </div>
+              {/* GitHub */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon name="github" size={14} style={{ color: 'var(--fg-3)' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>GitHub</div>
+                  <div className="mono" style={{ fontSize: 12 }}>
+                    {integrations?.github.configured
+                      ? `${integrations.github.owner}/${integrations.github.repo} · poll ${integrations.github.polling_interval_seconds}s`
+                      : 'not configured'}
+                  </div>
+                </div>
+                <span className={`chip dot ${integrations?.github.configured ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
+                  {integrations?.github.configured ? 'active' : 'missing'}
+                </span>
+              </div>
+              {/* Gemini */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon name="brain" size={14} style={{ color: 'var(--fg-3)' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>Gemini AI</div>
+                  <div className="mono" style={{ fontSize: 12 }}>
+                    {integrations?.gemini.configured ? integrations.gemini.model : 'no API key'}
+                  </div>
+                </div>
+                <span className={`chip dot ${integrations?.gemini.configured ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
+                  {integrations?.gemini.configured ? 'active' : 'missing'}
+                </span>
+              </div>
+              {/* CI ingest */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon name="branch" size={14} style={{ color: 'var(--fg-3)' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>CI Ingest (webhook + artifact)</div>
+                  <div className="mono" style={{ fontSize: 12 }}>
+                    {integrations
+                      ? `webhook auth: ${integrations.ci_ingest.webhook_token_required ? 'on' : 'off'} · api-key: ${integrations.ci_ingest.api_key_required ? 'on' : 'off'}`
+                      : '—'}
+                  </div>
+                </div>
+                <span className="chip dot status-info" style={{ fontSize: 10 }}>configured</span>
+              </div>
             </div>
           </div>
         </div>

@@ -1,48 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import type { FindingListParams } from '../api/client';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { useOverviewStats } from '../features/findings/useStats';
 import type { AnalysisResult, Finding, Project } from '../types';
-import { SEVERITY_ORDER } from '../types';
 
-// Dependency-scanner tools — findings from these are CVE/package-update type
-const DEP_SCAN_TOOLS = new Set(['trivy', 'dep-check', 'dependency-check', 'snyk', 'owasp-dep-check', 'owasp-dependency-check', 'grype']);
+// Dependency-scanner tools — findings from these are CVE/package-update type.
+// MUST khớp với DEPS_TOOLS ở backend (repositories/finding_repo.py) để filter category=sast|deps đúng.
+const DEP_SCAN_TOOLS = new Set(['trivy', 'dep-check', 'dependency-check', 'snyk', 'owasp-dep-check', 'owasp-dependency-check', 'grype', 'trivy-deps']);
 function isDepScan(tool: string) {
-  return DEP_SCAN_TOOLS.has(tool.toLowerCase()) || tool.toLowerCase().includes('dep');
+  return DEP_SCAN_TOOLS.has(tool.toLowerCase());
 }
+
+const PAGE_SIZE = 100;
 
 // Extract package metadata from raw_data (field names vary by tool)
 function pkgMeta(f: Finding) {
   const d = f.raw_data ?? {};
-  const name = (d.PkgName ?? d.package_name ?? d.packageName ?? d.component ?? '') as string;
+  const name = (d.PkgName ?? d.pkg_name ?? d.package_name ?? d.packageName ?? d.component ?? '') as string;
   const current = (d.InstalledVersion ?? d.installed_version ?? d.current_version ?? d.version ?? '') as string;
   const fixed = (d.FixedVersion ?? d.fixed_version ?? d.fix_version ?? d.patchedVersions ?? '') as string;
   const cveId = (d.VulnerabilityID ?? d.vulnerability_id ?? '') as string || (f.rule_id.match(/^(CVE|GHSA|PRISMA|SNYK)-/i) ? f.rule_id : '');
   return { name, current, fixed, cveId };
-}
-
-function upgradeCmd(f: Finding): string | null {
-  const { name, fixed } = pkgMeta(f);
-  if (!name || !fixed) return null;
-  const manifest = f.file_path.split('/').pop() ?? '';
-  if (manifest.includes('package.json') || manifest.includes('package-lock')) {
-    return `npm install ${name}@${fixed}`;
-  }
-  if (
-    manifest.includes('requirements') ||
-    manifest.includes('Pipfile') ||
-    manifest.endsWith('.txt')
-  ) {
-    return `pip install ${name}==${fixed}`;
-  }
-  if (
-    manifest.endsWith('.gradle') ||
-    manifest.endsWith('pom.xml') ||
-    manifest.endsWith('.jar')
-  ) {
-    return `# Update ${name} to ${fixed} in your build file`;
-  }
-  return `# Upgrade ${name} to ${fixed}`;
 }
 
 function SevChip({ sev }: { sev: string }) {
@@ -110,73 +90,6 @@ function CveUpdateCard({ finding }: { finding: Finding }) {
           {finding.cvss_score != null && (
             <span className="chip" style={{ fontSize: 11 }}>CVSS {finding.cvss_score}</span>
           )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CveSummaryPanel({ findings }: { findings: Finding[] }) {
-  const total = findings.length;
-  const bySev = findings.reduce(
-    (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
-    {} as Record<string, number>
-  );
-
-  // Top 10 packages by CVE count
-  const pkgCounts: Record<string, number> = {};
-  for (const f of findings) {
-    const { name } = pkgMeta(f);
-    if (name) pkgCounts[name] = (pkgCounts[name] ?? 0) + 1;
-  }
-  const top10 = Object.entries(pkgCounts)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 10);
-
-  return (
-    <div style={{
-      background: 'var(--bg-muted)',
-      border: '1px solid var(--border)',
-      borderRadius: 6,
-      padding: '10px 14px',
-      marginBottom: 10,
-    }}>
-      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
-        {total} {total === 1 ? 'vulnerability' : 'vulnerabilities'} found
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: top10.length > 0 ? 8 : 0 }}>
-        {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
-          const cnt = bySev[sev] ?? 0;
-          if (cnt === 0) return null;
-          return <SevChip key={sev} sev={sev} />;
-        })}
-        {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
-          const cnt = bySev[sev] ?? 0;
-          if (cnt === 0) return null;
-          return (
-            <span key={`cnt-${sev}`} style={{ fontSize: 11, alignSelf: 'center', color: 'var(--fg-2)' }}>
-              {sev[0].toUpperCase() + sev.slice(1)}: {cnt}
-            </span>
-          );
-        })}
-      </div>
-      {top10.length > 0 && (
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>
-            Top affected packages
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {top10.map(([pkg, count]) => (
-              <span
-                key={pkg}
-                className="chip"
-                style={{ fontSize: 10 }}
-                title={`${count} CVE${count > 1 ? 's' : ''}`}
-              >
-                {pkg} ({count})
-              </span>
-            ))}
-          </div>
         </div>
       )}
     </div>
@@ -488,10 +401,12 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
 }
 
 export function PageVulns({ initialId }: { initialId?: number }) {
+  // Vulns page = SAST findings only. Dependencies → SCA page.
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'sast' | 'deps'>('sast');
   const [projectFilter, setProjectFilter] = useState<number | 'all'>('all');
   const [sevFilter, setSevFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -501,24 +416,56 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [showAI, setShowAI] = useState(true);
 
+  const { stats } = useOverviewStats(60_000);
+
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => {});
   }, []);
 
+  const buildParams = (override: Partial<FindingListParams> = {}): FindingListParams => {
+    const params: FindingListParams = {
+      limit: PAGE_SIZE,
+      skip: page * PAGE_SIZE,
+      category: 'sast',
+      ...override,
+    };
+    if (projectFilter !== 'all') params.project_id = projectFilter as number;
+    if (sevFilter !== 'all') params.severity = sevFilter;
+    if (toolFilter !== 'all') params.tool = toolFilter;
+    if (statusFilter !== 'all') {
+      const map: Record<string, string> = {
+        pending: 'pending_review',
+        analyzed: 'ai_analyzed',
+        approved: 'APPROVED',
+        revoked: 'REVOKED',
+      };
+      if (map[statusFilter]) params.status = map[statusFilter];
+    }
+    if (search.trim()) params.q = search.trim();
+    return params;
+  };
+
+  useEffect(() => {
+    setPage(0);
+  }, [projectFilter, sevFilter, statusFilter, toolFilter, search]);
+
   useEffect(() => {
     setLoading(true);
-    const params: Parameters<typeof api.findings.list>[0] = { limit: 500 };
-    if (projectFilter !== 'all') params.project_id = projectFilter as number;
-    api.findings.list(params)
-      .then(f => { setFindings(f); setLoading(false); })
+    api.findings.listWithTotal(buildParams())
+      .then(({ data, total: t }) => {
+        setFindings(data);
+        setTotal(t);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
     const id = setInterval(() => {
-      const p: Parameters<typeof api.findings.list>[0] = { limit: 500 };
-      if (projectFilter !== 'all') p.project_id = projectFilter as number;
-      api.findings.list(p).then(setFindings).catch(() => {});
+      api.findings.listWithTotal(buildParams())
+        .then(({ data, total: t }) => { setFindings(data); setTotal(t); })
+        .catch(() => {});
     }, 30_000);
     return () => clearInterval(id);
-  }, [projectFilter]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, projectFilter, sevFilter, statusFilter, toolFilter, search]);
 
   useEffect(() => { if (initialId != null) setSelectedId(initialId); }, [initialId]);
 
@@ -535,77 +482,44 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  // Split findings by type
-  const sastFindings = findings.filter(f => !isDepScan(f.tool));
-  const depFindings  = findings.filter(f =>  isDepScan(f.tool));
-  const activePool   = viewMode === 'sast' ? sastFindings : depFindings;
+  // Total SAST findings từ server stats (across all severity/status filter).
+  let sastTotal = 0;
+  for (const [tool, count] of Object.entries(stats?.by_tool ?? {})) {
+    if (!DEP_SCAN_TOOLS.has(tool.toLowerCase())) sastTotal += count;
+  }
 
-  const tools = Array.from(new Set(activePool.map(f => f.tool))).sort();
-  const sevCounts = activePool.reduce(
+  // Tools dropdown: chỉ SAST tools.
+  const tools = Object.keys(stats?.by_tool ?? {})
+    .filter(t => !DEP_SCAN_TOOLS.has(t.toLowerCase()))
+    .sort();
+
+  // Severity counts cho summary bar — derive từ current page (sample).
+  // Khi total > PAGE_SIZE và filter sev='all', đây là sample chứ không phải full;
+  // nhưng trong practice user filter từng severity nên numbers phản ánh đúng phạm vi đang xem.
+  const sevCounts = findings.reduce(
     (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
-    {} as Record<string, number>
-  );
-  // Dep tab: also count by package manifest file for grouping hint
-  const depSevCounts = depFindings.reduce(
-    (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
-    {} as Record<string, number>
+    {} as Record<string, number>,
   );
 
-  const filtered = activePool
-    .filter(f => {
-      if (sevFilter !== 'all' && f.severity !== sevFilter) return false;
-      if (toolFilter !== 'all' && f.tool !== toolFilter) return false;
-      if (statusFilter === 'pending'  && f.status !== 'pending_review') return false;
-      if (statusFilter === 'analyzed' && f.status !== 'ai_analyzed')    return false;
-      if (statusFilter === 'approved' && f.status !== 'APPROVED')       return false;
-      if (statusFilter === 'revoked'  && f.status !== 'REVOKED')        return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (!`${f.message} ${f.file_path} ${f.rule_id} ${f.tool}`.toLowerCase().includes(q)) return false;
-      }
-      return true;
-    })
-    .sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
-
+  const filtered = findings.slice();
   const selected = selectedFinding ?? filtered[0] ?? null;
 
-  // Reset selectedId when switching tabs so a stale selection doesn't show wrong detail
-  const switchTab = (mode: 'sast' | 'deps') => {
-    setViewMode(mode);
-    setSevFilter('all');
-    setStatusFilter('all');
-    setToolFilter('all');
-    setSearch('');
-    setSelectedId(null);
-    setSelectedFinding(null);
-  };
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <div className="vuln-split" style={{ flex: 1, minWidth: 0 }}>
 
         <div className="vuln-list-pane" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Tab switcher */}
-          <div className="tabs" style={{ padding: '0 14px', flexShrink: 0 }}>
-            <button
-              className={`tab${viewMode === 'sast' ? ' active' : ''}`}
-              onClick={() => switchTab('sast')}
-            >
-              Findings
-              <span className="count">{loading ? '…' : sastFindings.length}</span>
-            </button>
-            <button
-              className={`tab${viewMode === 'deps' ? ' active' : ''}`}
-              onClick={() => switchTab('deps')}
-            >
-              Dependencies
-              {!loading && depFindings.length > 0 && (
-                <span className="count" style={
-                  (depSevCounts.critical ?? 0) + (depSevCounts.high ?? 0) > 0
-                    ? { color: 'var(--sev-crit-fg)' } : {}
-                }>{depFindings.length}</span>
-              )}
-            </button>
+          {/* Page header — SAST findings only (dependencies → SCA page) */}
+          <div style={{
+            padding: '14px 16px 10px', borderBottom: '1px solid var(--line)',
+            display: 'flex', alignItems: 'baseline', gap: 10, flexShrink: 0,
+          }}>
+            <h2 className="h2" style={{ margin: 0 }}>SAST findings</h2>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {stats == null ? '…' : `${sastTotal} total`}
+            </span>
           </div>
 
           {/* Project selector */}
@@ -633,18 +547,13 @@ export function PageVulns({ initialId }: { initialId?: number }) {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder={viewMode === 'deps' ? 'Package, CVE, manifest…' : 'Rule, file, message…'}
+                placeholder="Rule, file, message…"
               />
             </div>
           </div>
 
-          {/* CVE summary panel — deps tab only */}
-          {!loading && viewMode === 'deps' && depFindings.length > 0 && (
-            <CveSummaryPanel findings={depFindings} />
-          )}
-
           {/* Severity summary bar */}
-          {!loading && activePool.length > 0 && (
+          {!loading && findings.length > 0 && (
             <div className="sev-summary-bar">
               {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
                 const cnt = sevCounts[sev] ?? 0;
@@ -676,21 +585,10 @@ export function PageVulns({ initialId }: { initialId?: number }) {
 
           {/* Compact filter toolbar */}
           <div className="filter-toolbar">
-            {/* Tool select — only on SAST tab when multiple tools present */}
-            {viewMode === 'sast' && tools.length > 1 && (
+            {tools.length > 1 && (
               <>
                 <select value={toolFilter} onChange={e => setToolFilter(e.target.value)} title="Filter by tool">
                   <option value="all">All tools</option>
-                  {tools.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <span className="tb-sep" />
-              </>
-            )}
-            {/* On deps tab: tool select for scanner (trivy vs dep-check etc) */}
-            {viewMode === 'deps' && tools.length > 1 && (
-              <>
-                <select value={toolFilter} onChange={e => setToolFilter(e.target.value)} title="Scanner">
-                  <option value="all">All scanners</option>
                   {tools.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <span className="tb-sep" />
@@ -707,20 +605,51 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             ))}
           </div>
 
+          {/* Pagination header — chỉ hiển thị khi total > PAGE_SIZE */}
+          {!loading && total > PAGE_SIZE && (
+            <div style={{
+              padding: '6px 14px', borderBottom: '1px solid var(--line)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 11, color: 'var(--fg-3)', flexShrink: 0,
+            }}>
+              <span>
+                Showing <span className="mono">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)}</span>
+                {' '}of <span className="mono">{total}</span>
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  className="btn ghost sm"
+                  style={{ padding: '2px 8px', fontSize: 11 }}
+                  onClick={() => setPage(p => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                >
+                  ← Prev
+                </button>
+                <span style={{ alignSelf: 'center' }}>
+                  {page + 1} / {totalPages}
+                </span>
+                <button
+                  className="btn ghost sm"
+                  style={{ padding: '2px 8px', fontSize: 11 }}
+                  onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                  disabled={page >= totalPages - 1}
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Finding list */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {loading && <div className="empty">Loading…</div>}
             {!loading && filtered.length === 0 && (
               <div className="empty">
-                {activePool.length === 0
-                  ? viewMode === 'deps'
-                    ? 'No dependency vulnerabilities found'
-                    : 'No SAST findings found'
-                  : 'No findings match filters'}
+                {total === 0 ? 'No SAST findings found' : 'No findings match filters'}
               </div>
             )}
 
-            {viewMode === 'sast' && filtered.map(f => (
+            {filtered.map(f => (
               <div
                 key={f.id}
                 data-testid="finding-row"
@@ -743,59 +672,6 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                 </div>
               </div>
             ))}
-
-            {viewMode === 'deps' && filtered.map(f => {
-              const { name, current, fixed, cveId } = pkgMeta(f);
-              const displayName = name || f.file_path.split('/').pop() || f.rule_id;
-              const manifest = f.file_path.split('/').pop() ?? '';
-              return (
-                <div
-                  key={f.id}
-                  data-testid="finding-row"
-                  data-sev={f.severity}
-                  className={`vuln-row dep-row${selectedId === f.id ? ' active' : ''}`}
-                  onClick={() => setSelectedId(f.id)}
-                >
-                  {/* Line 1: severity + package name + CVE ID */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <SevChip sev={f.severity} />
-                    <span className="vuln-row-title" style={{ margin: 0, flex: 1 }}>{displayName}</span>
-                    {cveId && (
-                      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', flexShrink: 0 }}>{cveId}</span>
-                    )}
-                  </div>
-                  {/* Line 2: version arrow + manifest file + status */}
-                  <div className="vuln-row-meta">
-                    {current || fixed ? (
-                      <span className="mono" style={{ fontSize: 10.5 }}>
-                        {current && <span style={{ color: 'var(--sev-crit-fg)' }}>{current}</span>}
-                        {current && fixed && <span style={{ color: 'var(--fg-4)', margin: '0 4px' }}>→</span>}
-                        {fixed && <span style={{ color: 'var(--sev-low-fg)', fontWeight: 600 }}>{fixed}</span>}
-                      </span>
-                    ) : (
-                      <span className="tool-tag">{f.tool}</span>
-                    )}
-                    {manifest && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{manifest}</span>}
-                    {f.status === 'APPROVED' && <span className="row-status-badge approved">OK</span>}
-                    {f.status === 'REVOKED'  && <span className="row-status-badge revoked">Rev</span>}
-                  </div>
-                  {/* Upgrade command chip */}
-                  {(() => {
-                    const cmd = upgradeCmd(f);
-                    return cmd ? (
-                      <span
-                        className="chip"
-                        style={{ fontSize: 10, cursor: 'pointer', fontFamily: 'monospace', userSelect: 'none', marginTop: 4 }}
-                        title="Click to copy upgrade command"
-                        onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(cmd); }}
-                      >
-                        {cmd}
-                      </span>
-                    ) : null;
-                  })()}
-                </div>
-              );
-            })}
           </div>
         </div>
 

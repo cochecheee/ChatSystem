@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getAuthToken, setAuthToken } from '../api/client';
+import { api, getAuthToken } from '../api/client';
+import { useAuth } from '../features/auth/AuthContext';
 import { AlertBanner } from '../components/AlertBanner';
 import { ApprovalDialog } from '../components/modals/ApprovalDialog';
 import { RevokeDialog } from '../components/modals/RevokeDialog';
@@ -22,7 +23,8 @@ function parseCommand(input: string): { cmd: string; args: string[] } {
   return { cmd, args };
 }
 
-function LoginOverlay({ onLogin }: { onLogin: () => void }) {
+function LoginOverlay() {
+  const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('developer');
   const [loading, setLoading] = useState(false);
@@ -32,9 +34,7 @@ function LoginOverlay({ onLogin }: { onLogin: () => void }) {
     if (!username.trim()) { setError('Nhập tên đăng nhập'); return; }
     setLoading(true);
     try {
-      const res = await api.chat.login(username.trim(), role);
-      setAuthToken(res.access_token);
-      onLogin();
+      await login(username.trim(), role);
     } catch (e) {
       setError(String(e));
       setLoading(false);
@@ -103,8 +103,9 @@ export function PageChat() {
     role: 'ai',
     text: 'Xin chào! Mình là Sentinel AI — trợ lý bảo mật của bạn. Bạn có thể chat tự do bằng tiếng Việt, hoặc dùng lệnh nhanh như /explain 5, /scan, /report.',
   }]);
+  const { user, loading: authLoading, logout } = useAuth();
+  const authed = !!user;
   const [input, setInput] = useState('');
-  const [authed, setAuthed] = useState(!!getAuthToken());
   const [approvalId, setApprovalId] = useState<number | null>(null);
   const [revokeId, setRevokeId] = useState<number | null>(null);
   const [cmdStatus, setCmdStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
@@ -252,7 +253,7 @@ export function PageChat() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', position: 'relative' }}>
-      {!authed && <LoginOverlay onLogin={() => setAuthed(true)} />}
+      {!authLoading && !authed && <LoginOverlay />}
 
       <div style={{ padding: '20px 28px 0', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 16 }}>
@@ -264,8 +265,8 @@ export function PageChat() {
             </div>
           </div>
           {authed && (
-            <button className="btn ghost sm" onClick={() => { setAuthToken(null); setAuthed(false); }}>
-              Đăng xuất
+            <button className="btn ghost sm" onClick={logout}>
+              Đăng xuất {user ? `(${user.username})` : ''}
             </button>
           )}
         </div>

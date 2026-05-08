@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.security.api_key import APIKeyHeader
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
@@ -17,6 +16,7 @@ from ..models.schemas import (
     ProjectOut,
     WebhookRunPayload,
 )
+from ..repositories import ArtifactRepository, FindingRepository, ProjectRepository
 from ..services.github_client import GitHubClient
 from ..services.processor import SecurityProcessor
 
@@ -59,17 +59,38 @@ async def create_project(
     body: ProjectCreate,
     session: AsyncSession = Depends(get_session),
 ) -> Project:
-    project = Project(name=body.name, github_url=body.github_url)
-    session.add(project)
-    await session.commit()
-    await session.refresh(project)
-    return project
+    repo = ProjectRepository(session)
+    return await repo.create(name=body.name, github_url=body.github_url)
 
 
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(session: AsyncSession = Depends(get_session)) -> list[Project]:
-    result = await session.execute(select(Project))
-    return list(result.scalars().all())
+    return await ProjectRepository(session).list_all()
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Xoá project + cascade delete artifacts/findings.
+
+    Returns 204 No Content. Returns 404 nếu project không tồn tại.
+    """
+    project_repo = ProjectRepository(session)
+    artifact_repo = ArtifactRepository(session)
+    finding_repo = FindingRepository(session)
+
+    project = await project_repo.get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    artifacts = await artifact_repo.list_for_project(project_id)
+    artifact_ids = [a.id for a in artifacts]
+    await finding_repo.delete_by_artifact_ids(artifact_ids)
+    await artifact_repo.delete_by_ids(artifact_ids)
+    await project_repo.delete(project)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -128,18 +149,16 @@ async def process_artifact(
     session: AsyncSession = Depends(get_session),
     processor: SecurityProcessor = Depends(get_processor),
 ) -> ProcessResponse:
-    project = await session.get(Project, body.project_id)
-    if project is None:
+    project_repo = ProjectRepository(session)
+    if (await project_repo.get(body.project_id)) is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    artifact = Artifact(
+    artifact_repo = ArtifactRepository(session)
+    artifact = await artifact_repo.create(
         github_artifact_id=str(body.github_artifact_id),
         project_id=body.project_id,
         status="pending",
     )
-    session.add(artifact)
-    await session.commit()
-    await session.refresh(artifact)
 
     background_tasks.add_task(
         processor.process_artifact,
@@ -178,16 +197,10 @@ async def webhook_pipeline_complete(
         raise HTTPException(status_code=403, detail="Invalid or missing webhook token")
 
     github_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
-    result = await session.execute(select(Project).where(Project.github_url == github_url))
-    project = result.scalar_one_or_none()
-    if project is None:
-        project = Project(
-            name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
-            github_url=github_url,
-        )
-        session.add(project)
-        await session.commit()
-        await session.refresh(project)
+    project = await ProjectRepository(session).get_or_create_by_github_url(
+        name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
+        github_url=github_url,
+    )
 
     processor = SecurityProcessor(session_factory=AsyncSessionLocal)
     background_tasks.add_task(processor.process_run, project.id, body.run_id)
@@ -201,20 +214,44 @@ async def webhook_pipeline_complete(
 
 @router.get("/findings", response_model=list[FindingOut])
 async def list_findings(
+    response: Response,
     project_id: int | None = None,
     severity: str | None = None,
+    tool: str | None = None,
+    status: str | None = None,
+    category: str | None = None,
+    q: str | None = None,
     skip: int = 0,
     limit: int = 50,
     session: AsyncSession = Depends(get_session),
 ) -> list[Finding]:
-    query = select(Finding).join(Artifact)
-    if project_id is not None:
-        query = query.where(Artifact.project_id == project_id)
-    if severity is not None:
-        query = query.where(Finding.severity == severity)
-    query = query.order_by(Finding.id.desc()).offset(skip).limit(limit)
-    result = await session.execute(query)
-    return list(result.scalars().all())
+    """List findings với filter mở rộng.
+
+    Query params:
+    - project_id: lọc theo project
+    - severity: critical|high|medium|low|info
+    - tool: semgrep|codeql|spotbugs|eslint|trivy|dependency-check|...
+    - status: pending_review|ai_analyzed|APPROVED|REVOKED
+    - category: sast | deps  (deps = trivy + dependency-check; sast = các tool còn lại)
+    - q: search trong message / file_path / rule_id (LIKE %q%, case-insensitive)
+    - skip / limit: pagination
+
+    Response headers:
+    - X-Total-Count: tổng số findings match filter (trước khi apply skip/limit)
+    """
+    repo = FindingRepository(session)
+    filter_kwargs = dict(
+        project_id=project_id,
+        severity=severity,
+        tool=tool,
+        status=status,
+        category=category,
+        q=q,
+    )
+    total = await repo.count_with_filters(**filter_kwargs)
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return await repo.list_with_filters(skip=skip, limit=limit, **filter_kwargs)
 
 
 @router.get("/findings/{finding_id}", response_model=FindingOut)
@@ -222,7 +259,7 @@ async def get_finding(
     finding_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> Finding:
-    finding = await session.get(Finding, finding_id)
+    finding = await FindingRepository(session).get(finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
     return finding
@@ -239,23 +276,22 @@ async def reprocess_run(
     Used after fixing the normalizer or pulling in new artifact types — the
     previous artifacts in the DB are stale, so we delete them and re-fetch.
     """
-    artifact_result = await session.execute(
-        select(Artifact).where(Artifact.github_run_id == run_id)
-    )
-    artifacts = list(artifact_result.scalars().all())
+    artifact_repo = ArtifactRepository(session)
+    finding_repo = FindingRepository(session)
+    project_repo = ProjectRepository(session)
+
+    artifacts = await artifact_repo.list_for_run(run_id)
     project_id: int | None = None
     if artifacts:
         project_id = artifacts[0].project_id
         artifact_ids = [a.id for a in artifacts]
-        from sqlalchemy import delete
-        await session.execute(delete(Finding).where(Finding.artifact_id.in_(artifact_ids)))
-        await session.execute(delete(Artifact).where(Artifact.id.in_(artifact_ids)))
+        await finding_repo.delete_by_artifact_ids(artifact_ids)
+        await artifact_repo.delete_by_ids(artifact_ids)
         await session.commit()
 
     if project_id is None:
         github_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
-        result = await session.execute(select(Project).where(Project.github_url == github_url))
-        project = result.scalar_one_or_none()
+        project = await project_repo.get_by_github_url(github_url)
         if project is None:
             raise HTTPException(status_code=404, detail="Không tìm thấy project gắn với run này.")
         project_id = project.id
@@ -271,16 +307,4 @@ async def get_run_findings(
     session: AsyncSession = Depends(get_session),
 ) -> list[Finding]:
     """Return all findings from a specific GitHub Actions workflow run."""
-    artifact_result = await session.execute(
-        select(Artifact).where(Artifact.github_run_id == run_id)
-    )
-    artifacts = artifact_result.scalars().all()
-    if not artifacts:
-        return []
-    artifact_ids = [a.id for a in artifacts]
-    finding_result = await session.execute(
-        select(Finding)
-        .where(Finding.artifact_id.in_(artifact_ids))
-        .order_by(Finding.severity, Finding.rule_id)
-    )
-    return list(finding_result.scalars().all())
+    return await FindingRepository(session).list_for_run(run_id)

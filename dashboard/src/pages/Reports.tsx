@@ -27,13 +27,20 @@ export function PageReports() {
     api.projects.list().then(setProjects).catch(() => {});
   }, []);
 
+  // Total count match filter (server-side accurate, không phụ thuộc limit)
+  const [filterTotal, setFilterTotal] = useState(0);
+
   useEffect(() => {
-    const params: Parameters<typeof api.findings.list>[0] = { limit: 500 };
+    const params: Parameters<typeof api.findings.listWithTotal>[0] = { limit: 500 };
     if (projectId !== 'all') params.project_id = projectId as number;
     if (sevFilter !== 'all') params.severity = sevFilter;
-    api.findings.list(params).then(setFindings).catch(() => {});
+    api.findings.listWithTotal(params)
+      .then(({ data, total }) => { setFindings(data); setFilterTotal(total); })
+      .catch(() => {});
   }, [projectId, sevFilter]);
 
+  // Counts trên 500 records loaded — đủ cho KPI distribution; total đúng từ server.
+  // Khi filterTotal > 500 thì counts là sample chứ không phải full population.
   const counts = findings.reduce(
     (acc, f) => { acc[f.severity] = (acc[f.severity] || 0) + 1; return acc; },
     {} as Record<string, number>
@@ -56,7 +63,10 @@ export function PageReports() {
         setDownloading(false);
         return;
       }
-      const res = await fetch(api.chat.reportUrl(), {
+      const reportParams: { project_id?: number; severity?: string } = {};
+      if (projectId !== 'all') reportParams.project_id = projectId as number;
+      if (sevFilter !== 'all') reportParams.severity = sevFilter;
+      const res = await fetch(api.chat.reportUrl(reportParams), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -79,7 +89,14 @@ export function PageReports() {
       <div className="page-header">
         <div>
           <h1 className="h1">Reports</h1>
-          <div className="sub">Security posture — {findings.length} findings</div>
+          <div className="sub">
+            Security posture — {filterTotal} findings
+            {filterTotal > findings.length && (
+              <span className="muted" style={{ marginLeft: 8 }}>
+                (sample {findings.length} for charts)
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Project filter — GET /projects */}

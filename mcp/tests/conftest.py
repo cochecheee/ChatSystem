@@ -23,6 +23,17 @@ async def client():
 
 
 @pytest_asyncio.fixture
+async def db_session(client):
+    """AsyncSession để seed data trực tiếp trong test.
+
+    Phụ thuộc `client` để schema đã reset trước khi inject data.
+    """
+    from src.core.db import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
 async def project(client):
     resp = await client.post("/projects", json={
         "name": f"Java App {uuid.uuid4().hex[:8]}",

@@ -403,7 +403,7 @@ export function PagePipelines() {
         });
       })
       .catch(e => {
-        console.error('[Pipelines] fetch error:', e);
+        // Don't console.error — UI already surfaces qua fetchError banner.
         setFetchError(String(e));
         setLoading(false);
       });
@@ -425,7 +425,7 @@ export function PagePipelines() {
         });
       })
       .catch(e => {
-        console.error('[Pipelines] fetch error:', e);
+        // Don't console.error — UI already surfaces qua fetchError banner.
         setFetchError(String(e));
         setLoading(false);
       });
@@ -649,7 +649,7 @@ export function PagePipelines() {
           {loading && <div className="empty">Loading runs…</div>}
           {!loading && fetchError && (
             <div className="empty" style={{ color: 'var(--err-fg)', padding: 12, fontSize: 11, wordBreak: 'break-all' }}>
-              Error: {fetchError}
+              {fetchError.replace(/^Error:\s*/, '')}
             </div>
           )}
           {!loading && !fetchError && runs.length === 0 && (

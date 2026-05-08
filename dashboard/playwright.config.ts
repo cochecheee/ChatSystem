@@ -21,7 +21,7 @@ export default defineConfig({
 
   webServer: [
     {
-      command: 'cross-env TEST_MODE=1 ..\\.venv\\Scripts\\uvicorn.exe src.main:app --port 8001 --app-dir ../mcp',
+      command: 'cross-env TEST_MODE=1 GEMINI_API_KEY=test-dummy ..\\mcp\\.venv\\Scripts\\uvicorn.exe src.main:app --port 8001 --app-dir ../mcp',
       url: 'http://localhost:8001/health',
       reuseExistingServer: !process.env.CI,
       timeout: 20_000,

@@ -70,3 +70,21 @@ class Finding(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="findings")
+
+
+class AppConfig(Base):
+    """Key-value store cho dashboard runtime config.
+
+    Keys hiện tại: 'sast_tools', 'gates', 'ai'. Value là JSON object
+    free-form — service layer định nghĩa schema cho từng key qua defaults.
+    """
+
+    __tablename__ = "app_config"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

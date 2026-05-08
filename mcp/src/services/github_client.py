@@ -55,6 +55,17 @@ class GitHubClient:
             runs = [r for r in runs if r.get("name") == workflow_name]
         return runs
 
+    async def get_workflow_run(self, run_id: int) -> dict | None:
+        """Fetch metadata cho 1 run cụ thể. Trả None nếu 404."""
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/runs/{run_id}"
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+
     async def dispatch_workflow(self, workflow_filename: str, ref: str = "main") -> None:
         async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
             resp = await client.post(

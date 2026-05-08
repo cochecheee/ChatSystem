@@ -3,10 +3,10 @@ from __future__ import annotations
 import html
 from datetime import datetime, UTC
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.entities import Finding
+from ..repositories import FindingRepository
 
 _SEV_COLOR = {
     "critical": "#ef4444",
@@ -33,9 +33,17 @@ def _e(value: object) -> str:
     return html.escape(str(value)) if value is not None else ""
 
 
-async def generate_html(db: AsyncSession, project_name: str = "Security Report") -> str:
-    result = await db.execute(select(Finding))
-    findings: list[Finding] = list(result.scalars().all())
+async def generate_html(
+    db: AsyncSession,
+    project_name: str = "Security Report",
+    project_id: int | None = None,
+    severity: str | None = None,
+) -> str:
+    """Render HTML report. Filter theo project_id + severity nếu truyền vào."""
+    findings: list[Finding] = await FindingRepository(db).list_for_report(
+        project_id=project_id,
+        severity=severity,
+    )
 
     counts: dict[str, int] = {}
     for f in findings:

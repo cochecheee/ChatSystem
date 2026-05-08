@@ -21,6 +21,12 @@ dashboard/node_modules/
 dashboard/dist/
 dashboard/.next/
 dashboard/build/
+dashboard/test-results/
+dashboard/playwright-report/
+dashboard/mcp.db
+
+# Claude Code workspace
+.claude/
 
 # GSD/Gemini
 .gemini/tmp/
