@@ -15,6 +15,7 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [openVulnId, setOpenVulnId] = useState<number | undefined>();
   const [vulnCount, setVulnCount] = useState(0);
+  const [scaCount, setScaCount] = useState(0);
   const [newCritHighCount, setNewCritHighCount] = useState(0);
 
   useEffect(() => {
@@ -26,7 +27,8 @@ export default function App() {
   useEffect(() => {
     const fetchData = () => {
       api.stats.overview().then(s => {
-        setVulnCount(s.open);
+        setVulnCount(s.sast_open ?? s.open);
+        setScaCount(s.deps_open ?? 0);
         const critHigh = s.critical_high;
         if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
           setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));
@@ -64,7 +66,7 @@ export default function App() {
   return (
     <AuthProvider>
       <div className="app-shell">
-        <Sidebar active={active} onNav={onNav} vulnCount={vulnCount} />
+        <Sidebar active={active} onNav={onNav} vulnCount={vulnCount} scaCount={scaCount} />
         <div className="main">
           <Topbar
             active={active}

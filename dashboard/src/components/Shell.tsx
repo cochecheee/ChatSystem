@@ -52,9 +52,10 @@ interface SidebarProps {
   active: PageId;
   onNav: (id: PageId) => void;
   vulnCount: number;
+  scaCount?: number;
 }
 
-export function Sidebar({ active, onNav, vulnCount }: SidebarProps) {
+export function Sidebar({ active, onNav, vulnCount, scaCount }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -68,7 +69,9 @@ export function Sidebar({ active, onNav, vulnCount }: SidebarProps) {
         <div key={group.group}>
           <div className="nav-group-label">{group.group}</div>
           {group.items.map(it => {
-            const count = it.id === 'vulns' && vulnCount > 0 ? vulnCount : it.count;
+            let count = it.count;
+            if (it.id === 'vulns' && vulnCount > 0) count = vulnCount;
+            else if (it.id === 'sca' && scaCount && scaCount > 0) count = scaCount;
             return (
               <div
                 key={it.id}

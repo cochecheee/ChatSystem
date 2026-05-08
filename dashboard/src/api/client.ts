@@ -24,6 +24,24 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
   return res.json() as Promise<T>;
 }
 
+/**
+ * Like `get` but also reads `X-Total-Count` header. Trả về `{ data, total }`.
+ * Dùng cho `/findings` để biết tổng số match filter (server-side pagination).
+ */
+async function getWithTotal<T>(
+  path: string,
+  params?: Record<string, string | number>,
+): Promise<{ data: T; total: number }> {
+  const url = new URL(BASE + path);
+  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  const res = await fetch(url.toString(), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const data = (await res.json()) as T;
+  const totalHeader = res.headers.get('X-Total-Count');
+  const total = totalHeader ? parseInt(totalHeader, 10) : Array.isArray(data) ? data.length : 0;
+  return { data, total };
+}
+
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + path, {
     method: 'POST',
@@ -37,10 +55,24 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface FindingListParams {
+  project_id?: number;
+  severity?: string;
+  tool?: string;
+  status?: string;
+  category?: 'sast' | 'deps';
+  q?: string;
+  skip?: number;
+  limit?: number;
+}
+
 export const api = {
   findings: {
-    list: (params?: { project_id?: number; severity?: string; skip?: number; limit?: number }) =>
+    list: (params?: FindingListParams) =>
       get<Finding[]>('/findings', params as Record<string, string | number>),
+    /** Like list nhưng kèm X-Total-Count header → cho server-side pagination. */
+    listWithTotal: (params?: FindingListParams) =>
+      getWithTotal<Finding[]>('/findings', params as Record<string, string | number>),
     get: (id: number) => get<Finding>(`/findings/${id}`),
     explain: (id: number) => post<AnalysisResult>(`/findings/${id}/explain`),
   },
@@ -48,6 +80,48 @@ export const api = {
     list: () => get<Project[]>('/projects'),
     create: (name: string, github_url: string) =>
       post<Project>('/projects', { name, github_url }),
+    delete: (id: number) =>
+      fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: authHeaders() }).then(res => {
+        if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
+      }),
+  },
+  stats: {
+    overview: () => get<{
+      total: number;
+      critical_high: number;
+      ai_analyzed: number;
+      ai_analyzed_pct: number;
+      by_severity: Record<string, number>;
+      by_status: Record<string, number>;
+      by_tool: Record<string, number>;
+      open: number;
+      sast_open: number;
+      deps_open: number;
+      approved: number;
+      revoked: number;
+      pending: number;
+    }>('/stats/overview'),
+    latestScan: () => get<{
+      run_id: number | null;
+      run_number: number | null;
+      head_branch: string | null;
+      created_at: string | null;
+      scanned_at: string | null;
+      total: number;
+      critical_high: number;
+      ai_analyzed: number;
+      ai_analyzed_pct: number;
+      by_severity: Record<string, number>;
+      by_status: Record<string, number>;
+      by_tool: Record<string, number>;
+    }>('/stats/latest-scan'),
+    runs: (days = 30) => get<{
+      days: number;
+      total: number;
+      pass_rate: number;
+      by_conclusion: Record<string, number>;
+      by_day: Record<string, Record<string, number>>;
+    }>('/stats/runs', { days }),
   },
   github: {
     runs: (branch?: string) =>
@@ -64,6 +138,7 @@ export const api = {
   chat: {
     login: (username: string, role: string) =>
       post<TokenResponse>('/api/chat/auth/token', { username, role }),
+    me: () => get<{ username: string; role: string }>('/api/chat/auth/me'),
     command: (req: CommandRequest) =>
       post<CommandResponse>('/api/chat/command', req),
     message: (text: string, finding_id?: number) =>
@@ -71,7 +146,33 @@ export const api = {
         '/api/chat/message',
         { text, finding_id },
       ),
-    reportUrl: () => `${BASE}/api/chat/report`,
+    reportUrl: (params?: { project_id?: number; severity?: string }) => {
+      const url = new URL(`${BASE}/api/chat/report`);
+      if (params?.project_id !== undefined) url.searchParams.set('project_id', String(params.project_id));
+      if (params?.severity) url.searchParams.set('severity', params.severity);
+      return url.toString();
+    },
+  },
+  config: {
+    list: () => get<Record<string, Record<string, unknown>>>('/config'),
+    get: (key: string) => get<Record<string, unknown>>(`/config/${key}`),
+    update: (key: string, value: Record<string, unknown>) =>
+      fetch(`${BASE}/config/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(value),
+      }).then(async res => {
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error((detail as { detail?: string }).detail ?? `${res.status}`);
+        }
+        return res.json() as Promise<Record<string, unknown>>;
+      }),
+    integrations: () => get<{
+      github: { configured: boolean; owner: string | null; repo: string | null; polling_interval_seconds: number };
+      gemini: { configured: boolean; model: string };
+      ci_ingest: { api_key_required: boolean; webhook_token_required: boolean };
+    }>('/config/integrations'),
   },
   health: () => get<{ status: string }>('/health'),
 };
