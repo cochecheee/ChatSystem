@@ -13,7 +13,6 @@ interface NavItem {
   id: PageId;
   label: string;
   icon: string;
-  count?: number;
 }
 
 const NAV: { group: string; items: NavItem[] }[] = [
@@ -51,11 +50,9 @@ const CRUMB: Record<PageId, string[]> = {
 interface SidebarProps {
   active: PageId;
   onNav: (id: PageId) => void;
-  vulnCount: number;
-  scaCount?: number;
 }
 
-export function Sidebar({ active, onNav, vulnCount, scaCount }: SidebarProps) {
+export function Sidebar({ active, onNav }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -68,23 +65,17 @@ export function Sidebar({ active, onNav, vulnCount, scaCount }: SidebarProps) {
       {NAV.map(group => (
         <div key={group.group}>
           <div className="nav-group-label">{group.group}</div>
-          {group.items.map(it => {
-            let count = it.count;
-            if (it.id === 'vulns' && vulnCount > 0) count = vulnCount;
-            else if (it.id === 'sca' && scaCount && scaCount > 0) count = scaCount;
-            return (
-              <div
-                key={it.id}
-                data-nav={it.id}
-                className={`nav-item${active === it.id ? ' active' : ''}`}
-                onClick={() => onNav(it.id)}
-              >
-                <Icon name={it.icon} className="icon" />
-                <span>{it.label}</span>
-                {count != null && <span className="nav-count">{count}</span>}
-              </div>
-            );
-          })}
+          {group.items.map(it => (
+            <div
+              key={it.id}
+              data-nav={it.id}
+              className={`nav-item${active === it.id ? ' active' : ''}`}
+              onClick={() => onNav(it.id)}
+            >
+              <Icon name={it.icon} className="icon" />
+              <span>{it.label}</span>
+            </div>
+          ))}
         </div>
       ))}
       <div className="sidebar-footer">

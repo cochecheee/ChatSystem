@@ -14,8 +14,6 @@ export default function App() {
   const [active, setActive] = useState<PageId>('overview');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [openVulnId, setOpenVulnId] = useState<number | undefined>();
-  const [vulnCount, setVulnCount] = useState(0);
-  const [scaCount, setScaCount] = useState(0);
   const [newCritHighCount, setNewCritHighCount] = useState(0);
 
   useEffect(() => {
@@ -27,10 +25,6 @@ export default function App() {
   useEffect(() => {
     const fetchData = () => {
       api.stats.overview().then(s => {
-        // Show actionable count (critical + high) — total open is dominated
-        // by Trivy container OS-CVE noise and gives a misleading badge.
-        setVulnCount(s.sast_critical_high ?? s.sast_open ?? s.open);
-        setScaCount(s.deps_critical_high ?? s.deps_open ?? 0);
         const critHigh = s.critical_high;
         if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
           setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));
@@ -68,7 +62,7 @@ export default function App() {
   return (
     <AuthProvider>
       <div className="app-shell">
-        <Sidebar active={active} onNav={onNav} vulnCount={vulnCount} scaCount={scaCount} />
+        <Sidebar active={active} onNav={onNav} />
         <div className="main">
           <Topbar
             active={active}
