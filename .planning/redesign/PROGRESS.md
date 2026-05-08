@@ -107,9 +107,10 @@ b04ae9c ci: bump SAST artifact retention to 30 days
 - ✅ Backend pytest 200/200 pass
 
 ### Day 2-3 còn lại (revised scope)
-- ALOUTE end-to-end: chạy migrate_v2 trên DB thật, verify dashboard load đúng
-- Webhook schema doc (`docs/webhook-schema.md`)
-- Guardrails verify (PII scrub + injection prevention test cases)
+- ✅ ALOUTE end-to-end: migrate_v2 chạy trên DB thật, backfill 9 cột, idempotent verified, live API trả full multi-tenant fields với `has_*` boolean
+- ✅ Webhook schema doc (`docs/webhook-schema.md`) — endpoint, header, body, response codes, CI snippet, manual test curl
+- ✅ Guardrails verify — 24/24 tests pass, doc `docs/guardrails.md` với 2-layer architecture (Scrubbing + Injection prevention)
+- ✅ Endpoint mới `GET /projects/{id}/integration` — trả webhook URL + tên secrets + YAML step + curl test sẵn sàng copy-paste
 
 ### Multi-tenant runtime — deferred to Day 6+
 - Refactor poller `_poll()` thành loop projects (đã có sẵn implementation, đang revert)

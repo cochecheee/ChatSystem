@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +66,78 @@ async def create_project(
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(session: AsyncSession = Depends(get_session)) -> list[Project]:
     return await ProjectRepository(session).list_all()
+
+
+@router.get("/projects/{project_id}/integration")
+async def project_integration_snippet(
+    project_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Trả config snippet cần thiết để tích hợp 1 project mới với chat-system.
+
+    UI/CLI dùng endpoint này để hiển thị "Cách tích hợp project này":
+    - URL webhook
+    - Tên secret cần đặt trong GitHub Actions
+    - YAML step copy-paste
+    - curl command để test thủ công
+
+    KHÔNG trả token thật — UI chỉ render placeholder; admin operator
+    set secret bằng tay ở repo target.
+    """
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Build base URL từ request — phù hợp cả local dev (localhost:8000)
+    # lẫn deploy qua tunnel/proxy (Host header).
+    scheme = request.url.scheme
+    host = request.headers.get("host") or request.url.netloc
+    base = f"{scheme}://{host}"
+    webhook_url = f"{base}/webhook/pipeline-complete"
+
+    secret_token_name = "MCP_WEBHOOK_TOKEN"
+    secret_url_name = "MCP_GATEWAY_URL"
+
+    yaml_step = (
+        "- name: Notify chat-system\n"
+        "  if: always()\n"
+        "  env:\n"
+        f"    {secret_url_name}:   ${{{{ secrets.{secret_url_name} }}}}\n"
+        f"    {secret_token_name}: ${{{{ secrets.{secret_token_name} }}}}\n"
+        "  run: |\n"
+        f"    curl -f -s -X POST \"${{{secret_url_name}}}/webhook/pipeline-complete\" \\\n"
+        "      -H \"Content-Type: application/json\" \\\n"
+        f"      -H \"Authorization: Bearer ${{{secret_token_name}}}\" \\\n"
+        "      --max-time 20 \\\n"
+        "      -d \"{\\\"run_id\\\": ${{ github.run_id }}, \\\"pipeline_status\\\": \\\"passed\\\"}\"\n"
+        "  continue-on-error: true\n"
+    )
+
+    curl_test = (
+        f"curl -i -X POST \"{webhook_url}\" \\\n"
+        "  -H \"Content-Type: application/json\" \\\n"
+        f"  -H \"Authorization: Bearer <{secret_token_name}>\" \\\n"
+        "  -d '{\"run_id\": 1, \"pipeline_status\": \"test\"}'"
+    )
+
+    return {
+        "project_id": project.id,
+        "project_name": project.name,
+        "github_url": project.github_url,
+        "webhook_url": webhook_url,
+        "auth_required": bool(settings.CI_WEBHOOK_TOKEN),
+        "secrets_to_set_in_target_repo": [
+            {"name": secret_url_name, "value_hint": webhook_url},
+            {
+                "name": secret_token_name,
+                "value_hint": "<the same MCP_WEBHOOK_TOKEN in chat-system .env>",
+            },
+        ],
+        "github_actions_yaml_step": yaml_step,
+        "manual_test_curl": curl_test,
+        "docs": "/docs/webhook-schema.md",
+    }
 
 
 @router.delete("/projects/{project_id}", status_code=204)
