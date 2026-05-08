@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import type { FindingListParams } from '../api/client';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import type { Finding, Project } from '../types';
 
-const PAGE_SIZE = 100;
+const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+const PAGE_SIZE = 500;
 
 function pkgMeta(f: Finding) {
   const d = f.raw_data ?? {};
@@ -17,10 +18,25 @@ function pkgMeta(f: Finding) {
   return { name, current, fixed, cveId };
 }
 
-function upgradeCmd(f: Finding): string | null {
-  const { name, fixed } = pkgMeta(f);
+// Pick the highest semantic-version-ish string from a list of fix candidates.
+// Falls back to lexicographic compare for non-semver strings.
+function pickRecommendedVersion(versions: string[]): string {
+  const cleaned = versions.map(v => v.split(',')[0].trim()).filter(Boolean);
+  if (cleaned.length === 0) return '';
+  return cleaned.sort((a, b) => {
+    const pa = a.split('.').map(n => parseInt(n, 10));
+    const pb = b.split('.').map(n => parseInt(n, 10));
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = pa[i] || 0, y = pb[i] || 0;
+      if (Number.isFinite(x) && Number.isFinite(y) && x !== y) return y - x;
+    }
+    return b.localeCompare(a);
+  })[0];
+}
+
+function upgradeCmd(name: string, fixed: string, manifestPath: string): string | null {
   if (!name || !fixed) return null;
-  const manifest = f.file_path.split('/').pop() ?? '';
+  const manifest = manifestPath.split('/').pop() ?? '';
   if (manifest.includes('package.json') || manifest.includes('package-lock')) {
     return `npm install ${name}@${fixed}`;
   }
@@ -37,47 +53,84 @@ function SevChip({ sev }: { sev: string }) {
   return <Badge variant={sev as 'critical' | 'high' | 'medium' | 'low' | 'info'} dot>{sev}</Badge>;
 }
 
-function CveSummaryPanel({ findings }: { findings: Finding[] }) {
-  const total = findings.length;
-  const bySev = findings.reduce(
-    (acc, f) => { acc[f.severity] = (acc[f.severity] ?? 0) + 1; return acc; },
-    {} as Record<string, number>,
-  );
+interface PackageGroup {
+  key: string;            // "name@current"
+  name: string;
+  current: string;
+  recommended: string;
+  manifestPath: string;
+  maxSev: string;
+  sevCounts: Record<string, number>;
+  cves: Finding[];        // findings (one per CVE), deduped by CVE id
+}
 
-  const pkgCounts: Record<string, number> = {};
+function groupByPackage(findings: Finding[]): PackageGroup[] {
+  const map = new Map<string, PackageGroup>();
   for (const f of findings) {
-    const { name } = pkgMeta(f);
-    if (name) pkgCounts[name] = (pkgCounts[name] ?? 0) + 1;
+    const { name, current, fixed, cveId } = pkgMeta(f);
+    const key = name ? `${name}@${current || '?'}` : `__file:${f.file_path}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key,
+        name: name || f.file_path.split('/').pop() || f.file_path,
+        current,
+        recommended: '',
+        manifestPath: f.file_path,
+        maxSev: f.severity,
+        sevCounts: {},
+        cves: [],
+      };
+      map.set(key, g);
+    }
+    // Dedup by CVE id within the package group
+    if (cveId && g.cves.some(x => pkgMeta(x).cveId === cveId)) continue;
+    g.cves.push(f);
+    g.sevCounts[f.severity] = (g.sevCounts[f.severity] ?? 0) + 1;
+    if ((SEV_RANK[f.severity] ?? 0) > (SEV_RANK[g.maxSev] ?? 0)) g.maxSev = f.severity;
+    if (fixed) {
+      const cur = g.recommended ? [g.recommended, fixed] : [fixed];
+      g.recommended = pickRecommendedVersion(cur);
+    }
   }
-  const top10 = Object.entries(pkgCounts).sort(([, a], [, b]) => b - a).slice(0, 10);
+  return Array.from(map.values()).sort(
+    (a, b) => (SEV_RANK[b.maxSev] ?? 0) - (SEV_RANK[a.maxSev] ?? 0) || b.cves.length - a.cves.length,
+  );
+}
 
+function SummaryBar({ groups }: { groups: PackageGroup[] }) {
+  const totalCves = groups.reduce((n, g) => n + g.cves.length, 0);
+  const sev: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const g of groups) for (const [s, c] of Object.entries(g.sevCounts)) sev[s] = (sev[s] ?? 0) + c;
+  const top = groups.slice(0, 8);
   return (
     <div style={{
       background: 'var(--bg-muted)', border: '1px solid var(--line)',
       borderRadius: 6, padding: '10px 14px', margin: '10px 12px',
     }}>
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
-        {total} {total === 1 ? 'vulnerability' : 'vulnerabilities'} found
+        {groups.length} {groups.length === 1 ? 'dependency' : 'dependencies'} affected
+        <span style={{ color: 'var(--fg-3)', fontWeight: 400, marginLeft: 6 }}>
+          · {totalCves} CVE{totalCves === 1 ? '' : 's'} (deduped)
+        </span>
       </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: top10.length > 0 ? 8 : 0 }}>
-        {(['critical', 'high', 'medium', 'low'] as const).flatMap(sev => {
-          const cnt = bySev[sev] ?? 0;
-          if (cnt === 0) return [];
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: top.length > 0 ? 8 : 0 }}>
+        {(['critical', 'high', 'medium', 'low'] as const).flatMap(s => {
+          const c = sev[s] ?? 0;
+          if (!c) return [];
           return [
-            <SevChip key={sev} sev={sev} />,
-            <span key={`cnt-${sev}`} style={{ fontSize: 11, alignSelf: 'center', color: 'var(--fg-2)' }}>
-              {cnt}
-            </span>,
+            <SevChip key={s} sev={s} />,
+            <span key={`c-${s}`} style={{ fontSize: 11, alignSelf: 'center', color: 'var(--fg-2)' }}>{c}</span>,
           ];
         })}
       </div>
-      {top10.length > 0 && (
+      {top.length > 0 && (
         <div>
           <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>Top affected packages</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {top10.map(([pkg, count]) => (
-              <span key={pkg} className="chip" style={{ fontSize: 10 }} title={`${count} CVE${count > 1 ? 's' : ''}`}>
-                {pkg} ({count})
+            {top.map(g => (
+              <span key={g.key} className="chip" style={{ fontSize: 10 }} title={`${g.cves.length} CVE${g.cves.length > 1 ? 's' : ''}`}>
+                {g.name} ({g.cves.length})
               </span>
             ))}
           </div>
@@ -87,43 +140,29 @@ function CveSummaryPanel({ findings }: { findings: Finding[] }) {
   );
 }
 
-function DepDetail({ finding }: { finding: Finding }) {
-  const { name, current, fixed, cveId } = pkgMeta(finding);
-  const manifest = finding.file_path.split('/').pop() ?? finding.file_path;
-  const cmd = upgradeCmd(finding);
-  const owasp = finding.raw_data?.owasp_category as string | undefined;
+function PackageDetail({ group }: { group: PackageGroup }) {
+  const cmd = upgradeCmd(group.name, group.recommended, group.manifestPath);
 
   return (
     <div style={{ overflowY: 'auto', padding: '20px 28px 40px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <SevChip sev={finding.severity} />
-        <span className="tool-tag">{finding.tool}</span>
-        {finding.cvss_score != null && (
-          <span className="chip" style={{ fontSize: 11 }}>CVSS {finding.cvss_score}</span>
-        )}
+        <SevChip sev={group.maxSev} />
+        <span className="chip" style={{ fontSize: 11 }}>{group.cves.length} CVE{group.cves.length > 1 ? 's' : ''}</span>
       </div>
-      <h2 className="h2" style={{ lineHeight: 1.4, marginBottom: 16 }}>{finding.message}</h2>
+      <h2 className="h2" style={{ lineHeight: 1.4, marginBottom: 16 }}>{group.name}</h2>
 
       <div className="cve-update-card">
         <div className="cve-update-header">
-          <Icon name="download" size={11} /> Dependency update required
+          <Icon name="download" size={11} /> Recommended dependency update
         </div>
         <div className="cve-pkg-row">
-          <span className="cve-pkg-name">{name || manifest}</span>
-          {current && <span className="cve-version current">{current}</span>}
-          {(current || fixed) && <span className="cve-arrow">→</span>}
-          {fixed
-            ? <span className="cve-version fixed">{fixed}</span>
-            : <span className="cve-version unknown">check latest</span>}
+          <span className="cve-pkg-name">{group.name}</span>
+          {group.current && <span className="cve-version current">{group.current}</span>}
+          {(group.current || group.recommended) && <span className="cve-arrow">→</span>}
+          {group.recommended
+            ? <span className="cve-version fixed">{group.recommended}</span>
+            : <span className="cve-version unknown">no fixed version published</span>}
         </div>
-        {(cveId || finding.cwe_id) && (
-          <div className="cve-id-row">
-            {cveId && <span className="cve-id-badge">{cveId}</span>}
-            {finding.cwe_id && cveId !== finding.cwe_id && (
-              <span className="cve-id-badge">{finding.cwe_id}</span>
-            )}
-          </div>
-        )}
       </div>
 
       {cmd && (
@@ -139,70 +178,94 @@ function DepDetail({ finding }: { finding: Finding }) {
       )}
 
       <div className="card card-pad" style={{ marginTop: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {[
-            ['Manifest', finding.file_path],
-            ['Tool', finding.tool],
-            ['Status', finding.status],
-            ['Detected', finding.normalized_at ? new Date(finding.normalized_at).toLocaleString() : null],
-          ].filter(([, v]) => v).map(([k, v]) => (
-            <div key={k as string}>
-              <div style={{ color: 'var(--fg-3)', fontSize: 11, marginBottom: 2 }}>{k}</div>
-              <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>{v}</div>
-            </div>
-          ))}
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          CVEs in this dependency ({group.cves.length})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {group.cves
+            .slice()
+            .sort((a, b) => (SEV_RANK[b.severity] ?? 0) - (SEV_RANK[a.severity] ?? 0))
+            .map(f => {
+              const { cveId, fixed } = pkgMeta(f);
+              return (
+                <div key={f.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', background: 'var(--bg-elev)',
+                  border: '1px solid var(--line)', borderRadius: 6,
+                }}>
+                  <SevChip sev={f.severity} />
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, minWidth: 140 }}>{cveId || f.rule_id}</span>
+                  {f.cvss_score != null && (
+                    <span className="chip" style={{ fontSize: 10 }}>CVSS {f.cvss_score}</span>
+                  )}
+                  <span style={{ flex: 1, fontSize: 12, color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.message.split('\n')[0]}
+                  </span>
+                  {fixed && fixed !== group.recommended && (
+                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>fix: {fixed}</span>
+                  )}
+                </div>
+              );
+            })}
         </div>
       </div>
 
-      {owasp && (
-        <div className="card card-pad" style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>OWASP Top 10 2021</div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>{owasp}</div>
+      <div className="card card-pad" style={{ marginTop: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <div style={{ color: 'var(--fg-3)', fontSize: 11, marginBottom: 2 }}>Manifest</div>
+            <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all' }}>{group.manifestPath}</div>
+          </div>
+          <div>
+            <div style={{ color: 'var(--fg-3)', fontSize: 11, marginBottom: 2 }}>Tool</div>
+            <div className="mono" style={{ fontSize: 12 }}>{group.cves[0]?.tool ?? ''}</div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
+const SEV_FLOORS = ['critical', 'high', 'medium', 'low'] as const;
+type SevFloor = typeof SEV_FLOORS[number];
+
 export function PageSCA() {
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectFilter, setProjectFilter] = useState<number | 'all'>('all');
-  const [sevFilter, setSevFilter] = useState('all');
+  const [sevFloor, setSevFloor] = useState<SevFloor>('high');  // default: HIGH+CRITICAL only
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => {});
   }, []);
 
-  useEffect(() => { setPage(0); }, [projectFilter, sevFilter, search]);
-
   useEffect(() => {
     setLoading(true);
-    const params: FindingListParams = {
-      category: 'deps',
-      limit: PAGE_SIZE,
-      skip: page * PAGE_SIZE,
-    };
+    const params: FindingListParams = { category: 'deps', limit: PAGE_SIZE, skip: 0 };
     if (projectFilter !== 'all') params.project_id = projectFilter as number;
-    if (sevFilter !== 'all') params.severity = sevFilter;
-    if (search.trim()) params.q = search.trim();
-
     api.findings.listWithTotal(params)
-      .then(({ data, total: t }) => {
-        setFindings(data);
-        setTotal(t);
-        setLoading(false);
-      })
+      .then(({ data }) => { setFindings(data); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [page, projectFilter, sevFilter, search]);
+  }, [projectFilter]);
 
-  const selected = findings.find(f => f.id === selectedId) ?? findings[0] ?? null;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const groups = useMemo(() => {
+    const floor = SEV_RANK[sevFloor] ?? 3;
+    const filtered = findings.filter(f => (SEV_RANK[f.severity] ?? 0) >= floor);
+    let g = groupByPackage(filtered);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      g = g.filter(x =>
+        x.name.toLowerCase().includes(q) ||
+        x.cves.some(c => pkgMeta(c).cveId.toLowerCase().includes(q)),
+      );
+    }
+    return g;
+  }, [findings, sevFloor, search]);
+
+  const selected = groups.find(g => g.key === selectedKey) ?? groups[0] ?? null;
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -214,7 +277,9 @@ export function PageSCA() {
             display: 'flex', alignItems: 'baseline', gap: 10, flexShrink: 0,
           }}>
             <h2 className="h2" style={{ margin: 0 }}>Dependencies (SCA)</h2>
-            <span className="muted" style={{ fontSize: 12 }}>{total} total</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {loading ? '…' : `${groups.length} affected`}
+            </span>
           </div>
 
           {projects.length > 1 && (
@@ -236,74 +301,65 @@ export function PageSCA() {
           <div style={{ padding: '8px 12px 6px', flexShrink: 0 }}>
             <div className="search-box" style={{ width: '100%' }}>
               <Icon name="search" size={13} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="CVE, package, file…" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Package, CVE id…" />
             </div>
           </div>
 
-          <div className="filter-toolbar">
-            {(['all', 'critical', 'high', 'medium', 'low'] as const).map(s => (
+          <div className="filter-toolbar" title="Severity floor (default: high+critical)">
+            <span style={{ fontSize: 10.5, color: 'var(--fg-3)', alignSelf: 'center', marginRight: 4 }}>min</span>
+            {SEV_FLOORS.map(s => (
               <button
                 key={s}
-                className={`tb-pill${sevFilter === s ? ' active' : ''}`}
-                onClick={() => setSevFilter(s)}
+                className={`tb-pill${sevFloor === s ? ' active' : ''}`}
+                onClick={() => setSevFloor(s)}
               >
-                {s === 'all' ? 'All' : s[0].toUpperCase() + s.slice(1)}
+                {s[0].toUpperCase() + s.slice(1)}
               </button>
             ))}
           </div>
 
-          {!loading && findings.length > 0 && <CveSummaryPanel findings={findings} />}
-
-          {!loading && total > PAGE_SIZE && (
-            <div style={{
-              padding: '6px 14px', borderBottom: '1px solid var(--line)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              fontSize: 11, color: 'var(--fg-3)', flexShrink: 0,
-            }}>
-              <span>Showing <span className="mono">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)}</span> of <span className="mono">{total}</span></span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn ghost sm" style={{ padding: '2px 8px', fontSize: 11 }}
-                  onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>← Prev</button>
-                <span style={{ alignSelf: 'center' }}>{page + 1} / {totalPages}</span>
-                <button className="btn ghost sm" style={{ padding: '2px 8px', fontSize: 11 }}
-                  onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>Next →</button>
-              </div>
-            </div>
-          )}
+          {!loading && groups.length > 0 && <SummaryBar groups={groups} />}
 
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {loading && <div className="empty">Loading…</div>}
-            {!loading && findings.length === 0 && (
-              <div className="empty">{total === 0 ? 'No dependency vulnerabilities' : 'No findings match filters'}</div>
+            {!loading && groups.length === 0 && (
+              <div className="empty">
+                {findings.length === 0 ? 'No dependency vulnerabilities' : `No deps at severity ≥ ${sevFloor}`}
+              </div>
             )}
-            {findings.map(f => {
-              const { name, current, fixed, cveId } = pkgMeta(f);
-              return (
-                <div
-                  key={f.id}
-                  data-testid="dep-finding-row"
-                  data-sev={f.severity}
-                  className={`vuln-row${selectedId === f.id ? ' active' : ''}`}
-                  onClick={() => setSelectedId(f.id)}
-                >
-                  <div className="vuln-row-title">
-                    {name || f.message.split('\n')[0]}
-                    {fixed && <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginLeft: 6 }}>{current || '?'} → {fixed}</span>}
-                  </div>
-                  <div className="vuln-row-meta">
-                    <SevChip sev={f.severity} />
-                    <span className="tool-tag">{f.tool}</span>
-                    {cveId && <span className="chip" style={{ fontSize: 10 }}>{cveId}</span>}
-                  </div>
+            {groups.map(g => (
+              <div
+                key={g.key}
+                data-testid="dep-pkg-row"
+                data-sev={g.maxSev}
+                className={`vuln-row${selectedKey === g.key ? ' active' : ''}`}
+                onClick={() => setSelectedKey(g.key)}
+              >
+                <div className="vuln-row-title">
+                  {g.name}
+                  {g.current && (
+                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginLeft: 6 }}>
+                      {g.current}{g.recommended && g.recommended !== g.current ? ` → ${g.recommended}` : ''}
+                    </span>
+                  )}
                 </div>
-              );
-            })}
+                <div className="vuln-row-meta">
+                  <SevChip sev={g.maxSev} />
+                  <span className="chip" style={{ fontSize: 10 }}>{g.cves.length} CVE{g.cves.length > 1 ? 's' : ''}</span>
+                  {g.recommended && g.recommended !== g.current && (
+                    <span className="chip" style={{ fontSize: 10, background: 'var(--accent-tint)', color: 'var(--accent-2)' }}>
+                      fix available
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {selected
-            ? <DepDetail finding={selected} />
+            ? <PackageDetail group={selected} />
             : <div className="empty" style={{ marginTop: 80 }}>
                 {loading ? 'Loading…' : 'Chọn một dependency để xem chi tiết'}
               </div>}
