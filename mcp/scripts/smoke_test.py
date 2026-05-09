@@ -117,16 +117,43 @@ def check_webhook_unauth(base: str) -> Any:
         if e.code in (202, 403):
             return f"server reachable, code {e.code}"
         raise
+    # URLError (connection refused, DNS, etc.) propagates to Check.run and
+    # surfaces as a normal FAIL — same behaviour as the other checks.
 
 
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
+def _precheck_reachable(base: str) -> tuple[bool, str]:
+    """Fast (2s) connectivity probe — surfaces a clean error message
+    when the backend is down instead of letting every check time out."""
+    try:
+        with urllib.request.urlopen(f"{base}/health", timeout=2):
+            return True, ""
+    except urllib.error.URLError as e:
+        return False, str(e.reason if hasattr(e, "reason") else e)
+    except (OSError, ConnectionError) as e:
+        return False, str(e)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://localhost:8000")
     args = ap.parse_args()
+
+    print(f"=== Smoke test against {args.base} ===\n")
+
+    ok, detail = _precheck_reachable(args.base)
+    if not ok:
+        print(f"  [FAIL]  backend unreachable")
+        print(f"      {detail}")
+        print()
+        print("Backend chua chay. Khoi dong:")
+        print("  cd mcp")
+        print("  .venv\\Scripts\\activate")
+        print("  uvicorn src.main:app --reload --port 8000")
+        return 1
 
     checks = [
         Check("health", check_health),
@@ -138,7 +165,6 @@ def main() -> int:
         Check("webhook reachable", check_webhook_unauth),
     ]
 
-    print(f"=== Smoke test against {args.base} ===\n")
     failed = 0
     for c in checks:
         ok = c.run(args.base)
