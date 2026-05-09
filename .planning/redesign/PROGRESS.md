@@ -143,6 +143,30 @@ b04ae9c ci: bump SAST artifact retention to 30 days
 
 ---
 
+## Day 5 — Tue 2026-05-12 — ALOUTE demo prep — ✅ DONE (code/docs phần)
+
+User scope: tao làm code/docs, user tự chạy demo (trigger CI, expose ngrok, click UI).
+
+### Files
+- `docs/demo-script.md` — bài demo 12-15 phút, 8 phần (Overview → /scan → Pipelines → Vulns + AI → /approve → Dependencies → free-form chat → /report) với expected output từng step
+- `docs/preflight-checklist.md` — 9 nhóm check trước demo (env, DB, CI, tunnel, BE/FE, auth, pre-cache AI, browser, backup)
+- `docs/troubleshooting.md` — 11 failure mode + fix trong 1-2 phút (dashboard blank, /explain 500, ngrok URL đổi, SCA loading…)
+- `mcp/scripts/smoke_test.py` — script tự động kiểm 7 endpoint trước demo (`python -m scripts.smoke_test`)
+
+### Verify
+- Smoke script chạy OK khi backend up; logic verify khi backend down (connection refused per check)
+- Đã verify code path 7 ChatOps commands ở `command_service.py` — `/explain`, `/fix`, `/scan`, `/rerun`, `/approve`, `/revoke`, `/report` đều validate input + audit trail đầy đủ
+
+### Còn treo (user side)
+- Chạy CI ALOUTE mới + verify findings vào dashboard (cache v2 đã pass theo user)
+- Set ngrok URL cố định ở `MCP_GATEWAY_URL` GitHub Secret
+- Pre-cache 5-10 finding `/explain` trước demo
+- Record screencast `docs/demo-recording.mp4` (Day 7)
+
+### Sang Day 6 (docs/integration.md + adapter-guide) khi user OK
+
+---
+
 ## Câu hỏi mở còn lại
 
 Tham chiếu `OPEN-QUESTIONS.md` — đã trả lời hết Q1-Q12 cuối Day 1. Không câu hỏi mở mới.
