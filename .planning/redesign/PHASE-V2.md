@@ -374,20 +374,19 @@ Total **~70-80h** nếu làm nhẹ, ~100h nếu polish kỹ.
 
 ---
 
-## Quyết định pending — cần mày confirm
+## Quyết định đã chốt (2026-05-09)
 
-1. **Domain custom** cho dashboard demo? (Hiện ngrok URL, V2 cần URL ổn định cho Render webhook). Options:
-   - Cloudflare Tunnel + domain mày sẵn có
-   - Render có domain `*.onrender.com` cho dashboard luôn
-   - Mua domain $10/năm
+1. **Hosting** — Cả `chat-system` lẫn `aloute-staging` deploy lên **Render free tier**, skip ngrok hoàn toàn.
+   - `mcp` → Render **Web Service** (Docker), URL `chat-mcp.onrender.com`
+   - `dashboard` → Render **Static Site** (npm build → CDN edge serve `dist/`), URL `chat-dashboard.onrender.com`
+   - **Lý do B2**: FE không cold start, free tier nhẹ (chỉ mcp tốn 750h Web Service quota), pattern industry standard 2026.
+   - Code change cần: thêm `fastapi.middleware.cors.CORSMiddleware` cho mcp, FE build với `VITE_API_URL=https://chat-mcp.onrender.com`.
 
-2. **Inheritor repo Java sample** — fork ALOUTE hay tạo mới?
-   - Fork ALOUTE: nhanh, có data thật
-   - Repo mới: clean, không legacy CI
+2. **Demo inheritor repo** — tạo **repo Python mới** (Flask/FastAPI vulnerable). Lý do: variety language khác Java, demo template multi-language. Repo gợi ý tên: `cochecheee/sast-chat-sample-python`.
 
-3. **DAST scan target** — staging URL ALOUTE deploy ở đâu?
-   - Đã chốt Render → URL `https://aloute-staging.onrender.com`
-   - Cần build Dockerfile cho ALOUTE (Spring Boot có sẵn)
+3. **DAST target** — staging URL `https://sample-python-staging.onrender.com` (Render free Web Service).
+
+4. **ALOUTE** — vẫn deploy staging trên Render (V2.2 task), Dockerfile có sẵn ở repo. Nhưng demo *V2 inheritor* chính sẽ là sample Python, ALOUTE giữ làm tham chiếu cũ.
 
 ---
 
