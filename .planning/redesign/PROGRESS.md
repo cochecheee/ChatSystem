@@ -167,6 +167,35 @@ User scope: tao làm code/docs, user tự chạy demo (trigger CI, expose ngrok,
 
 ---
 
+## Day 6 — Wed 2026-05-13 — DEFERRED
+
+User skipped Day 6 (docs/integration.md + adapter-guide.md), ưu tiên Day 7 trước. Day 6 sẽ làm sau release v0.1.0 nếu còn thời gian.
+
+---
+
+## Day 7 — Thu 2026-05-14 — Composite Action + release prep — ✅ DONE
+
+### Files
+- `action.yml` (repo root) — composite GitHub Action, 1-dòng `uses: cochecheee/chat-system@v0.1.0` thay cho bespoke notify step. Inputs: `dashboard-url`, `dashboard-token`, `pipeline-status`, `fail-on-error`, `timeout-seconds`. Outputs: `http-status`, `accepted`. Tolerates gateway downtime mặc định (không fail CI).
+- `CHANGELOG.md` — full v0.1.0 entry theo Keep a Changelog format. Added/Changed/Removed/Security/Known limitations.
+- `docs/release-notes-v0.1.0.md` — markdown cho GitHub release page, có quickstart curl + composite Action sample + roadmap V2.
+- `docs/slide-outline.md` — 12 slide skeleton cho buổi defense ~20 phút, 8-section live demo flow ăn 10', Q&A predicted với canned answers.
+
+### Còn treo (user side)
+- Push tag `v0.1.0` để trigger release.yml workflow → push image lên Docker Hub
+- Test composite Action trên ALOUTE workflow (replace bespoke notify step bằng `uses:`)
+- Record screencast demo backup
+- UI polish — empty states/error toast (deferred, không critical cho thesis)
+- Convert slide outline → PowerPoint/Canva với screenshot thật
+
+---
+
+## Day 8 — Fri 2026-05-15 — Final polish (user-led)
+
+User chạy demo + rehearse. Code/docs đã ready từ Day 1-7.
+
+---
+
 ## Câu hỏi mở còn lại
 
 Tham chiếu `OPEN-QUESTIONS.md` — đã trả lời hết Q1-Q12 cuối Day 1. Không câu hỏi mở mới.
