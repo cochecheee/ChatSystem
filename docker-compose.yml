@@ -1,0 +1,41 @@
+# Local stack — `docker compose up -d` from repo root.
+# Builds both images from source. For users who want pre-built images
+# from Docker Hub instead, see docker-compose.example.yml.
+#
+# Single-tenant flow (Day 4 scope): one mcp instance polls the repo
+# defined in mcp/.env. Multi-tenant runtime arrives post-packaging.
+
+services:
+  mcp:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    image: chat-system/mcp:dev
+    env_file:
+      - ./mcp/.env
+    environment:
+      # Override the local SQLite path so it lands in the named volume.
+      DATABASE_URL: sqlite+aiosqlite:////data/mcp.db
+    volumes:
+      - mcp_data:/data
+    expose:
+      - "8000"
+    # Map to host only when you want to hit Swagger UI directly.
+    # Otherwise, dashboard already proxies /docs through nginx.
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: chat-system/dashboard:dev
+    depends_on:
+      - mcp
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  mcp_data:

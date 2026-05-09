@@ -119,6 +119,30 @@ b04ae9c ci: bump SAST artifact retention to 30 days
 
 ---
 
+## Day 4 — Mon 2026-05-11 — Docker packaging — ✅ DONE (chưa test live)
+
+### Files
+- `mcp/Dockerfile` — Python 3.13-slim multi-stage (builder + runtime), non-root `app` user, healthcheck `/health`, mount `/data` cho SQLite
+- `mcp/.dockerignore` — strip venv/cache/db
+- `dashboard/Dockerfile` — node:20-alpine build → nginx:1.27-alpine serve, healthcheck wget /
+- `dashboard/nginx.conf` — single-origin SPA + proxy backend prefixes (`/health`, `/findings`, `/projects`, `/artifacts`, `/github`, `/webhook`, `/api`, `/stats`, `/config`, `/docs`, `/openapi.json`)
+- `dashboard/.dockerignore` — strip node_modules/dist/test-results
+- `docker-compose.yml` — build từ source, mcp:8000 + dashboard:80→host:5173, named volume `mcp_data`
+- `docker-compose.example.yml` — pull `cochecheee/sast-chat-mcp:latest` + `cochecheee/sast-chat-dashboard:latest` từ Docker Hub, không build
+- `.env.example` — full env shape ở repo root
+- `.github/workflows/release.yml` — build matrix (mcp + dashboard) + push Docker Hub khi tag v*, có gha cache, support manual dispatch
+
+### Còn treo
+- ⏳ Local build test — Docker Desktop chưa chạy ở máy user. User tự `docker compose up --build` để verify
+- ⏳ Push tag v0.1.0 (chờ Day 7) → workflow release.yml sẽ chạy lần đầu
+
+### Lý do dùng same-origin nginx proxy
+- Demo URL chỉ 1 (port 5173 / hostname) — onboard team mới đơn giản
+- Tránh CORS — FE build với `VITE_API_URL=""` → relative URLs
+- Swagger UI vẫn truy cập được qua `http://host/docs`
+
+---
+
 ## Câu hỏi mở còn lại
 
 Tham chiếu `OPEN-QUESTIONS.md` — đã trả lời hết Q1-Q12 cuối Day 1. Không câu hỏi mở mới.

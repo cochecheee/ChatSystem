@@ -1,0 +1,40 @@
+# Pull-and-run variant for teams that want chat-system on their own
+# infrastructure without cloning + building. Pulls pre-built images
+# from Docker Hub (published by chat-system's release.yml workflow on
+# every git tag).
+#
+# Quickstart:
+#   1. cp docker-compose.example.yml docker-compose.yml
+#   2. cp .env.example .env  (or mcp/.env — adjust env_file below)
+#   3. Fill in GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, GEMINI_API_KEY,
+#      SECRET_KEY, CI_WEBHOOK_TOKEN.
+#   4. docker compose up -d
+#   5. Open http://localhost:5173
+#
+# CI in your project pushes findings via:
+#   POST $MCP_GATEWAY_URL/webhook/pipeline-complete
+# See docs/webhook-schema.md for the contract.
+
+services:
+  mcp:
+    image: cochecheee/sast-chat-mcp:latest
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/mcp.db
+    volumes:
+      - mcp_data:/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  dashboard:
+    image: cochecheee/sast-chat-dashboard:latest
+    depends_on:
+      - mcp
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  mcp_data:

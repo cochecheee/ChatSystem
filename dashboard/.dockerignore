@@ -1,0 +1,22 @@
+node_modules/
+dist/
+dist-ssr/
+build/
+.next/
+test-results/
+playwright-report/
+coverage/
+
+# Local SQLite that snuck into dashboard/ during dev.
+mcp.db
+
+# Local env / editor noise.
+.env
+.env.local
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*

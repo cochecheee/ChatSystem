@@ -1,0 +1,24 @@
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local DBs — never bake into image.
+*.db
+mcp.db
+test.db
+findings.db
+
+# Local env — operator mounts/passes these at runtime.
+.env
+
+# Tests + dev artifacts not needed at runtime.
+tests/
+htmlcov/
+.coverage
+*.log
