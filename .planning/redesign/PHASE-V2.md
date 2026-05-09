@@ -376,9 +376,15 @@ Total **~70-80h** nếu làm nhẹ, ~100h nếu polish kỹ.
 
 ## Quyết định đã chốt (2026-05-09)
 
-> **Revision 2026-05-09 evening**: User chốt **defer Render deploy đến cuối V2** (sau khi tính năng mở rộng xong). V2.1-V2.4 phát triển local + ngrok như hiện tại; deploy step thành "V2.5 — Production deploy" cuối cùng.
+> **Revision 2026-05-09 evening (lần 2)**:
+> - Deploy chat-system (mcp + dashboard) chuyển hẳn sang **V2.5 cuối cùng**.
+> - User chọn **B1 deploy shape** (mcp + dashboard CÙNG là Web Service nginx-proxy) thay vì B2 (Static Site).
+> - V2.1-V2.4 develop local + ngrok như hiện tại.
+> - V2.2 CD pipeline chỉ deploy **inheritor app** (ALOUTE/sample Python) lên Render, KHÔNG đụng chat-system.
 
-1. **Hosting** — Cả `chat-system` lẫn sample inheritor sẽ deploy lên **Render free tier** ở **V2.5 cuối cùng**, skip ngrok khi đó.
+1. **Hosting** chat-system — V2.5 cuối cùng. **B1**: 2 Render Web Service (mcp + dashboard nginx). FE giữ nguyên `nginx.conf` hiện tại proxy `/api/*` → mcp. Cold start ~30s sau idle nhưng demo OK.
+
+2. **Hosting inheritor app** (ALOUTE/sample Python) — V2.2 deploy lên Render staging làm DAST target.
    - `mcp` → Render **Web Service** (Docker), URL `chat-mcp.onrender.com`
    - `dashboard` → Render **Static Site** (npm build → CDN edge serve `dist/`), URL `chat-dashboard.onrender.com`
    - **Lý do B2**: FE không cold start, free tier nhẹ (chỉ mcp tốn 750h Web Service quota), pattern industry standard 2026.
