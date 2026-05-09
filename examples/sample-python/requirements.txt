@@ -1,0 +1,5 @@
+# Vuln #6 — pinned to an old Flask with known CVEs so Trivy/Safety
+# have something to flag. Don't bump this without updating the demo
+# narrative (the point is to be vulnerable).
+Flask==1.0
+MarkupSafe==1.1.1
