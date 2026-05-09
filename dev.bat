@@ -10,6 +10,7 @@ REM   dev.bat e2e          — playwright e2e
 REM   dev.bat migrate      — chay migration v2 (idempotent)
 REM   dev.bat reset        — reset DB (xoa hot findings + artifacts)
 REM   dev.bat clean        — cleanup orphan failed artifacts
+REM   dev.bat lint         — lint GitHub Actions workflows + composite
 REM =====================================================================
 
 setlocal
@@ -25,6 +26,7 @@ if /i "%CMD%"=="e2e"     goto :e2e
 if /i "%CMD%"=="migrate" goto :migrate
 if /i "%CMD%"=="reset"   goto :reset
 if /i "%CMD%"=="clean"   goto :clean
+if /i "%CMD%"=="lint"    goto :lint
 goto :help
 
 :test
@@ -75,6 +77,13 @@ call .venv\Scripts\activate.bat
 python -m scripts.cleanup_db --apply
 goto :done
 
+:lint
+echo [lint] Checking GitHub Actions workflows + composite actions...
+cd mcp
+call .venv\Scripts\activate.bat
+python -m scripts.lint_workflows
+goto :done
+
 :help
 echo.
 echo Usage: dev.bat ^<command^>
@@ -86,6 +95,7 @@ echo   e2e      Playwright E2E tests
 echo   migrate  Add multi-tenant columns + backfill from .env
 echo   reset    Wipe findings + artifacts (DESTRUCTIVE — confirms first)
 echo   clean    Remove orphan failed artifacts (safe, findings preserved)
+echo   lint     Lint GitHub Actions workflows + composite actions
 echo.
 
 :done
