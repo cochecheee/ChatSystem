@@ -4,7 +4,7 @@ description: >-
   Drop-in replacement for the bespoke notify step in security pipelines —
   emits the JSON shape the gateway expects (run_id required, the rest
   ignored gracefully) and tolerates gateway downtime so it never blocks CI.
-author: 'Le Ba Tien Thanh'
+author: 'cocheche'
 branding:
   icon: 'shield'
   color: 'orange'

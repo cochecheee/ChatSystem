@@ -376,7 +376,9 @@ Total **~70-80h** nếu làm nhẹ, ~100h nếu polish kỹ.
 
 ## Quyết định đã chốt (2026-05-09)
 
-1. **Hosting** — Cả `chat-system` lẫn `aloute-staging` deploy lên **Render free tier**, skip ngrok hoàn toàn.
+> **Revision 2026-05-09 evening**: User chốt **defer Render deploy đến cuối V2** (sau khi tính năng mở rộng xong). V2.1-V2.4 phát triển local + ngrok như hiện tại; deploy step thành "V2.5 — Production deploy" cuối cùng.
+
+1. **Hosting** — Cả `chat-system` lẫn sample inheritor sẽ deploy lên **Render free tier** ở **V2.5 cuối cùng**, skip ngrok khi đó.
    - `mcp` → Render **Web Service** (Docker), URL `chat-mcp.onrender.com`
    - `dashboard` → Render **Static Site** (npm build → CDN edge serve `dist/`), URL `chat-dashboard.onrender.com`
    - **Lý do B2**: FE không cold start, free tier nhẹ (chỉ mcp tốn 750h Web Service quota), pattern industry standard 2026.

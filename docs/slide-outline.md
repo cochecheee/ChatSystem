@@ -12,7 +12,7 @@
 Hệ thống Tích hợp Bảo mật vào CI/CD Pipeline
 với hỗ trợ AI cho Quy trình Khắc phục
 
-Sinh viên:    Lê Bá Tiến Thành
+Sinh viên:    cocheche
 GVHD:         <tên GVHD>
 Ngày bảo vệ:  2026-05-XX
 ```

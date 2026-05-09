@@ -50,7 +50,7 @@ POST {MCP_GATEWAY_URL}/webhook/pipeline-complete
   "repository": "cochecheee/SAST_CICD",
   "ref": "refs/heads/main",
   "sha": "856928e2adac24423314c98541e253cd2da990af",
-  "actor": "tienblt",
+  "actor": "cocheche",
   "event": "push",
   "pipeline_status": "passed",
   "timestamp": "2026-05-08T21:30:00Z"

@@ -409,4 +409,4 @@ chat-system/
 
 ## Tác giả
 
-Lê Bá Tiến Thành — Đồ án tốt nghiệp 2025
+cocheche — Đồ án tốt nghiệp 2025

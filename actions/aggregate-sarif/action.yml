@@ -8,7 +8,7 @@ description: >-
 
   When in doubt, prefer notify-dashboard + the chat-system poller —
   this action is for advanced setups that push reports inline.
-author: 'Le Ba Tien Thanh'
+author: 'cocheche'
 branding:
   icon: 'upload-cloud'
   color: 'orange'

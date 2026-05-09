@@ -8,7 +8,7 @@ description: >-
   one in your CI workflow if you only need the webhook notify; for the
   full SAST suite use cochecheee/sast-chat/.github/workflows/sast-ci.yml
   reusable workflow which calls all three composite actions internally.
-author: 'Le Ba Tien Thanh'
+author: 'cocheche'
 branding:
   icon: 'send'
   color: 'orange'
