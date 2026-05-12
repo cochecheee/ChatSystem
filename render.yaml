@@ -21,19 +21,18 @@ services:
     dockerContext: ./mcp
     healthCheckPath: /health
 
-    # 1 GB free persistent volume so SQLite survives redeploys.
-    # Mount path matches Dockerfile's DATABASE_URL=/data/mcp.db.
-    disk:
-      name: mcp-data
-      mountPath: /data
-      sizeGB: 1
+    # NOTE: Render free tier does NOT support persistent disks. SQLite at
+    # /tmp/mcp.db resets on every redeploy + container restart. That's
+    # acceptable for demo because webhook ingests fresh CI data; for
+    # persistence upgrade to Render Postgres (free 90 days) and switch
+    # DATABASE_URL to postgresql+asyncpg://...
 
     envVars:
       # ----- Public config (safe to commit) -----
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:////data/mcp.db
+        value: sqlite+aiosqlite:////tmp/mcp.db
       - key: GITHUB_OWNER
         value: cochecheee
       - key: GITHUB_REPO
