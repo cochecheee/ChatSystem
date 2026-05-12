@@ -1,4 +1,4 @@
-# Testing GitHub Actions — composite + reusable workflow
+﻿# Testing GitHub Actions — composite + reusable workflow
 
 > Cách verify `actions/*` + `.github/workflows/sast-ci.yml` work end-to-end trước khi pin tag `@v0.2.0`.
 
@@ -47,7 +47,7 @@ choco install act-cli       # hoặc tải release từ GitHub
 # Pre-condition: Docker Desktop đang chạy
 
 # Chạy reusable workflow của sample-python local
-cd examples\sample-python
+cd D:\School\DoAnTotNghiep\sample-python
 
 # Tạo file secret tạm
 @"
@@ -61,7 +61,7 @@ act push --workflows .github\workflows\security.yml `
 ```
 
 **Limitation `act`**:
-- Không pull reusable workflow từ remote `cocheche/sast-chat/.github/workflows/sast-ci.yml@main` — phải clone chat-system về local + override `uses:` dùng path local `./.github/workflows/sast-ci.yml` (act hỗ trợ relative reference).
+- Không pull reusable workflow từ remote `cochecheee/sast-action/.github/workflows/sast-ci.yml@main` — phải clone chat-system về local + override `uses:` dùng path local `./.github/workflows/sast-ci.yml` (act hỗ trợ relative reference).
 - 1 số GitHub-only feature (cache, artifact upload server) sẽ no-op hoặc fail.
 - Image `catthehacker/ubuntu:act-latest` nặng (~2 GB) — pull lần đầu chậm.
 
@@ -71,64 +71,52 @@ act push --workflows .github\workflows\security.yml `
 
 ## Level 3 — Real run trên GitHub Actions (5-10 phút, ground truth)
 
-### Step 1: Push branch chat-system lên GitHub
+> **Note (V2 split)**: Action library đã tách ra repo riêng `cochecheee/sast-action` (folder local: `D:\School\DoAnTotNghiep\sast-action`). Sample-python đã move ra `D:\School\DoAnTotNghiep\sample-python`. Chat-system repo này **không còn** chứa `actions/` hay `sast-ci.yml`.
+
+### Step 1: Push 2 repo lên GitHub
 
 ```powershell
-cd D:\School\DoAnTotNghiep\chat-system
-git push origin ft/imp-fe
-```
+# Repo 1: action library
+cd D:\School\DoAnTotNghiep\sast-action
+git init -b main
+git add .
+git commit -m "init: SAST actions library"
+gh repo create cochecheee/sast-action --public --source=. --push --remote=origin
 
-(Mày đã có remote `cocheche/sast-chat` chưa? Nếu chưa: `gh repo create cocheche/sast-chat --public --source=. --push --remote=origin`)
-
-### Step 2: Tạo repo sample-python độc lập trên GitHub
-
-```powershell
-# Copy examples/sample-python/ ra folder tạm
-$dst = "D:\tmp\sast-chat-sample-python"
-New-Item -ItemType Directory -Force -Path $dst | Out-Null
-Copy-Item -Recurse -Force examples\sample-python\* $dst
-
-cd $dst
-git init
+# Repo 2: sample inheritor
+cd D:\School\DoAnTotNghiep\sample-python
+git init -b main
 git add .
 git commit -m "init: vulnerable Flask sample"
-
-# Tạm chỉnh workflow để point sang branch test thay vì @v0.2.0
-$wf = ".github\workflows\security.yml"
-(Get-Content $wf) -replace '@main', '@ft/imp-fe' | Set-Content $wf
-git add $wf
-git commit --amend --no-edit
-
-# Push lên GitHub
-gh repo create cocheche/sast-chat-sample-python --public --source=. --push --remote=origin
+gh repo create cochecheee/sample-python --public --source=. --push --remote=origin
 ```
 
-### Step 3: Set GitHub Secrets
+### Step 2: Set GitHub Secrets cho sample-python
 
 Khi chat-system chưa deploy public, dùng giá trị giả để workflow chạy nhưng `notify-dashboard` step sẽ skip với warning (URL trống = OK):
 
 ```powershell
-gh secret set MCP_GATEWAY_URL    -R cocheche/sast-chat-sample-python --body ""
-gh secret set MCP_WEBHOOK_TOKEN  -R cocheche/sast-chat-sample-python --body ""
+gh secret set MCP_GATEWAY_URL    -R cochecheee/sample-python --body ""
+gh secret set MCP_WEBHOOK_TOKEN  -R cochecheee/sample-python --body ""
 ```
 
 Hoặc nếu mày có ngrok URL public:
 ```powershell
-gh secret set MCP_GATEWAY_URL    -R cocheche/sast-chat-sample-python --body "https://abc.ngrok-free.app"
-gh secret set MCP_WEBHOOK_TOKEN  -R cocheche/sast-chat-sample-python --body "<token same as chat-system .env>"
+gh secret set MCP_GATEWAY_URL    -R cochecheee/sample-python --body "https://abc.ngrok-free.app"
+gh secret set MCP_WEBHOOK_TOKEN  -R cochecheee/sample-python --body "<token same as chat-system .env>"
 ```
 
-### Step 4: Trigger workflow + watch
+### Step 3: Trigger workflow + watch
 
 Workflow tự trigger khi push commit. Hoặc manual:
 
 ```powershell
-cd $dst
+cd D:\School\DoAnTotNghiep\sample-python
 gh workflow run security.yml
 gh run watch
 ```
 
-### Step 5: Verify expected
+### Step 4: Verify expected
 
 Mong đợi:
 - `actions/sast-suite` step chạy 4 tools (Semgrep + Trivy + Bandit + Safety) cho language=python
@@ -144,13 +132,13 @@ Nếu fail, check log của step nào:
 gh run view --log-failed
 ```
 
-### Step 6: Cleanup khi xong test
+### Step 5: Cleanup khi xong test
 
 ```powershell
-# Repo sample-python: giữ làm demo lâu dài hoặc xoá
-gh repo delete cocheche/sast-chat-sample-python --yes
+# Sample-python: giữ làm demo lâu dài hoặc xoá
+gh repo delete cochecheee/sample-python --yes
 
-# Branch test trong sample-python: revert @ft/imp-fe → @v0.2.0 sau khi tag
+# sast-action: KHÔNG xoá — đó là production library
 ```
 
 ---
@@ -200,14 +188,14 @@ jobs:
   bad:
     runs-on: ubuntu-latest
     steps:
-      - uses: cocheche/sast-chat/.github/workflows/sast-ci.yml@v0.2.0   # ❌ reusable phải ở job-level
+      - uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@v0.2.0   # ❌ reusable phải ở job-level
 ```
 
 Đúng:
 ```yaml
 jobs:
   good:
-    uses: cocheche/sast-chat/.github/workflows/sast-ci.yml@v0.2.0
+    uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@v0.2.0
     with: ...
 ```
 

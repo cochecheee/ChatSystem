@@ -1,4 +1,4 @@
-# REUSABILITY — Đóng gói thế nào để dự án khác dùng được
+﻿# REUSABILITY — Đóng gói thế nào để dự án khác dùng được
 
 > Trả lời câu hỏi mày đặt ra: *"vấn đề là nó lấy kết quả SAST từ CI/CD nên các dự án khác khó dùng"*. Đây là phân tích sâu trước khi chốt option.
 
@@ -78,12 +78,12 @@ CI chỉ cần thêm 1 step:
 
 ---
 
-### Option B — GitHub Action `cochecheee/sast-chat@v1` + central dashboard
+### Option B — GitHub Action `cochecheee/sast-action@v1` + central dashboard
 
 **Cách dùng (project khác)**:
 ```yaml
 # .github/workflows/sast.yml
-- uses: cochecheee/sast-chat@v1
+- uses: cochecheee/sast-action@v1
   with:
     sast-tools: 'semgrep,codeql,trivy'
     dashboard-url: ${{ secrets.SAST_CHAT_URL }}

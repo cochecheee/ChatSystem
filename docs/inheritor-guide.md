@@ -1,4 +1,4 @@
-# Inheritor Guide — Plug your repo into chat-system in 5 minutes
+﻿# Inheritor Guide — Plug your repo into chat-system in 5 minutes
 
 > Mục tiêu: project bất kỳ (Java/Python/Node/Go) chỉ cần 1 file workflow ngắn để có toàn bộ SAST scan + push findings về dashboard.
 
@@ -28,7 +28,7 @@ on:
 
 jobs:
   security:
-    uses: cochecheee/sast-chat/.github/workflows/sast-ci.yml@v0.2.0
+    uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@v0.2.0
     with:
       language: python    # java | python | node | go
       dashboard_url: ${{ secrets.MCP_GATEWAY_URL }}
@@ -84,11 +84,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: cochecheee/sast-chat/actions/sast-suite@v0.2.0
+      - uses: cochecheee/sast-action/actions/sast-suite@v0.2.0
         with:
           language: python
 
-      - uses: cochecheee/sast-chat/actions/notify-dashboard@v0.2.0
+      - uses: cochecheee/sast-action/actions/notify-dashboard@v0.2.0
         with:
           dashboard-url:   ${{ secrets.MCP_GATEWAY_URL }}
           dashboard-token: ${{ secrets.MCP_WEBHOOK_TOKEN }}
@@ -107,7 +107,7 @@ jobs:
 
 ## Workflow steps under the hood
 
-Khi mày `uses: cochecheee/sast-chat/.github/workflows/sast-ci.yml@v0.2.0`:
+Khi mày `uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@v0.2.0`:
 
 ```
 1. Checkout repo
@@ -159,12 +159,12 @@ chat-system phía bên kia:
 Pin theo tag để tránh breaking change:
 
 ```yaml
-uses: cochecheee/sast-chat/.github/workflows/sast-ci.yml@v0.2.0
+uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@v0.2.0
 ```
 
 `@main` cũng work cho dev nhưng không stable.
 
-Composite action cùng tag: `cochecheee/sast-chat/actions/sast-suite@v0.2.0`.
+Composite action cùng tag: `cochecheee/sast-action/actions/sast-suite@v0.2.0`.
 
 ---
 

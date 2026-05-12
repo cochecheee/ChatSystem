@@ -1,0 +1,65 @@
+# Render Blueprint — chat-system MCP backend
+# https://render.com/docs/blueprint-spec
+#
+# Connect: dashboard.render.com → New + → Blueprint → cochecheee/ChatSystem
+# Render auto-reads this file, creates the Web Service + Persistent Disk,
+# and asks you to fill in the 4 `sync: false` secrets in the UI.
+#
+# Auto-deploy: every push to `branch:` re-runs `docker build` and rolls
+# out a new container. SQLite at /data survives across redeploys via
+# the persistent disk mount.
+
+services:
+  - type: web
+    name: mcp
+    runtime: docker
+    plan: free            # 750h/mo, sleeps after 15min idle, cold start ~30s
+    region: singapore     # closest to VN; change to oregon/frankfurt as needed
+    branch: ft/imp-fe     # auto-deploy on push here; switch to `main` later
+    autoDeploy: true
+    dockerfilePath: ./mcp/Dockerfile
+    dockerContext: ./mcp
+    healthCheckPath: /health
+
+    # 1 GB free persistent volume so SQLite survives redeploys.
+    # Mount path matches Dockerfile's DATABASE_URL=/data/mcp.db.
+    disk:
+      name: mcp-data
+      mountPath: /data
+      sizeGB: 1
+
+    envVars:
+      # ----- Public config (safe to commit) -----
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////data/mcp.db
+      - key: GITHUB_OWNER
+        value: cochecheee
+      - key: GITHUB_REPO
+        value: sample-python
+      - key: POLLING_WORKFLOW_NAME
+        value: Security
+      - key: POLLING_INTERVAL_SECONDS
+        value: "300"
+      - key: POLLING_BRANCH
+        value: main
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_MAX_RETRIES
+        value: "3"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "480"
+      - key: CI_API_KEY
+        value: ""
+
+      # ----- Secrets (set in Render UI after Blueprint creates the service) -----
+      # `sync: false` tells Render: "don't manage this value — operator fills it in".
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: CI_WEBHOOK_TOKEN
+        sync: false

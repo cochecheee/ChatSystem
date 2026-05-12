@@ -1,4 +1,4 @@
-# PHASE V2 — DevSecOps Template (CI → CD → Runtime SAST → Monitor)
+﻿# PHASE V2 — DevSecOps Template (CI → CD → Runtime SAST → Monitor)
 
 > Plan cụ thể cho mục tiêu V2: biến chat-system từ "1 dashboard SAST" thành **template DevSecOps end-to-end** mà project khác kế thừa được. Nhỏ-nhẹ cho đồ án nhưng đầy đủ flow.
 
@@ -36,9 +36,9 @@
 
 **3 reusable artifact** mà inheritor repo dùng:
 
-1. `cochecheee/sast-chat/.github/workflows/sast-ci.yml` — reusable workflow (CI + SAST + push notify)
-2. `cochecheee/sast-chat/cd-action` — composite Action (build image + deploy Render)
-3. `cochecheee/sast-chat/monitor-action` — composite Action (DAST + CVE re-scan + uptime ping + email)
+1. `cochecheee/sast-action/.github/workflows/sast-ci.yml` — reusable workflow (CI + SAST + push notify)
+2. `cochecheee/sast-action/cd-action` — composite Action (build image + deploy Render)
+3. `cochecheee/sast-action/monitor-action` — composite Action (DAST + CVE re-scan + uptime ping + email)
 
 ---
 
@@ -52,7 +52,7 @@ Inheritor repo chỉ cần 1-2 file workflow ngắn để có toàn bộ SAST CI
 
 ### Nội dung
 
-1. **Reusable workflow** `cochecheee/sast-chat/.github/workflows/sast-ci.yml@v2`
+1. **Reusable workflow** `cochecheee/sast-action/.github/workflows/sast-ci.yml@v2`
    - Inputs: `language` (java/python/node/go), `dashboard_url`, `dashboard_token` (secret)
    - Tự chọn SAST tool theo language:
      - Java → Semgrep + CodeQL + SpotBugs + Dep-Check + Trivy
@@ -73,7 +73,7 @@ Inheritor repo chỉ cần 1-2 file workflow ngắn để có toàn bộ SAST CI
    on: [push, pull_request]
    jobs:
      security:
-       uses: cochecheee/sast-chat/.github/workflows/sast-ci.yml@v2
+       uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@v2
        with:
          language: java
          dashboard_url: ${{ secrets.MCP_GATEWAY_URL }}
@@ -116,9 +116,9 @@ Sau khi CI pass + SAST không có critical, auto-deploy to staging. Chứng minh
    - Environment "production" — require manual approval của security_lead role
    - Reuse JWT role concept từ chat-system
 
-4. **Composite Action** `cochecheee/sast-chat/actions/deploy-staging`:
+4. **Composite Action** `cochecheee/sast-action/actions/deploy-staging`:
    ```yaml
-   - uses: cochecheee/sast-chat/actions/deploy-staging@v2
+   - uses: cochecheee/sast-action/actions/deploy-staging@v2
      with:
        image: cochecheee/sast-chat-sample-java
        deploy_hook: ${{ secrets.RENDER_DEPLOY_HOOK }}
@@ -171,7 +171,7 @@ Sau khi staging deployed, chạy SAST động (DAST) trên URL thật + monitor 
 
 1. **OWASP ZAP DAST** — daily scheduled GitHub Action:
    ```yaml
-   # cochecheee/sast-chat/.github/workflows/dast-scheduled.yml
+   # cochecheee/sast-action/.github/workflows/dast-scheduled.yml
    on:
      schedule: [cron: '0 2 * * *']   # 2 AM UTC daily
      workflow_dispatch:
@@ -196,7 +196,7 @@ Sau khi staging deployed, chạy SAST động (DAST) trên URL thật + monitor 
 
 4. **Composite action** `actions/runtime-monitor/action.yml`:
    ```yaml
-   - uses: cochecheee/sast-chat/actions/runtime-monitor@v2
+   - uses: cochecheee/sast-action/actions/runtime-monitor@v2
      with:
        staging_url: https://my-app-staging.onrender.com
        dashboard_url: ${{ secrets.MCP_GATEWAY_URL }}
@@ -259,7 +259,7 @@ Monitor staging app uptime + error rate. Email alert khi: critical finding mới
 
 5. **Composite action** `actions/notify-monitor/action.yml`:
    ```yaml
-   - uses: cochecheee/sast-chat/actions/notify-monitor@v2
+   - uses: cochecheee/sast-action/actions/notify-monitor@v2
      with:
        event: deployed | failed | down
        service_name: my-app

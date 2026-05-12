@@ -1,4 +1,4 @@
-# ANALYSIS — Hiện trạng chat-system (2026-05-08)
+﻿# ANALYSIS — Hiện trạng chat-system (2026-05-08)
 
 > Phân tích sâu trước khi đề xuất tái triển khai. Mục tiêu: trả lời câu hỏi *"sản phẩm này thực sự đóng góp gì, có tái sử dụng được không?"*
 
@@ -127,7 +127,7 @@ Hiện tại **KHÔNG**, vì 4 lý do:
 | Phương án | Onboard effort | Maintenance | Phù hợp đồ án? |
 |---|---|---|---|
 | **A. Docker Compose template** (per-project self-host) | 30 phút (clone + .env + paste workflow YAML) | Mỗi team tự lo | ✅ Khả thi 1 tuần |
-| **B. GitHub Action `cochecheee/sast-chat@v1` + central dashboard** | 5 phút (add 1 step vào workflow) | Tao maintain Action | ⚠️ Tham vọng, khó nhưng impressive |
+| **B. GitHub Action `cochecheee/sast-action@v1` + central dashboard** | 5 phút (add 1 step vào workflow) | Tao maintain Action | ⚠️ Tham vọng, khó nhưng impressive |
 | **C. SaaS multi-tenant** | < 5 phút | Tao maintain server | ❌ Quá to cho 1 tuần |
 
 **Khuyến nghị**: chi tiết trong `REUSABILITY.md`.
