@@ -51,6 +51,10 @@ services:
         value: "480"
       - key: CI_API_KEY
         value: ""
+      - key: CORS_ORIGINS
+        # Comma-separated list of allowed origins for the dashboard.
+        # Add your deployed dashboard URL here once it goes live.
+        value: "http://localhost:5173,http://localhost:4173"
 
       # ----- Secrets (set in Render UI after Blueprint creates the service) -----
       # `sync: false` tells Render: "don't manage this value — operator fills it in".

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     CI_API_KEY: str = ""        # if empty, auth disabled (dev/test mode)
     CI_WEBHOOK_TOKEN: str = ""  # if empty, webhook auth disabled
+    # Comma-separated origin list for production CORS. Ignored in
+    # development/testing (where allow_origins="*"). Set on Render to
+    # the dashboard URL + any local-dev URL you want to allow.
+    CORS_ORIGINS: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
