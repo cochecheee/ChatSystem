@@ -47,24 +47,38 @@ async def init_db() -> None:
         await conn.run_sync(_migrate_schema)
 
 
+def _pg_column_data_type(sync_conn, table: str, column: str) -> str | None:
+    """Return the canonical Postgres `data_type` for a column, or None if
+    the table/column doesn't exist. Goes through information_schema so we
+    get the truthful DB type string ("timestamp with time zone", "bigint",
+    "integer", ...) — SQLAlchemy's reflected column.type stringifies as
+    "TIMESTAMP" or "INTEGER" regardless of the underlying variant, which
+    previously caused these migration checks to fire on every boot.
+    """
+    from sqlalchemy import text
+
+    row = sync_conn.execute(
+        text(
+            "SELECT data_type FROM information_schema.columns "
+            "WHERE table_schema = current_schema() "
+            "AND table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).first()
+    return row[0].lower() if row else None
+
+
 def _needs_tz_migration(sync_conn) -> bool:
-    """Return True iff connection is Postgres AND projects.created_at exists
-    as `timestamp without time zone`. Means schema predates the DT_TZ change
-    and we need a one-shot drop+recreate.
+    """Return True iff Postgres has projects.created_at as the naive
+    `timestamp without time zone` variant. Schema predates the DT_TZ
+    rewrite — drop+recreate once so the tz-aware columns apply.
     """
     if sync_conn.dialect.name != "postgresql":
         return False
-    from sqlalchemy import inspect
-
-    inspector = inspect(sync_conn)
-    if "projects" not in inspector.get_table_names():
-        return False  # fresh DB, create_all will set correct types
-    for col in inspector.get_columns("projects"):
-        if col["name"] == "created_at":
-            col_type = str(col["type"]).upper()
-            # SQLAlchemy returns "TIMESTAMP" for naive, "TIMESTAMP WITH TIME ZONE" for aware
-            return "WITH TIME ZONE" not in col_type
-    return False
+    dtype = _pg_column_data_type(sync_conn, "projects", "created_at")
+    if dtype is None:
+        return False  # fresh DB; create_all handles it
+    return "with time zone" not in dtype
 
 
 def _needs_bigint_migration(sync_conn) -> bool:
@@ -74,16 +88,10 @@ def _needs_bigint_migration(sync_conn) -> bool:
     """
     if sync_conn.dialect.name != "postgresql":
         return False
-    from sqlalchemy import inspect
-
-    inspector = inspect(sync_conn)
-    if "artifacts" not in inspector.get_table_names():
+    dtype = _pg_column_data_type(sync_conn, "artifacts", "github_run_id")
+    if dtype is None:
         return False
-    for col in inspector.get_columns("artifacts"):
-        if col["name"] == "github_run_id":
-            col_type = str(col["type"]).upper()
-            return "BIGINT" not in col_type
-    return False
+    return dtype != "bigint"
 
 
 def _migrate_schema(sync_conn) -> None:
