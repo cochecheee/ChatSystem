@@ -115,3 +115,52 @@ class AppConfig(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+# ---------------------------------------------------------------------------
+# V2.4 — Monitor + alert
+# ---------------------------------------------------------------------------
+
+class UptimeCheck(Base):
+    """One ping result against an inheritor staging URL.
+
+    Scheduler writes 1 row every POLLING_INTERVAL_SECONDS. The Monitor tab
+    aggregates these into uptime % and a sparkline. Rows older than 7 days
+    are pruned in a daily job to keep SQLite small.
+    """
+
+    __tablename__ = "uptime_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
+    target_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    )
+    http_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_up: Mapped[bool] = mapped_column(Integer, nullable=False)  # 1 if 2xx/3xx
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Alert(Base):
+    """Operational alert raised by the monitor (down event, CVE diff, etc).
+
+    Distinct from Finding — these are runtime events not source-code issues.
+    """
+
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    # kind ∈ {"down", "recovered", "cve_new", "deploy_failed"}
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raised_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    )
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

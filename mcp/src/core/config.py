@@ -22,6 +22,24 @@ class Settings(BaseSettings):
     # the dashboard URL + any local-dev URL you want to allow.
     CORS_ORIGINS: str = ""
 
+    # V2.4 — Monitor + alert
+    MONITOR_ENABLED: bool = False
+    MONITOR_INTERVAL_SECONDS: int = 300
+    # Comma-separated list of (project_id:url) to ping, e.g.
+    #   "1:https://sample-python-latest.onrender.com/health"
+    MONITOR_TARGETS: str = ""
+    MONITOR_DOWN_THRESHOLD: int = 2  # consecutive fails before alert
+
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+    SMTP_USE_TLS: bool = True
+    EMAIL_FROM: str = ""
+    EMAIL_TO: str = ""
+
+    SENTRY_DSN: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

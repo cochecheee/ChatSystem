@@ -12,6 +12,7 @@ from .api.analysis import router as analysis_router
 from .api.artifacts import router as artifacts_router
 from .api.chat import router as chat_router
 from .api.config import router as config_router
+from .api.monitor import router as monitor_router
 from .api.stats import router as stats_router
 from .core.config import settings
 from .core.db import init_db
@@ -30,11 +31,32 @@ if TEST_MODE:
 async def lifespan(app: FastAPI):
     await init_db()
 
+    # V2.4 — Sentry init (gracefully skipped if SENTRY_DSN empty)
+    if settings.SENTRY_DSN:
+        try:
+            import sentry_sdk
+            sentry_sdk.init(
+                dsn=settings.SENTRY_DSN,
+                environment=settings.APP_ENV,
+                traces_sample_rate=0.1,
+            )
+            log.info("Sentry initialized")
+        except ImportError:
+            log.warning("SENTRY_DSN set but sentry-sdk not installed")
+        except Exception:  # noqa: BLE001
+            log.exception("Sentry init failed — continuing")
+
     if settings.APP_ENV not in ("testing", "test") and not TEST_MODE:
         from .services.poller import GitHubPoller
         poller = GitHubPoller()
         asyncio.create_task(poller.start())
         log.info("Background poller scheduled")
+
+        # V2.4 — Monitor loop (uptime ping + alert)
+        if settings.MONITOR_ENABLED:
+            from .services.monitor import monitor_loop
+            asyncio.create_task(monitor_loop())
+            log.info("Monitor loop scheduled")
 
     yield
 
@@ -63,6 +85,7 @@ app.include_router(artifacts_router, tags=["core"])
 app.include_router(analysis_router, tags=["ai"])
 app.include_router(chat_router)
 app.include_router(config_router)
+app.include_router(monitor_router)
 app.include_router(stats_router)
 
 

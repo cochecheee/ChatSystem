@@ -32,6 +32,9 @@ passlib[bcrypt]>=1.7.4
 # Rate Limiting
 slowapi>=0.1.9
 
+# V2.4 — Monitor + alert (Sentry is optional; SENTRY_DSN gates init)
+sentry-sdk>=2.0.0
+
 # Utils
 python-dotenv>=1.0.0
 python-multipart>=0.0.9

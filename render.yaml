@@ -51,6 +51,15 @@ services:
         value: "480"
       - key: CI_API_KEY
         value: ""
+      # V2.4 — Monitor uptime checks (no email until SMTP_* set)
+      - key: MONITOR_ENABLED
+        value: "true"
+      - key: MONITOR_INTERVAL_SECONDS
+        value: "300"
+      - key: MONITOR_TARGETS
+        value: "1:https://sample-python-latest.onrender.com/health"
+      - key: MONITOR_DOWN_THRESHOLD
+        value: "2"
       - key: CORS_ORIGINS
         # Comma-separated list of allowed origins for the dashboard.
         # Static Site URL appended once V2.5 lands.

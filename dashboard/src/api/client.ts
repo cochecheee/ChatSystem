@@ -66,6 +66,48 @@ export interface FindingListParams {
   limit?: number;
 }
 
+async function getRaw<T>(path: string): Promise<T> {
+  const res = await fetch(BASE + path, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json() as Promise<T>;
+}
+
+export interface UptimeCheck {
+  id: number;
+  project_id: number;
+  target_url: string;
+  checked_at: string;
+  http_status: number;
+  response_time_ms: number | null;
+  is_up: boolean;
+  error_message: string | null;
+}
+
+export interface UptimeSummary {
+  hours: number;
+  targets: {
+    target_url: string;
+    checks: number;
+    up: number;
+    down: number;
+    uptime_pct: number;
+    avg_latency_ms: number | null;
+  }[];
+}
+
+export interface AlertItem {
+  id: number;
+  project_id: number | null;
+  kind: string;
+  severity: string;
+  title: string;
+  detail: string | null;
+  extra: Record<string, unknown> | null;
+  raised_at: string;
+  notified_at: string | null;
+  acknowledged_at: string | null;
+}
+
 export const api = {
   findings: {
     list: (params?: FindingListParams) =>
@@ -75,6 +117,30 @@ export const api = {
       getWithTotal<Finding[]>('/findings', params as Record<string, string | number>),
     get: (id: number) => get<Finding>(`/findings/${id}`),
     explain: (id: number) => post<AnalysisResult>(`/findings/${id}/explain`),
+  },
+  monitor: {
+    summary: (hours = 24) =>
+      getRaw<UptimeSummary>(`/monitor/summary?hours=${hours}`),
+    uptime: (hours = 24) =>
+      getRaw<{ count: number; hours: number; items: UptimeCheck[] }>(`/monitor/uptime?hours=${hours}`),
+    alerts: (params?: { only_open?: boolean; kind?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.only_open) q.set('only_open', 'true');
+      if (params?.kind) q.set('kind', params.kind);
+      return getRaw<AlertItem[]>(`/monitor/alerts${q.toString() ? '?' + q : ''}`);
+    },
+    ack: (alertId: number) =>
+      fetch(`${BASE}/monitor/alerts/${alertId}/ack`, {
+        method: 'POST',
+        headers: authHeaders(),
+      }).then(res => {
+        if (!res.ok && res.status !== 204) throw new Error(`${res.status}`);
+      }),
+    ping: () =>
+      fetch(`${BASE}/monitor/ping`, {
+        method: 'POST',
+        headers: authHeaders(),
+      }).then(res => res.json() as Promise<{ checks_executed: number }>),
   },
   projects: {
     list: () => get<Project[]>('/projects'),
@@ -99,6 +165,8 @@ export const api = {
       deps_open: number;
       sast_critical_high: number;
       deps_critical_high: number;
+      dast_open?: number;
+      dast_critical_high?: number;
       approved: number;
       revoked: number;
       pending: number;
