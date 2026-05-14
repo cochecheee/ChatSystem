@@ -22,14 +22,39 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 
 async def init_db() -> None:
     async with engine.begin() as conn:
-        # One-shot reset hatch — set INIT_DB_DROP_ALL=1 on Render after a
-        # schema change (e.g. DateTime → DateTime(timezone=True)). Unset
-        # immediately after the next deploy so we don't nuke real data.
-        if os.environ.get("INIT_DB_DROP_ALL") == "1":
-            log.warning("INIT_DB_DROP_ALL=1 — dropping all tables before recreate")
+        # Auto-drop hatch: if Postgres has old TIMESTAMP WITHOUT TIME ZONE
+        # columns from before the DT_TZ migration, drop + recreate so the
+        # new tz-aware schema applies. SQLite path skips this check.
+        # Manual override INIT_DB_DROP_ALL=1 always wins.
+        force_drop = os.environ.get("INIT_DB_DROP_ALL") == "1"
+        if force_drop or await conn.run_sync(_needs_tz_migration):
+            log.warning(
+                "Dropping all tables (reason=%s) — recreating with current schema",
+                "INIT_DB_DROP_ALL" if force_drop else "TZ migration detected",
+            )
             await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_schema)
+
+
+def _needs_tz_migration(sync_conn) -> bool:
+    """Return True iff connection is Postgres AND projects.created_at exists
+    as `timestamp without time zone`. Means schema predates the DT_TZ change
+    and we need a one-shot drop+recreate.
+    """
+    if sync_conn.dialect.name != "postgresql":
+        return False
+    from sqlalchemy import inspect
+
+    inspector = inspect(sync_conn)
+    if "projects" not in inspector.get_table_names():
+        return False  # fresh DB, create_all will set correct types
+    for col in inspector.get_columns("projects"):
+        if col["name"] == "created_at":
+            col_type = str(col["type"]).upper()
+            # SQLAlchemy returns "TIMESTAMP" for naive, "TIMESTAMP WITH TIME ZONE" for aware
+            return "WITH TIME ZONE" not in col_type
+    return False
 
 
 def _migrate_schema(sync_conn) -> None:
