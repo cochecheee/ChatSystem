@@ -29,7 +29,7 @@
 | V2.1.3 | ✅ | Tách `actions/` ra repo riêng `cochecheee/sast-action`. Tách `examples/sample-python/` ra repo `cochecheee/sample-python`. |
 | V2.1.4 | ✅ | Deploy mcp lên Render free tier (Blueprint config) |
 | V2.1.5 | ✅ | Fix ingest profile + production CORS |
-| V2.2 | ✅ | CD: build image inheritor + deploy Render staging (sast-action side done, mcp side deferred) |
+| V2.2 | ⏳ | CD: build image inheritor + deploy Render staging |
 | V2.3 | ⏳ | Runtime DAST (OWASP ZAP) + daily Trivy CVE re-scan |
 | V2.4 | ⏳ | Monitor + email alert (Sentry + SMTP) |
 | V2.5 | ⏳ | Deploy dashboard lên Render Static Site |

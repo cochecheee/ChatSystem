@@ -53,8 +53,8 @@ services:
         value: ""
       - key: CORS_ORIGINS
         # Comma-separated list of allowed origins for the dashboard.
-        # Add your deployed dashboard URL here once it goes live.
-        value: "http://localhost:5173,http://localhost:4173"
+        # Static Site URL appended once V2.5 lands.
+        value: "http://localhost:5173,http://localhost:4173,https://dashboard-chat-system.onrender.com"
 
       # ----- Secrets (set in Render UI after Blueprint creates the service) -----
       # `sync: false` tells Render: "don't manage this value — operator fills it in".
@@ -66,3 +66,37 @@ services:
         sync: false
       - key: CI_WEBHOOK_TOKEN
         sync: false
+
+  # ============================================================
+  # V2.5 — Dashboard Static Site
+  # Render builds the Vite/React app and serves the static bundle
+  # over a CDN — no cold start, unlimited 100GB/mo bandwidth free.
+  # ============================================================
+  - type: web
+    name: dashboard
+    runtime: static
+    branch: ft/imp-fe
+    autoDeploy: true
+    rootDir: dashboard
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    # SPA fallback — any unknown path serves index.html so React Router
+    # client-side routing works on hard refresh / direct URL hits.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    # Security headers (default Render headers + tightened)
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+    envVars:
+      - key: VITE_API_URL
+        value: https://mcp-l958.onrender.com
