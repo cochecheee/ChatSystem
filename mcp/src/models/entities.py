@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, UTC
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 
 # Timezone-aware DateTime singleton — passed to every `mapped_column(DT_TZ, ...)`
 # so Postgres column type is TIMESTAMP WITH TIME ZONE. asyncpg refuses to
@@ -27,7 +27,10 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     github_url: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC))
-    last_processed_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # GitHub workflow run IDs are 64-bit (~25B as of 2026). On Postgres,
+    # SQLAlchemy Integer = INT4 (max 2.1B) → "integer out of range" on insert.
+    # SQLite hid this because it stores integers dynamically up to 64-bit.
+    last_processed_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     # Multi-tenant config (Day 2). One chat-system instance can serve N
     # repos — each row carries the GitHub creds + AI key + polling and
@@ -68,7 +71,7 @@ class Artifact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     github_artifact_id: Mapped[str] = mapped_column(String(255), nullable=False)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
-    github_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    github_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default=ArtifactStatus.pending.value, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))

@@ -22,15 +22,25 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 
 async def init_db() -> None:
     async with engine.begin() as conn:
-        # Auto-drop hatch: if Postgres has old TIMESTAMP WITHOUT TIME ZONE
-        # columns from before the DT_TZ migration, drop + recreate so the
-        # new tz-aware schema applies. SQLite path skips this check.
-        # Manual override INIT_DB_DROP_ALL=1 always wins.
+        # Auto-drop hatch: drop+recreate Postgres tables when an older schema
+        # is detected. Two known migrations:
+        #   1. TIMESTAMP -> TIMESTAMP WITH TIME ZONE (DT_TZ migration)
+        #   2. INTEGER  -> BIGINT  on github run-id columns (INT4 overflow)
+        # SQLite stores integers/timestamps dynamically so skips both checks.
         force_drop = os.environ.get("INIT_DB_DROP_ALL") == "1"
-        if force_drop or await conn.run_sync(_needs_tz_migration):
+        if force_drop:
+            reason = "INIT_DB_DROP_ALL"
+        elif await conn.run_sync(_needs_tz_migration):
+            reason = "TZ migration detected"
+        elif await conn.run_sync(_needs_bigint_migration):
+            reason = "BIGINT migration detected"
+        else:
+            reason = None
+
+        if reason is not None:
             log.warning(
                 "Dropping all tables (reason=%s) — recreating with current schema",
-                "INIT_DB_DROP_ALL" if force_drop else "TZ migration detected",
+                reason,
             )
             await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -54,6 +64,25 @@ def _needs_tz_migration(sync_conn) -> bool:
             col_type = str(col["type"]).upper()
             # SQLAlchemy returns "TIMESTAMP" for naive, "TIMESTAMP WITH TIME ZONE" for aware
             return "WITH TIME ZONE" not in col_type
+    return False
+
+
+def _needs_bigint_migration(sync_conn) -> bool:
+    """Return True iff Postgres has artifacts.github_run_id as INTEGER (INT4)
+    instead of BIGINT. GitHub run IDs already exceed INT4 max (~2.1B), so any
+    insert overflows. SQLite reports the column as INTEGER for both; ignore.
+    """
+    if sync_conn.dialect.name != "postgresql":
+        return False
+    from sqlalchemy import inspect
+
+    inspector = inspect(sync_conn)
+    if "artifacts" not in inspector.get_table_names():
+        return False
+    for col in inspector.get_columns("artifacts"):
+        if col["name"] == "github_run_id":
+            col_type = str(col["type"]).upper()
+            return "BIGINT" not in col_type
     return False
 
 
