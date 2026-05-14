@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.entities import Finding
 from ...models.schemas import AnalysisResult
 from ..github_client import GitHubClient
-from ...core.guardrails import ScrubbingService
+from ...core.guardrails import InjectionGuardrail, ScrubbingService
 from .client import GeminiClient
 from .prompts import build_prompt
 from .schemas import AnalysisOutput
@@ -37,6 +37,7 @@ class LLMAnalysisService:
         self._client = client or GeminiClient()
         self._github_client = github_client or GitHubClient()
         self._scrubber = ScrubbingService()
+        self._guardrail = InjectionGuardrail()
 
     async def analyze_finding(
         self,
@@ -68,15 +69,28 @@ class LLMAnalysisService:
 
         code_context = _extract_context(source_code, finding.line_number)
 
+        # Defend against indirect prompt injection: SAST finding messages and
+        # code context come from untrusted sources (open-source repos, CI
+        # tools). Reject obvious injection patterns; sanitize anything that
+        # passes (truncate, strip control chars) before it hits Gemini.
+        safe_message, reason_msg = self._guardrail.check(finding.message or "")
+        safe_context, reason_ctx = self._guardrail.check(code_context)
+        if not safe_message or not safe_context:
+            log.warning(
+                "Injection guardrail blocked finding %d: msg=%r ctx=%r",
+                finding.id, reason_msg, reason_ctx,
+            )
+            raise ValueError("Finding content rejected by injection guardrail")
+
         prompt = build_prompt(
             tool_name=finding.tool,
             rule_id=finding.rule_id,
-            message=finding.message,
+            message=self._guardrail.sanitize(finding.message or ""),
             file_path=finding.file_path,
             line_number=finding.line_number,
             cwe_id=finding.cwe_id,
             cvss_score=finding.cvss_score,
-            code_context=code_context,
+            code_context=self._guardrail.sanitize(code_context),
         )
 
         output: AnalysisOutput = await self._client.analyze(prompt)

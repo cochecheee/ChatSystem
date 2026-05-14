@@ -27,8 +27,35 @@ if TEST_MODE:
     os.environ.setdefault("APP_ENV", "testing")
 
 
+_DEFAULT_SECRET_KEY = "change-me-in-production-min-32-chars"
+
+
+def _enforce_production_safety() -> None:
+    """Fail-fast guards for production deploys.
+
+    Caught misconfigs that would otherwise let an attacker forge JWTs
+    (default SECRET_KEY) or POST findings without auth (empty
+    CI_WEBHOOK_TOKEN). Dev/test bypass these so local work is friction-free.
+    """
+    if settings.APP_ENV != "production":
+        return
+    problems: list[str] = []
+    if not settings.SECRET_KEY or settings.SECRET_KEY == _DEFAULT_SECRET_KEY:
+        problems.append("SECRET_KEY is unset or default — JWTs are forgeable")
+    if not settings.CI_WEBHOOK_TOKEN:
+        problems.append("CI_WEBHOOK_TOKEN is empty — webhook auth disabled")
+    if not settings.CORS_ORIGINS.strip():
+        problems.append("CORS_ORIGINS is empty — dashboard cannot call the API")
+    if problems:
+        raise RuntimeError(
+            "Refusing to start in production with insecure config: "
+            + "; ".join(problems)
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _enforce_production_safety()
     await init_db()
 
     # V2.4 — Sentry init (gracefully skipped if SENTRY_DSN empty)
@@ -52,11 +79,12 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(poller.start())
         log.info("Background poller scheduled")
 
-        # V2.4 — Monitor loop (uptime ping + alert)
+        # V2.4 — Monitor loop (uptime ping + alert) + daily prune
         if settings.MONITOR_ENABLED:
-            from .services.monitor import monitor_loop
+            from .services.monitor import monitor_loop, prune_loop
             asyncio.create_task(monitor_loop())
-            log.info("Monitor loop scheduled")
+            asyncio.create_task(prune_loop())
+            log.info("Monitor + prune loops scheduled")
 
     yield
 
@@ -73,10 +101,15 @@ _cors_origins = (
     if settings.APP_ENV in ("development", "testing")
     else [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 )
+# Browsers reject `Access-Control-Allow-Credentials: true` paired with
+# `Access-Control-Allow-Origin: *`. When using wildcard origins (dev),
+# disable credentials so preflight succeeds; in prod we list explicit
+# origins and credentials are safe to enable.
+_allow_credentials = _cors_origins != ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

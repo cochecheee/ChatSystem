@@ -6,3 +6,42 @@ uvicorn src.main:app --reload --port 8000
 D:/School/DoAnTotNghiep/ngrok-v3-stable-windows-amd64/ngrok.exe  http 8000
 
 npm run dev
+
+ Mày test (đợi mcp Live ~3 phút):
+
+  # 1. Verify mcp boots
+  curl -m 60 https://mcp-l958.onrender.com/health
+
+  # 2. POST should now work
+  curl -X POST "https://mcp-l958.onrender.com/projects" `
+    -H "Content-Type: application/json" `
+    -d '{\"name\":\"persist-test\",\"github_url\":\"https://github.com/cochecheee/sample-python\"}'
+  # → {"id":1,"name":"persist-test",...} HTTP 201
+
+  # 3. Verify GET returns it
+  curl https://mcp-l958.onrender.com/projects
+
+  # 4. Test persistence — push empty commit chat-system để trigger redeploy
+  cd D:\School\DoAnTotNghiep\chat-system
+  # 1. Verify mcp boots
+  curl -m 60 https://mcp-l958.onrender.com/health
+
+  # 2. POST should now work
+  curl -X POST "https://mcp-l958.onrender.com/projects" ` -H "Content-Type: application/json" ` -d '{\"name\":\"persist-test\",\"github_url\":\"https://github.com/cochecheee/sample-python\"}'
+  # → {"id":1,"name":"persist-test",...} HTTP 201
+
+  # 3. Verify GET returns it
+  curl https://mcp-l958.onrender.com/projects
+
+  # 4. Test persistence — push empty commit chat-system để trigger redeploy
+  cd D:\School\DoAnTotNghiep\chat-system
+  git commit --allow-empty -m "test: verify Postgres persistence"
+  git push
+
+  # 5. Đợi ~3 phút Render rebuild, rồi check Project có còn không
+  curl https://mcp-l958.onrender.com/projects
+  # → Phải vẫn có row persist-test (proof Postgres giữ data qua redeploy)
+
+  # 6. Open dashboard browser
+  Start-Process https://dashboard-zyy0.onrender.com
+  # Click qua các tab — phải fetch được data từ mcp không lỗi CORS

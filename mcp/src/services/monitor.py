@@ -206,3 +206,22 @@ async def prune_old_checks(days: int = 7) -> int:
         )
         await session.commit()
         return result.rowcount or 0
+
+
+async def prune_loop(days: int = 7, interval_seconds: int = 86_400) -> None:
+    """Background loop — prune UptimeCheck rows once per day.
+
+    Without this, every target ping (default 5min) leaves a row forever
+    and the free Render Postgres (256MB) fills within a couple of months.
+    Runs in the same event loop as monitor_loop; sleeps first so startup
+    doesn't trigger a delete storm.
+    """
+    log.info("Prune loop started: keep=%dd interval=%ds", days, interval_seconds)
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            removed = await prune_old_checks(days=days)
+            if removed:
+                log.info("Pruned %d old uptime_checks rows", removed)
+        except Exception:  # noqa: BLE001
+            log.exception("prune_old_checks failed")

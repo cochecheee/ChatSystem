@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.db import AsyncSessionLocal
@@ -91,16 +92,36 @@ class SecurityProcessor:
         )
 
         for gh_artifact in security_artifacts:
+            gh_artifact_id = str(gh_artifact["id"])
             async with self.session_factory() as session:
-                db_artifact = ArtifactModel(
-                    github_artifact_id=str(gh_artifact["id"]),
-                    project_id=project_id,
-                    github_run_id=github_run_id,
-                    status="pending",
+                # Idempotency: SAST and DAST webhooks land separately but
+                # both call process_run with the same run_id; list_artifacts
+                # returns the cumulative set on each call, so without this
+                # check we'd recreate Artifact rows + duplicate Findings on
+                # every overlapping webhook (or workflow rerun).
+                existing = await session.execute(
+                    select(ArtifactModel).where(
+                        ArtifactModel.project_id == project_id,
+                        ArtifactModel.github_artifact_id == gh_artifact_id,
+                    )
                 )
-                session.add(db_artifact)
-                await session.commit()
-                await session.refresh(db_artifact)
+                db_artifact = existing.scalar_one_or_none()
+                if db_artifact is not None and db_artifact.status == "processed":
+                    log.info(
+                        "Skipping artifact %s — already processed (db_id=%d)",
+                        gh_artifact_id, db_artifact.id,
+                    )
+                    continue
+                if db_artifact is None:
+                    db_artifact = ArtifactModel(
+                        github_artifact_id=gh_artifact_id,
+                        project_id=project_id,
+                        github_run_id=github_run_id,
+                        status="pending",
+                    )
+                    session.add(db_artifact)
+                    await session.commit()
+                    await session.refresh(db_artifact)
 
             await self.process_artifact(db_artifact.id, gh_artifact["id"], gh=gh)
 
