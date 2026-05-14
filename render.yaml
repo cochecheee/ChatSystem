@@ -1,13 +1,24 @@
-# Render Blueprint — chat-system MCP backend
+# Render Blueprint — chat-system MCP backend + Postgres + dashboard
 # https://render.com/docs/blueprint-spec
 #
 # Connect: dashboard.render.com → New + → Blueprint → cochecheee/ChatSystem
-# Render auto-reads this file, creates the Web Service + Persistent Disk,
-# and asks you to fill in the 4 `sync: false` secrets in the UI.
+# Render auto-reads this file, creates Postgres + Web Service + Static Site,
+# and asks you to fill in the `sync: false` secrets in the UI.
 #
 # Auto-deploy: every push to `branch:` re-runs `docker build` and rolls
-# out a new container. SQLite at /data survives across redeploys via
-# the persistent disk mount.
+# out a new container. Postgres URL is injected via fromDatabase, so DB
+# data survives across redeploys (vs the previous ephemeral /tmp SQLite).
+#
+# Render free Postgres: 256MB, expires 90 days from creation — fine for
+# thesis demo. Migrate to Supabase / paid Render Postgres post-defense.
+
+databases:
+  - name: mcp-db
+    plan: free
+    databaseName: mcp
+    user: mcp
+    # Region must match the service region so cross-AZ latency stays low.
+    region: singapore
 
 services:
   - type: web
@@ -21,18 +32,17 @@ services:
     dockerContext: ./mcp
     healthCheckPath: /health
 
-    # NOTE: Render free tier does NOT support persistent disks. SQLite at
-    # /tmp/mcp.db resets on every redeploy + container restart. That's
-    # acceptable for demo because webhook ingests fresh CI data; for
-    # persistence upgrade to Render Postgres (free 90 days) and switch
-    # DATABASE_URL to postgresql+asyncpg://...
-
     envVars:
       # ----- Public config (safe to commit) -----
       - key: APP_ENV
         value: production
+      # DATABASE_URL injected from the free Postgres declared above.
+      # Render returns postgres:// — config.py rewrites to
+      # postgresql+asyncpg:// at startup so SQLAlchemy async driver works.
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:////tmp/mcp.db
+        fromDatabase:
+          name: mcp-db
+          property: connectionString
       - key: GITHUB_OWNER
         value: cochecheee
       - key: GITHUB_REPO

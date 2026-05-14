@@ -5,6 +5,9 @@ uvicorn[standard]
 # Database
 sqlalchemy>=2.0.0
 aiosqlite>=0.20.0
+# Postgres async driver — used in production (Render free Postgres).
+# Local dev keeps sqlite via DATABASE_URL=sqlite+aiosqlite:///./mcp.db
+asyncpg>=0.30.0
 
 # Validation
 pydantic>=2.0.0

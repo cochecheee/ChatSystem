@@ -66,9 +66,10 @@ export function PageMonitor() {
     <div className="page-pad">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ margin: 0 }}>Monitor — Uptime + Alerts</h1>
+          <h1 style={{ margin: 0 }}>Uptime — Health checks + Alerts</h1>
           <p style={{ color: 'var(--fg-3)', margin: '4px 0 0', fontSize: 13 }}>
-            Background ping mỗi 5 phút. Alert email khi down ≥ ngưỡng cấu hình.
+            Background ping mỗi 5 phút từ chat-system mcp tới staging URL của inheritor.
+            Đây là <b>uptime monitor server-side</b> — không track user action trên dashboard.
           </p>
         </div>
         <button className="btn" onClick={onPing} disabled={pinging}>

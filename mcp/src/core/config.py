@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -41,6 +42,24 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def _normalize_database_url(cls, v: str) -> str:
+        """Rewrite Render's `postgres://` connectionString to the SQLAlchemy
+        async dialect `postgresql+asyncpg://`. SQLAlchemy 2.x dropped
+        implicit `postgres://` support, and Render still emits the legacy
+        form via fromDatabase.connectionString.
+
+        Also tolerate `postgresql://` (no driver) by adding +asyncpg.
+        """
+        if not v:
+            return v
+        if v.startswith("postgres://"):
+            return "postgresql+asyncpg://" + v[len("postgres://"):]
+        if v.startswith("postgresql://") and "+asyncpg" not in v:
+            return "postgresql+asyncpg://" + v[len("postgresql://"):]
+        return v
 
 
 settings = Settings()
