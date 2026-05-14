@@ -72,8 +72,8 @@ services:
         value: "2"
       - key: CORS_ORIGINS
         # Comma-separated list of allowed origins for the dashboard.
-        # Static Site URL appended once V2.5 lands.
-        value: "http://localhost:5173,http://localhost:4173,https://dashboard-chat-system.onrender.com"
+        # dashboard-zyy0 is the live Render Static Site (V2.5).
+        value: "http://localhost:5173,http://localhost:4173,https://dashboard-zyy0.onrender.com"
 
       # ----- Secrets (set in Render UI after Blueprint creates the service) -----
       # `sync: false` tells Render: "don't manage this value — operator fills it in".
