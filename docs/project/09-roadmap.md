@@ -8,11 +8,11 @@
 ✅ V2.1.3  Test infra (lint + actions-testing.md)
 ✅ V2.1.4  Repo split (sast-action + sample-python) + Render deploy
 ✅ V2.1.5  Fix ingest profile + CORS production
-✅ V2.2    CD: build image inheritor + deploy Render staging
-👉 V2.3    Runtime DAST (OWASP ZAP) + daily Trivy CVE re-scan          ← TIẾP THEO
-⏳ V2.4    Monitor + email alert (Sentry + SMTP + uptime cron)
-⏳ V2.5    Deploy dashboard (Static Site)
-🏁 Tag v0.2.0
+✅ V2.2    CD: build image + push Docker Hub + Render deploy hook
+✅ V2.3    Runtime DAST (OWASP ZAP baseline) + Runtime tab
+✅ V2.4    Monitor (uptime + alert + email + Sentry hook) + Monitor tab
+🔄 V2.5    Dashboard Static Site (Blueprint pushed — chờ Render Sync)  ← USER ACTION
+🏁 Tag v0.2.0 sau khi V2.5 verify
 ```
 
 ---

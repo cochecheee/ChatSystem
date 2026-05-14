@@ -84,6 +84,56 @@ Sau loạt fix trên:
 
 Sẽ làm khi cần show deploy history qua UI. Hiện CD pass/fail xem ở GitHub Actions tab + Render dashboard.
 
+## V2.2 — verification (2026-05-13/14)
+
+Bootstrap manual + 2 lần Flask compat fix:
+- `1eb0f66` (sample-python) Pin Flask 1.0 transitive deps
+- `86fda08` (sample-python) Python 3.12 → 3.9 (Flask 1.0 needs `collections.MutableMapping`)
+- `7e45470` (sample-python) Fix /health route (Flask 1.0 không auto-jsonify dict)
+
+End-to-end verified ở https://sample-python-latest.onrender.com:
+- ✅ Image build + push Docker Hub `tienbui482/sample-python:latest`
+- ✅ Render auto-pull image + boot
+- ✅ /health 200 + vuln endpoints fire correctly
+- ✅ CI run #11 → mcp ingest 125 findings (102 trivy + 16 semgrep + 7 bandit)
+
+## V2.3 — DAST + Runtime tab (2026-05-14)
+
+| Commit | Repo | Mô tả |
+|---|---|---|
+| `e3215be` | sast-action | composite `run-dast/` (OWASP ZAP baseline + full scan + retry cold start) + `cd:` extends sast-ci.yml với 3 input mới (dast, staging_url, dast_scan_type) + DAST job depends on cd. Notify dashboard with pipeline_status=dast_complete. |
+| `7845ad0` | sample-python | Enable `dast: true` + staging_url. |
+| `1593f0f` | sample-python | Fix `permissions: issues: write` (ZAP action requires nó dù allow_issue_writing=false). |
+| `92903a1` | chat-system | mcp `ZapJsonNormalizer` (parses ZAP site/alerts/instances JSON, riskcode → severity mapping) + `DAST_TOOLS` filter ở finding_repo. stats endpoint thêm `dast_open/dast_critical_high`. profile thêm prefix `dast-reports-`. dashboard Runtime tab (Pages/Runtime.tsx). |
+
+End-to-end verified với run #13 (sha 1593f0f):
+- ✅ Workflow chạy 3 job (sast + cd + dast)
+- ✅ Reprocess pulled cả 3 artifact (sast-reports-13, trivy-image-scan-13, dast-reports-13)
+- ✅ mcp ingest 184 findings: 23 SAST + 102 deps + **59 DAST (owasp-zap)**
+
+## V2.4 — Monitor + alert (2026-05-14)
+
+| Commit | Repo | Mô tả |
+|---|---|---|
+| `a73d460` | chat-system | mcp `UptimeCheck` + `Alert` entities, `monitor.py` background loop (httpx ping every interval, alert raise after threshold consecutive fails, recovered alert when 2xx returns), `smtp_service.py` (gracefully skip if SMTP_HOST empty), Sentry init guarded by SENTRY_DSN, `/monitor/*` API (summary/uptime/alerts/ack/ping). dashboard Monitor page. render.yaml: MONITOR_ENABLED=true + sample-python staging làm default target. |
+
+Verified với manual ping:
+- ✅ Background loop ping sample-python staging mỗi 5 phút
+- ✅ 8 checks ghi nhận, uptime 75% (cold start 22s gây 2 timeout)
+- ✅ /monitor/summary + /alerts endpoints respond đúng schema
+
+Skipped verification (cần config):
+- Email send (SMTP_HOST chưa set)
+- Sentry capture (SENTRY_DSN chưa set)
+
+## V2.5 — Dashboard Static Site (in progress)
+
+| Commit | Repo | Mô tả |
+|---|---|---|
+| `8e98a7a` | chat-system | render.yaml thêm service `dashboard` (runtime: static, rootDir: dashboard, buildCommand: npm ci+vite build, staticPublishPath: ./dist, SPA fallback rewrite, security headers, VITE_API_URL pinned). |
+
+Chờ user click **Sync** ở Render Blueprint UI để Render tạo service mới.
+
 ## Sub-phase đếm số
 
 ```
@@ -93,10 +143,12 @@ Sẽ làm khi cần show deploy history qua UI. Hiện CD pass/fail xem ở GitH
 ✅ V2.1.4  Repo split + Render deploy
 ✅ V2.1.5  Fix ingest profile + CORS
 ✅ V2.2    CD: build + push Docker Hub + Render redeploy
-👉 V2.3    DAST (OWASP ZAP) + daily Trivy CVE rescan       ← TIẾP THEO
+✅ V2.3    DAST (OWASP ZAP) + Runtime tab + ZapNormalizer
+✅ V2.4    Monitor uptime + alert + email + Sentry
+🔄 V2.5    Dashboard Static Site (chờ Render Sync user action)
 ```
 
-Tổng: 6 milestone done. V2.3 chờ V2.2 verify end-to-end (mày setup Docker Hub + Render staging service).
+Tổng: 8 milestone done. Tag v0.2.0 chờ V2.5 verified.
 
 ## Reference: V1 history
 
