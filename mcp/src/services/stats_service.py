@@ -51,6 +51,13 @@ class StatsService:
         deps_crit = await self.findings.count_with_filters(category="deps", severity="critical")
         deps_high = await self.findings.count_with_filters(category="deps", severity="high")
 
+        # DAST counts (V2.3 — OWASP ZAP runtime scan)
+        dast_total = await self.findings.count_with_filters(category="dast")
+        dast_approved = await self.findings.count_with_filters(category="dast", status="APPROVED")
+        dast_revoked = await self.findings.count_with_filters(category="dast", status="REVOKED")
+        dast_crit = await self.findings.count_with_filters(category="dast", severity="critical")
+        dast_high = await self.findings.count_with_filters(category="dast", severity="high")
+
         return {
             "total": total,
             "critical_high": critical + high,
@@ -62,8 +69,10 @@ class StatsService:
             "open": total - approved - revoked,
             "sast_open": sast_total - sast_approved - sast_revoked,
             "deps_open": deps_total - deps_approved - deps_revoked,
+            "dast_open": dast_total - dast_approved - dast_revoked,
             "sast_critical_high": sast_crit + sast_high,
             "deps_critical_high": deps_crit + deps_high,
+            "dast_critical_high": dast_crit + dast_high,
             "approved": approved,
             "revoked": revoked,
             "pending": pending,

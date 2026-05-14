@@ -15,6 +15,13 @@ DEPS_TOOLS: set[str] = {
     "trivy-deps",
 }
 
+# Runtime/DAST tools (V2.3). Findings tới từ scan app đang chạy.
+DAST_TOOLS: set[str] = {
+    "owasp-zap",
+    "zap",
+    "zaproxy",
+}
+
 
 class FindingRepository:
     def __init__(self, session: AsyncSession):
@@ -49,8 +56,13 @@ class FindingRepository:
             cat = category.lower()
             if cat == "deps":
                 query = query.where(Finding.tool.in_(DEPS_TOOLS))
+            elif cat == "dast":
+                query = query.where(Finding.tool.in_(DAST_TOOLS))
             elif cat == "sast":
-                query = query.where(~Finding.tool.in_(DEPS_TOOLS))
+                # SAST = code scan, exclude both deps + dast runtime tools.
+                query = query.where(
+                    ~Finding.tool.in_(DEPS_TOOLS | DAST_TOOLS)
+                )
         if q:
             like = f"%{q.lower()}%"
             query = query.where(
@@ -134,8 +146,12 @@ class FindingRepository:
             cat = category.lower()
             if cat == "deps":
                 query = query.where(Finding.tool.in_(DEPS_TOOLS))
+            elif cat == "dast":
+                query = query.where(Finding.tool.in_(DAST_TOOLS))
             elif cat == "sast":
-                query = query.where(~Finding.tool.in_(DEPS_TOOLS))
+                query = query.where(
+                    ~Finding.tool.in_(DEPS_TOOLS | DAST_TOOLS)
+                )
         if q:
             like = f"%{q.lower()}%"
             query = query.where(

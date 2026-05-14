@@ -5,6 +5,7 @@ export type PageId =
   | 'pipelines'
   | 'vulns'
   | 'sca'
+  | 'runtime'
   | 'chat'
   | 'reports'
   | 'settings';
@@ -22,6 +23,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { id: 'pipelines', label: 'Pipelines', icon: 'pipeline' },
       { id: 'vulns', label: 'Vulnerabilities', icon: 'shield' },
       { id: 'sca', label: 'Dependencies', icon: 'package' },
+      { id: 'runtime', label: 'Runtime (DAST)', icon: 'alert' },
     ],
   },
   {
@@ -42,6 +44,7 @@ const CRUMB: Record<PageId, string[]> = {
   pipelines:  ['Workspace', 'Pipelines'],
   vulns:      ['Workspace', 'Vulnerabilities'],
   sca:        ['Workspace', 'Dependencies · SCA'],
+  runtime:    ['Workspace', 'Runtime · DAST'],
   chat:       ['Assistant', 'AI Assistant'],
   reports:    ['Admin', 'Reports'],
   settings:   ['Admin', 'Settings'],

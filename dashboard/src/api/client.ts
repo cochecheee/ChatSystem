@@ -60,7 +60,7 @@ export interface FindingListParams {
   severity?: string;
   tool?: string;
   status?: string;
-  category?: 'sast' | 'deps';
+  category?: 'sast' | 'deps' | 'dast';
   q?: string;
   skip?: number;
   limit?: number;

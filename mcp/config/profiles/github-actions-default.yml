@@ -23,8 +23,9 @@ exact_names:
 
 # Prefix-matched names (run number / SHA appended at runtime).
 # e.g. trivy-image-scan-42, trivy-image-scan-100
-# sast-reports-* = bundled multi-tool artifact produced by sast-action's
-# sast-suite composite (one zip with semgrep.sarif, trivy-fs.sarif, ...).
+# sast-reports-* = bundled multi-tool artifact from sast-suite composite
+# dast-reports-* = OWASP ZAP output from run-dast composite (V2.3)
 prefixes:
   - trivy-image-scan-
   - sast-reports-
+  - dast-reports-
