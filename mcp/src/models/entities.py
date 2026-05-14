@@ -2,6 +2,13 @@ import enum
 from datetime import datetime, UTC
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text
+
+# Timezone-aware DateTime singleton — passed to every `mapped_column(DT_TZ, ...)`
+# so Postgres column type is TIMESTAMP WITH TIME ZONE. asyncpg refuses to
+# bind a tz-aware Python datetime to a naive TIMESTAMP column, so without
+# this every INSERT raises "can't subtract offset-naive and offset-aware".
+# SQLite ignores timezone=True (stored as text), so dev still works.
+DT_TZ = DateTime(timezone=True)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -19,7 +26,7 @@ class Project(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     github_url: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC))
     last_processed_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Multi-tenant config (Day 2). One chat-system instance can serve N
@@ -63,8 +70,8 @@ class Artifact(Base):
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
     github_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default=ArtifactStatus.pending.value, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     project: Mapped["Project"] = relationship("Project", back_populates="artifacts")
     findings: Mapped[list["Finding"]] = relationship("Finding", back_populates="artifact")
@@ -82,7 +89,7 @@ class Finding(Base):
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     line_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     raw_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    normalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    normalized_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
     cwe_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cvss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     dedup_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -92,12 +99,12 @@ class Finding(Base):
     # Approval audit trail
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
 
     # Revoke audit trail
     revoke_justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
 
     artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="findings")
 
@@ -113,8 +120,7 @@ class AppConfig(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict] = mapped_column(JSON, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+    updated_at: Mapped[datetime] = mapped_column(DT_TZ,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
@@ -137,8 +143,7 @@ class UptimeCheck(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
     target_url: Mapped[str] = mapped_column(String(512), nullable=False)
-    checked_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    checked_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC), nullable=False, index=True,
     )
     http_status: Mapped[int] = mapped_column(Integer, nullable=False)
     response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -162,8 +167,7 @@ class Alert(Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    raised_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    raised_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC), nullable=False, index=True,
     )
-    notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notified_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)

@@ -1,7 +1,12 @@
+import logging
+import os
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
+
+log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -17,6 +22,12 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 
 async def init_db() -> None:
     async with engine.begin() as conn:
+        # One-shot reset hatch — set INIT_DB_DROP_ALL=1 on Render after a
+        # schema change (e.g. DateTime → DateTime(timezone=True)). Unset
+        # immediately after the next deploy so we don't nuke real data.
+        if os.environ.get("INIT_DB_DROP_ALL") == "1":
+            log.warning("INIT_DB_DROP_ALL=1 — dropping all tables before recreate")
+            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_schema)
 
