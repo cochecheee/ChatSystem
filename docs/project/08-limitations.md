@@ -4,10 +4,10 @@ Honest assessment — không phải marketing.
 
 ## Infra
 
-### SQLite ephemeral trên Render free tier
-- **Impact**: Mỗi redeploy + container restart → mất hết Project, Pipeline, Finding, AI cache
-- **Mitigation**: Webhook auto re-ingest sau CI lần tiếp theo (~5 phút)
-- **Resolve**: Upgrade Render Postgres free 90 ngày (`postgresql+asyncpg://`) hoặc Starter plan + persistent disk
+### ~~SQLite ephemeral trên Render free tier~~ → V2.6 đã fix
+- **Trước**: `/tmp/mcp.db` reset mỗi redeploy → mất Project + Finding + UptimeCheck
+- **Fix** (V2.6, chờ Sync): switch sang Render free Postgres 256MB qua `databases: mcp-db` ở render.yaml. config.py rewrite `postgres://` → `postgresql+asyncpg://`. Data persist qua redeploy.
+- **Limit còn lại**: Postgres free hết hạn 90 ngày → cần upgrade $7/mo paid hoặc migrate Supabase free vĩnh viễn.
 
 ### Cold start ~30s
 - **Impact**: Request đầu sau 15 phút idle bị timeout nếu client `--max-time` < 60s

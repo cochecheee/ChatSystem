@@ -134,6 +134,27 @@ Skipped verification (cần config):
 
 Chờ user click **Sync** ở Render Blueprint UI để Render tạo service mới.
 
+## V2.6 — Postgres persistence + naming clarity (2026-05-14)
+
+Hai issue phát hiện sau khi demo flow:
+- **Data wipe mỗi redeploy**: SQLite ở `/tmp/mcp.db` (Render free filesystem ephemeral). Mỗi push chat-system → Project + Finding + UptimeCheck rỗng lại từ đầu.
+- **"Monitor" label gây hiểu nhầm**: User tưởng tab này track hành vi user trên dashboard. Thực tế = server-side uptime ping HTTP tới staging URL.
+
+| Commit | Repo | Mô tả |
+|---|---|---|
+| `85dab64` | chat-system | Add `databases: mcp-db` (Render free Postgres 256MB, 90 ngày) vào render.yaml. mcp service env `DATABASE_URL` chuyển sang `fromDatabase: name=mcp-db, property=connectionString`. config.py thêm field_validator rewrite `postgres://` → `postgresql+asyncpg://` (Render emits legacy form, SQLAlchemy 2.x cần dialect prefix). requirements.txt thêm asyncpg≥0.30.0. Sidebar label `Monitor → Uptime`, breadcrumb `Monitor · Uptime → Uptime · Health checks`, Monitor.tsx header text làm rõ "server-side uptime, KHÔNG track user". |
+
+Chờ user **Sync** Render Blueprint để:
+1. Postgres `mcp-db` được provision
+2. `DATABASE_URL` env rebind tới connectionString của Postgres
+3. mcp tự redeploy lần 2, init_db() tạo schema trên Postgres
+4. Dữ liệu (Project, Finding, UptimeCheck, Alert, AnalysisCache) persist qua redeploy
+
+Verify sau Sync:
+- POST `/projects` → restart mcp → GET `/projects` vẫn có row (proof persistence)
+- Sidebar tab label "Uptime"
+- Cold start ~30s lần đầu (mcp init Postgres pool)
+
 ## Sub-phase đếm số
 
 ```
@@ -146,9 +167,10 @@ Chờ user click **Sync** ở Render Blueprint UI để Render tạo service m�
 ✅ V2.3    DAST (OWASP ZAP) + Runtime tab + ZapNormalizer
 ✅ V2.4    Monitor uptime + alert + email + Sentry
 🔄 V2.5    Dashboard Static Site (chờ Render Sync user action)
+🔄 V2.6    Postgres persistence + Monitor→Uptime rename (chờ cùng Sync)
 ```
 
-Tổng: 8 milestone done. Tag v0.2.0 chờ V2.5 verified.
+Tổng: 8 milestone done + 2 chờ Sync. Tag v0.2.0 chờ V2.5 + V2.6 verified.
 
 ## Reference: V1 history
 

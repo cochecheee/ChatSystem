@@ -22,8 +22,12 @@ services:
       # Public config
       - key: APP_ENV
         value: production
+      # DATABASE_URL = Postgres connection string injected từ databases: mcp-db
+      # qua fromDatabase. config.py rewrites postgres:// → postgresql+asyncpg://
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:////tmp/mcp.db   # ephemeral
+        fromDatabase:
+          name: mcp-db
+          property: connectionString
       - key: GITHUB_OWNER
         value: cochecheee
       - key: GITHUB_REPO

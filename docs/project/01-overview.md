@@ -33,7 +33,8 @@
 | V2.3 | ✅ | Runtime DAST (OWASP ZAP) + Runtime tab dashboard (59 ZAP findings live) |
 | V2.4 | ✅ | Monitor + uptime check + email alert + Sentry hook + Monitor tab |
 | V2.5 | 🔄 | Dashboard Static Site Blueprint pushed — chờ Render Sync |
-| Tag | 🏁 | `v0.2.0` sau khi V2.5 verify end-to-end |
+| V2.6 | 🔄 | Postgres persistence + Monitor→Uptime rename pushed — chờ Render Sync |
+| Tag | 🏁 | `v0.2.0` sau khi V2.5+V2.6 verify end-to-end |
 
 ## Stack tổng
 
