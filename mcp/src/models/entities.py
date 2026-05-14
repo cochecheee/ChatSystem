@@ -37,7 +37,10 @@ class Project(Base):
     )
     polling_workflow_name: Mapped[str] = mapped_column(String(255), default="CI Workflow", nullable=False)
     polling_branch: Mapped[str] = mapped_column(String(255), default="main", nullable=False)
-    active: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)
+    # Stored as INTEGER (0/1) for SQLite compat; Mapped[int] keeps the
+    # type honest so asyncpg doesn't try to coerce bool -> bool to a
+    # Postgres INTEGER column, which raises 'invalid input syntax'.
+    active: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="project")
 
@@ -139,7 +142,7 @@ class UptimeCheck(Base):
     )
     http_status: Mapped[int] = mapped_column(Integer, nullable=False)
     response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    is_up: Mapped[bool] = mapped_column(Integer, nullable=False)  # 1 if 2xx/3xx
+    is_up: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 if 2xx/3xx
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
