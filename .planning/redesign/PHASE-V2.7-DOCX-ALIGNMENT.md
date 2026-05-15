@@ -115,8 +115,8 @@
 | Step | Status | Commit SHA | Verified |
 |---|---|---|---|
 | 1 G1 polling 15s | DONE | e460ece | TS check pass, grep all polls = POLL_INTERVAL_MS |
-| 2 G2 4 commands | TODO | — | — |
-| 3 G8 guardrail docs | TODO | — | — |
+| 2 G2 4 commands | DONE | 8b50dcc | 208/208 pytest pass (incl 8 new) |
+| 3 G8 guardrail docs | DONE | — | guardrails.md rewrite 4-layer + 24/24 tests pass |
 | 4 G3 Security Gate (sast-action) | TODO | — | — |
 | 5 G4 CodeQL+ESLint+DepCheck (sast-action) | TODO | — | — |
 | 6 G5 MCP server thật | TODO | — | — |

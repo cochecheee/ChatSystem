@@ -1,3 +1,11 @@
+"""4-layer AI guardrail pipeline — see docs/guardrails.md.
+
+Layer 1 (auth) lives in core/auth.py + main.py production-safety check.
+Layer 2 (schema) is enforced at the FastAPI edge via Pydantic models.
+This module owns:
+  Layer 3 — ScrubbingService    (PII/secret removal before DB + LLM)
+  Layer 4 — InjectionGuardrail  (prompt-injection check + sanitize)
+"""
 import os
 import re
 import tempfile
@@ -5,7 +13,7 @@ import tempfile
 from detect_secrets import SecretsCollection
 
 # ---------------------------------------------------------------------------
-# PII & Secret Scrubbing
+# Layer 3 — PII & Secret Scrubbing
 # ---------------------------------------------------------------------------
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
@@ -61,7 +69,7 @@ class ScrubbingService:
 
 
 # ---------------------------------------------------------------------------
-# Prompt Injection Prevention
+# Layer 4 — Prompt Injection Prevention
 # ---------------------------------------------------------------------------
 
 _MAX_CONTENT_LENGTH = 2000
