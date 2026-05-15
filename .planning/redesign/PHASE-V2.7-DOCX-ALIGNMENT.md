@@ -117,7 +117,7 @@
 | 1 G1 polling 15s | DONE | e460ece | TS check pass, grep all polls = POLL_INTERVAL_MS |
 | 2 G2 4 commands | DONE | 8b50dcc | 208/208 pytest pass (incl 8 new) |
 | 3 G8 guardrail docs | DONE | — | guardrails.md rewrite 4-layer + 24/24 tests pass |
-| 4 G3 Security Gate (sast-action) | TODO | — | — |
-| 5 G4 CodeQL+ESLint+DepCheck (sast-action) | TODO | — | — |
+| 4 G3 Security Gate (sast-action) | DONE | sast-action:0577b81 | YAML lint pass + Python jq-equiv smoke (1 crit→fail, clean→pass). Live CI verify deferred to merge time. |
+| 5 G4 CodeQL wire (sast-action) | DONE | sast-action:a1a2328 | YAML valid, 5 CodeQL steps added; ESLint+SpotBugs+DepCheck đã có từ V2.1. Live CI verify deferred. |
 | 6 G5 MCP server thật | TODO | — | — |
 | 7 B1-B4 docx alignment | TODO | — | — |
