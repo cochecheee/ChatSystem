@@ -92,3 +92,44 @@ def test_scrubs_multiple_secret_lines(scrubber):
     assert result_lines[1] == "[SECRET_SCRUBBED]"
     assert result_lines[2] == "another safe line"
     assert result_lines[3] == "[SECRET_SCRUBBED]"
+
+
+# ---------------------------------------------------------------------------
+# JSON skip — báo cáo tiến độ V2.7 fix CodeQL SARIF silent drop
+# ---------------------------------------------------------------------------
+
+def test_json_content_skipped_to_preserve_validity(scrubber):
+    """SARIF JSON với Python decorator `\\n@app.route` — email regex
+    nếu chạy sẽ ăn `n` từ `\\n` JSON escape → `\\[EMAIL_SCRUBBED]` invalid
+    JSON escape. Scrubber phải skip JSON content entirely."""
+    import json
+    sarif_like = {
+        "runs": [{
+            "tool": {"driver": {"name": "CodeQL"}},
+            "results": [{
+                "ruleId": "py/xss",
+                "level": "warning",
+                "message": {"text": "@app.route('/user')\nreturn flask.render_template(name)"},
+            }],
+        }],
+    }
+    content = json.dumps(sarif_like)
+    result = scrubber.scrub_content(content)
+    # Phải parse được — chứng minh không có invalid escape inserted
+    assert json.loads(result) == sarif_like
+
+
+def test_json_array_skipped(scrubber):
+    """JSON array (ESLint format) cũng phải skip — same family of issues."""
+    import json
+    content = '[{"messages":[{"ruleId":"x","line":1}]}]'
+    result = scrubber.scrub_content(content)
+    assert json.loads(result) == json.loads(content)
+
+
+def test_non_json_still_scrubbed(scrubber):
+    """Plain text content vẫn scrub đầy đủ — regression cho fix V2.7."""
+    content = "User john@example.com from 10.0.0.5 hit XSS"
+    result = scrubber.scrub_content(content)
+    assert "[EMAIL_SCRUBBED]" in result
+    assert "[IP_SCRUBBED]" in result

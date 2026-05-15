@@ -191,8 +191,13 @@ class SecurityProcessor:
 
             for schema_finding in findings:
                 enriched = self.enricher.enrich(schema_finding)
+                # V2.7 — scrub PII trên message POST-parse. scrub_content
+                # pre-parse từng break JSON escape (Issue: codeql.sarif silent
+                # drop). Per-field scrub đảm bảo email/IP không lọt vào DB +
+                # JSON SARIF vẫn parse được.
+                scrubbed_message = self.scrubber.scrub_text(enriched.message)
                 h = compute_dedup_hash(
-                    enriched.rule_id, enriched.file_path, enriched.message
+                    enriched.rule_id, enriched.file_path, scrubbed_message
                 )
                 batch_hashes.add(h)
 
@@ -202,7 +207,7 @@ class SecurityProcessor:
                         tool=enriched.tool,
                         rule_id=enriched.rule_id,
                         severity=enriched.severity,
-                        message=enriched.message,
+                        message=scrubbed_message,
                         file_path=enriched.file_path,
                         line_number=enriched.line_number,
                         raw_data=enriched.raw_data,
