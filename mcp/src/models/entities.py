@@ -154,6 +154,25 @@ class UptimeCheck(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CommandFeedback(Base):
+    """User feedback for /feedback ChatOps command — báo cáo tiến độ ch.4.3.
+
+    Stores natural-language quality feedback against an AI-analyzed finding
+    so prompts/models can be tuned later. Optional finding_id lets users
+    submit general feedback as well.
+    """
+
+    __tablename__ = "command_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    finding_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("findings.id"), nullable=True)
+    submitted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
+    )
+
+
 class Alert(Base):
     """Operational alert raised by the monitor (down event, CVE diff, etc).
 

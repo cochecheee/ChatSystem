@@ -114,7 +114,7 @@
 
 | Step | Status | Commit SHA | Verified |
 |---|---|---|---|
-| 1 G1 polling 15s | TODO | — | — |
+| 1 G1 polling 15s | DONE | e460ece | TS check pass, grep all polls = POLL_INTERVAL_MS |
 | 2 G2 4 commands | TODO | — | — |
 | 3 G8 guardrail docs | TODO | — | — |
 | 4 G3 Security Gate (sast-action) | TODO | — | — |

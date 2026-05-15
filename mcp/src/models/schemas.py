@@ -147,6 +147,10 @@ class CommandRequest(BaseModel):
     finding_id: int | None = None
     run_id: int | None = None
     justification: str | None = None
+    # /feedback — free-form text comment about an AI analysis
+    feedback_text: str | None = None
+    # /status, /results — optional repo override (defaults to configured repo)
+    repo: str | None = None
 
 
 class CommandResponse(BaseModel):
