@@ -112,20 +112,24 @@ chat-system/
 └── README.md
 ```
 
-## Cái "mcp" — quan trọng làm rõ
+## Cái "mcp" — dual protocol từ V2.7
 
-Tên folder `mcp/` + tên gọi "MCP Gateway" trong codebase này **KHÔNG** phải MCP server theo nghĩa Model Context Protocol của Anthropic.
+Folder `mcp/` host 2 process độc lập, cùng codebase + DB:
 
-| Khía cạnh | MCP thật | mcp/ ở project này |
-|---|---|---|
-| Vai trò LLM | LLM **gọi** server qua tool-use | LLM **được gọi** bởi server (Gemini) |
-| Protocol | JSON-RPC stdio / SSE | REST HTTP |
-| Tool registry | Có (`@mcp.tool`) | Không |
-| Client | Claude Desktop, IDE, agent | curl, browser, CI |
+| Protocol | Entry point | Client | Mục đích |
+|---|---|---|---|
+| **REST HTTP** (FastAPI) | `uvicorn src.main:app` | React dashboard, curl, CI webhook | UI + integration |
+| **Anthropic MCP** | `python -m src.mcp_server` | Claude Desktop, Cursor, MCP Inspector | AI agent natural-language access |
 
-Đây là **REST API gateway thuần** dùng FastAPI. Tên gọi "MCP" có thể là legacy từ thiết kế ban đầu (Master Control Plane?) — không liên quan đến Anthropic MCP. Khi defense, nếu panel hỏi nên làm rõ ngay.
+MCP server (`mcp/src/mcp_server.py`) — dùng `fastmcp` SDK, expose 8 tool wrap repositories + services. Mỗi tool dùng `AsyncSessionLocal` chia sẻ với FastAPI process → cùng `mcp.db` hoặc Render Postgres.
 
-Đề xuất rename `mcp/` → `gateway/` hoặc `backend/` được ghi nhận ở [08-limitations.md](08-limitations.md), nhưng deferred cost ~30 phút refactor + có thể làm sau defense.
+Xem [`docs/mcp-server.md`](../mcp-server.md) cho config Claude Desktop + 8 tool reference.
+
+**Lý do "dual protocol"**:
+- REST cần cho dashboard React (browser fetch) + CI webhook (curl). MCP transport stdio/SSE không phù hợp browser direct.
+- MCP cần cho AI agent (Claude Desktop) — REST tích hợp được nhưng cần wrapper. Anthropic MCP chuẩn hoá → connect 1 lần, dùng nhiều agent.
+
+Khi nói "MCP Server" trong báo cáo (ch.3.2 + ch.4.1) → reference Anthropic MCP. Khi nói "MCP Gateway" trong code path `mcp/src/api/` (REST) → reference middleware role giữa CI/CD và LLM (terminology cũ giữ vì có nhiều inheritor + URL `mcp-l958.onrender.com` đã chạy production).
 
 ## Component data ownership
 

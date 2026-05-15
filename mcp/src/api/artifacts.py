@@ -59,8 +59,22 @@ async def create_project(
     body: ProjectCreate,
     session: AsyncSession = Depends(get_session),
 ) -> Project:
+    """Tạo project với full credentials (V2.8 P7).
+
+    Trước đây chỉ persist name + github_url; các field credentials
+    (github_owner/repo/token, gemini_*) bị drop silent → POST /projects
+    không bao giờ wire multi-tenant đúng. Giờ persist tất cả 9 field.
+
+    Secrets (`github_token`, `gemini_api_key`) sẽ được Fernet-encrypt khi
+    `FERNET_KEY` set ở Phase A1 — hiện vẫn plaintext (single-tenant
+    deployment chấp nhận theo decision log [.planning/REQUIREMENTS.md]).
+    `active=False` map sang INTEGER 0 — Postgres asyncpg không tự coerce.
+    """
     repo = ProjectRepository(session)
-    return await repo.create(name=body.name, github_url=body.github_url)
+    fields = body.model_dump(exclude_unset=False)
+    # Bool -> int để khớp Mapped[int] cột active
+    fields["active"] = 1 if fields.get("active", True) else 0
+    return await repo.create(**fields)
 
 
 @router.get("/projects", response_model=list[ProjectOut])
@@ -262,19 +276,45 @@ async def webhook_pipeline_complete(
     Header: Authorization: Bearer <MCP_WEBHOOK_TOKEN>
     Body:   run-metadata.json (có run_id, run_number, repository, ...)
 
+    Routing (V2.8):
+      MULTI_TENANT_ENABLED=true + body.repository có giá trị → lookup
+        Project theo github_url. Match → dùng project đó.
+      Không match hoặc flag off → fallback settings.GITHUB_OWNER/REPO
+        (legacy behavior). Log warning để debug.
+
     CI_WEBHOOK_TOKEN trống → auth disabled (dev mode).
     """
+    import logging
+    log = logging.getLogger(__name__)
+
     webhook_token = credentials.credentials if credentials else None
     if settings.CI_WEBHOOK_TOKEN and webhook_token != settings.CI_WEBHOOK_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid or missing webhook token")
 
-    github_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
-    project = await ProjectRepository(session).get_or_create_by_github_url(
-        name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
-        github_url=github_url,
-    )
+    project_repo = ProjectRepository(session)
+    project = None
+
+    # Multi-tenant path: lookup by repository field from payload
+    if settings.MULTI_TENANT_ENABLED and body.repository:
+        github_url = f"https://github.com/{body.repository}"
+        project = await project_repo.get_by_github_url(github_url)
+        if project is None:
+            log.warning(
+                "Webhook repository=%r không tìm được project — fallback env",
+                body.repository,
+            )
+
+    # Fallback / legacy: use env-configured single-tenant project
+    if project is None:
+        fallback_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
+        project = await project_repo.get_or_create_by_github_url(
+            name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
+            github_url=fallback_url,
+        )
 
     processor = SecurityProcessor(session_factory=AsyncSessionLocal)
+    # B2 (future): truyền project để processor.process_run dùng
+    # per-project GitHub client. Hiện B2 chưa wire — vẫn dùng env client.
     background_tasks.add_task(processor.process_run, project.id, body.run_id)
 
     return {"status": "accepted", "run_id": body.run_id, "project_id": project.id}

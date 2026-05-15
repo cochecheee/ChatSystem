@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import { POLL_INTERVAL_MS } from '../lib/constants';
 import { AreaTrend, SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { Finding, WorkflowArtifact, WorkflowRun } from '../types';
@@ -433,7 +434,7 @@ export function PagePipelines() {
       api.github.runs()
         .then(arr => setRuns(arr))
         .catch(() => {});
-    }, 30_000);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 

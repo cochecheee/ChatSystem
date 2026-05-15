@@ -12,7 +12,10 @@
 ✅ V2.3    Runtime DAST (OWASP ZAP baseline) + Runtime tab
 ✅ V2.4    Monitor (uptime + alert + email + Sentry hook) + Monitor tab
 🔄 V2.5    Dashboard Static Site (Blueprint pushed — chờ Render Sync)  ← USER ACTION
-🏁 Tag v0.2.0 sau khi V2.5 verify
+🔄 V2.6    Postgres persistence + Monitor→Uptime rename (chờ Render Sync)
+✅ V2.7    Docx alignment — polling 15s, 4 commands, 4-layer guardrail
+            docs, Security Gate, CodeQL wire, Anthropic MCP server thật
+🏁 Tag v0.2.0 sau khi V2.5/V2.6/V2.7 verify
 ```
 
 ---
@@ -121,6 +124,26 @@
 - B1 vẫn OK, chỉ tốn 1 free Web Service slot
 
 ---
+
+## V2.7 — Docx báo cáo tiến độ alignment ✅ DONE
+
+**Trigger**: Audit phát hiện gap giữa code và `Nhom04_BaoCaoTienDo1_fixed_1.docx`.
+
+**Done** (branch `verify-work` cả 2 repo):
+
+| # | Gap | Commit | Note |
+|---|---|---|---|
+| 1 | Polling 60s → 15s (ch.4.5) | chat-system:e460ece | `POLL_INTERVAL_MS` single source |
+| 2 | ChatOps 6/10 → 10/10 (ch.4.3) | chat-system:8b50dcc | /status /results /help /feedback + 8 test mới |
+| 3 | Guardrail 2-layer → 4-layer docs (ch.4.4.2) | chat-system:1e3cd22 | docs rewrite, code đã có sẵn auth+schema |
+| 4 | Security Gate stage 7 (ch.4.2) | sast-action:0577b81 | Composite + workflow job, block PR nếu critical |
+| 5 | CodeQL chưa wire (ch.4.2) | sast-action:a1a2328 | Add CodeQL cho java/python/node/go |
+| 6 | MCP misnomer → MCP thật (ch.3.2) | chat-system:ed175ec | `fastmcp` 8 tool, 13 test pass |
+| 7 | Docs/spec alignment | đang làm | 02/08/09 update, REQUIREMENTS đồng bộ |
+
+**Live verify pending**:
+- Step 4 + 5 chạy thật trên CI khi `sast-action verify-work` merge về `master` (sample-python sẽ tự pick up).
+- Step 6 chạy thật khi cấu hình Claude Desktop với config trong `docs/mcp-server.md`.
 
 ## Tag v0.2.0
 

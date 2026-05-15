@@ -1,3 +1,11 @@
+"""4-layer AI guardrail pipeline — see docs/guardrails.md.
+
+Layer 1 (auth) lives in core/auth.py + main.py production-safety check.
+Layer 2 (schema) is enforced at the FastAPI edge via Pydantic models.
+This module owns:
+  Layer 3 — ScrubbingService    (PII/secret removal before DB + LLM)
+  Layer 4 — InjectionGuardrail  (prompt-injection check + sanitize)
+"""
 import os
 import re
 import tempfile
@@ -5,7 +13,7 @@ import tempfile
 from detect_secrets import SecretsCollection
 
 # ---------------------------------------------------------------------------
-# PII & Secret Scrubbing
+# Layer 3 — PII & Secret Scrubbing
 # ---------------------------------------------------------------------------
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
@@ -13,14 +21,47 @@ _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
+def _looks_like_json(content: str) -> bool:
+    """Cheap heuristic — JSON đúng spec phải bắt đầu với `{` hoặc `[`
+    sau khi strip whitespace. Đủ chính xác cho SARIF/Trivy/DepCheck/ZAP
+    output, không cần parse full để tránh tốn CPU trên file 700KB+."""
+    stripped = content.lstrip()
+    return stripped.startswith(("{", "["))
+
+
 class ScrubbingService:
     """Removes secrets and PII from arbitrary text before passing to AI."""
 
     def scrub_content(self, content: str) -> str:
-        content = self._scrub_secrets(content)
-        content = _EMAIL_RE.sub("[EMAIL_SCRUBBED]", content)
-        content = _IPV4_RE.sub("[IP_SCRUBBED]", content)
-        return content
+        """Scrub full text content (artifact pre-normalize OR source code).
+
+        Skip toàn bộ scrub cho JSON content (SARIF, Trivy, DepCheck, ZAP) — V2.7.
+        2 lý do silent breakage trên SARIF lớn (700KB+ codeql.sarif):
+          1. detect-secrets `[SECRET_SCRUBBED]` thay full line → break `{}`
+             bracket nếu flagged line là một entry JSON.
+          2. Email regex ăn vào JSON escape: source code snippet trong SARIF
+             có Python decorator như `\\n@app.route` — regex match `n@app.route`,
+             ăn `n` của `\\n`, để lại `\\[EMAIL_SCRUBBED]` — `\\[` invalid JSON
+             escape → entire SARIF không parse được → 0 finding ingest silent.
+
+        Caller cần scrub PII trong field cụ thể (Finding.message etc.) dùng
+        `scrub_text` post-parse — JSON skip ở đây không bỏ qua Layer 3 vì
+        processor sẽ scrub_text từng field sau khi normalize.
+        """
+        if _looks_like_json(content):
+            return content
+        return self.scrub_text(content)
+
+    def scrub_text(self, text: str) -> str:
+        """Scrub plain text (Finding.message, source code fetched from GitHub).
+
+        Áp dụng đầy đủ 3 pattern. An toàn vì input không phải JSON nên không
+        có vấn đề break escape. Dùng sau khi parse SARIF/JSON outputs.
+        """
+        text = self._scrub_secrets(text)
+        text = _EMAIL_RE.sub("[EMAIL_SCRUBBED]", text)
+        text = _IPV4_RE.sub("[IP_SCRUBBED]", text)
+        return text
 
     # ------------------------------------------------------------------
 
@@ -61,7 +102,7 @@ class ScrubbingService:
 
 
 # ---------------------------------------------------------------------------
-# Prompt Injection Prevention
+# Layer 4 — Prompt Injection Prevention
 # ---------------------------------------------------------------------------
 
 _MAX_CONTENT_LENGTH = 2000

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { FindingListParams } from '../api/client';
+import { POLL_INTERVAL_MS } from '../lib/constants';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import { useOverviewStats } from '../features/findings/useStats';
@@ -416,7 +417,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [showAI, setShowAI] = useState(true);
 
-  const { stats } = useOverviewStats(60_000);
+  const { stats } = useOverviewStats(POLL_INTERVAL_MS);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => {});
@@ -462,7 +463,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
       api.findings.listWithTotal(buildParams())
         .then(({ data, total: t }) => { setFindings(data); setTotal(t); })
         .catch(() => {});
-    }, 30_000);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, projectFilter, sevFilter, statusFilter, toolFilter, search]);

@@ -38,6 +38,9 @@ slowapi>=0.1.9
 # V2.4 — Monitor + alert (Sentry is optional; SENTRY_DSN gates init)
 sentry-sdk>=2.0.0
 
+# V2.7 — Anthropic Model Context Protocol server (báo cáo tiến độ ch.3.2)
+fastmcp>=3.3.0
+
 # Utils
 python-dotenv>=1.0.0
 python-multipart>=0.0.9

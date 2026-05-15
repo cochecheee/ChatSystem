@@ -148,3 +148,148 @@ async def test_poll_continues_on_run_error(db):
 
     # Second run should still be attempted
     assert mock_processor.process_run.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# V2.8 B3 — multi-tenant poller
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_multi_tenant_iterates_active_projects(monkeypatch):
+    """MULTI_TENANT_ENABLED=true → poll all active projects in parallel.
+
+    Mock 2 active projects + 1 inactive. Verify list_active returns 2,
+    processor.process_run called for each new run per project.
+    """
+    from src.services import poller as poller_mod
+    from src.repositories import ProjectRepository
+
+    monkeypatch.setattr(poller_mod.settings, "MULTI_TENANT_ENABLED", True)
+
+    # Mock 2 projects với different runs available
+    p1 = MagicMock()
+    p1.id = 1
+    p1.github_owner = "cochecheee"
+    p1.github_repo = "sample-python"
+    p1.github_token = "ghp_p1"
+    p1.polling_workflow_name = ""
+    p1.polling_branch = ""
+    p1.last_processed_run_id = 100
+
+    p2 = MagicMock()
+    p2.id = 2
+    p2.github_owner = "cochecheee"
+    p2.github_repo = "SAST_CICD"
+    p2.github_token = "ghp_p2"
+    p2.polling_workflow_name = ""
+    p2.polling_branch = ""
+    p2.last_processed_run_id = 200
+
+    # list_active returns 2 projects
+    monkeypatch.setattr(
+        ProjectRepository, "list_active",
+        AsyncMock(return_value=[p1, p2]),
+    )
+
+    # Per-project gh.list_workflow_runs → different runs
+    gh_p1 = AsyncMock()
+    gh_p1.list_workflow_runs = AsyncMock(return_value=[
+        {"id": 101, "conclusion": "success"},
+        {"id": 102, "conclusion": "success"},
+    ])
+    gh_p2 = AsyncMock()
+    gh_p2.list_workflow_runs = AsyncMock(return_value=[
+        {"id": 201, "conclusion": "success"},
+    ])
+
+    def fake_for_project(project):
+        return gh_p1 if project.id == 1 else gh_p2
+
+    monkeypatch.setattr(
+        poller_mod.GitHubClient, "for_project",
+        classmethod(lambda cls, project: fake_for_project(project)),
+    )
+
+    mock_processor = AsyncMock()
+    mock_processor.process_run = AsyncMock()
+
+    # Stub session for last_processed update
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.get = AsyncMock(return_value=None)  # skip update
+    mock_session.commit = AsyncMock()
+
+    sf = MagicMock(return_value=mock_session)
+
+    poller = poller_mod.GitHubPoller(
+        processor=mock_processor,
+        session_factory=sf,
+    )
+
+    await poller._poll()
+
+    # process_run gọi cho 3 run (2 từ p1 + 1 từ p2)
+    assert mock_processor.process_run.call_count == 3
+    calls = {c.args for c in mock_processor.process_run.call_args_list}
+    assert (1, 101) in calls
+    assert (1, 102) in calls
+    assert (2, 201) in calls
+
+
+@pytest.mark.asyncio
+async def test_multi_tenant_empty_active_list(monkeypatch):
+    """Không có active project → skip cycle, không crash."""
+    from src.services import poller as poller_mod
+    from src.repositories import ProjectRepository
+
+    monkeypatch.setattr(poller_mod.settings, "MULTI_TENANT_ENABLED", True)
+    monkeypatch.setattr(ProjectRepository, "list_active", AsyncMock(return_value=[]))
+
+    mock_processor = AsyncMock()
+    poller = poller_mod.GitHubPoller(processor=mock_processor)
+    await poller._poll()
+    mock_processor.process_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_multi_tenant_one_project_fail_does_not_crash_cycle(monkeypatch):
+    """1 project lỗi → log + skip, project khác vẫn process."""
+    from src.services import poller as poller_mod
+    from src.repositories import ProjectRepository
+
+    monkeypatch.setattr(poller_mod.settings, "MULTI_TENANT_ENABLED", True)
+
+    p_ok = MagicMock(id=10, github_owner="x", github_repo="ok", github_token="t",
+                    polling_workflow_name="", polling_branch="", last_processed_run_id=0)
+    p_bad = MagicMock(id=11, github_owner="x", github_repo="bad", github_token="t",
+                     polling_workflow_name="", polling_branch="", last_processed_run_id=0)
+
+    monkeypatch.setattr(
+        ProjectRepository, "list_active",
+        AsyncMock(return_value=[p_ok, p_bad]),
+    )
+
+    gh_ok = AsyncMock()
+    gh_ok.list_workflow_runs = AsyncMock(return_value=[{"id": 50, "conclusion": "success"}])
+    gh_bad = AsyncMock()
+    gh_bad.list_workflow_runs = AsyncMock(side_effect=RuntimeError("GitHub down"))
+
+    monkeypatch.setattr(
+        poller_mod.GitHubClient, "for_project",
+        classmethod(lambda cls, project: gh_ok if project.id == 10 else gh_bad),
+    )
+
+    mock_processor = AsyncMock()
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.get = AsyncMock(return_value=None)
+    mock_session.commit = AsyncMock()
+    sf = MagicMock(return_value=mock_session)
+
+    poller = poller_mod.GitHubPoller(processor=mock_processor, session_factory=sf)
+    await poller._poll()
+
+    # ok project vẫn process run 50
+    mock_processor.process_run.assert_called_once_with(10, 50)

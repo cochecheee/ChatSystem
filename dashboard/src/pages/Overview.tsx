@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { POLL_INTERVAL_MS } from '../lib/constants';
 import { AreaTrend, Donut, Heatmap, Sparkline } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { PageId } from '../components/Shell';
@@ -46,7 +47,7 @@ function timeAgo(iso: string) {
 }
 
 export function PageOverview({ onNav, onOpenVuln }: Props) {
-  const { runs } = useRuns(undefined, 60_000);
+  const { runs } = useRuns(undefined, POLL_INTERVAL_MS);
   const [projects, setProjects] = useState<Project[]>([]);
   const [healthy, setHealthy] = useState<boolean | null>(null);
 
@@ -74,7 +75,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
       api.stats.latestScan().then(setLatestStats).catch(() => {});
     };
     fetch();
-    const id = setInterval(fetch, 60_000);
+    const id = setInterval(fetch, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -92,7 +93,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
 
   usePolling(() => {
     api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
-  }, 60_000);
+  }, POLL_INTERVAL_MS);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => {});

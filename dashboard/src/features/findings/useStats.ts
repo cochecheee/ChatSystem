@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
+import { POLL_INTERVAL_MS } from '../../lib/constants';
 
 export interface OverviewStats {
   total: number;
@@ -24,9 +25,9 @@ const DEPS_TOOLS = new Set([
 
 /**
  * Hook poll `/stats/overview` — server-side counts đáng tin trên 8000+ findings.
- * Polling: 60s (KPI ít thay đổi).
+ * Polling 15s per báo cáo tiến độ docx ch.4.5.
  */
-export function useOverviewStats(intervalMs = 60_000) {
+export function useOverviewStats(intervalMs = POLL_INTERVAL_MS) {
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
 

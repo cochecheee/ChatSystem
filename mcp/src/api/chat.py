@@ -25,13 +25,18 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 COMMAND_ROLES: dict[str, list[str]] = {
-    "explain": ["developer", "security_lead", "admin"],
-    "fix":     ["developer", "security_lead", "admin"],
-    "report":  ["developer", "security_lead", "admin"],
-    "scan":    ["security_lead", "admin"],
-    "rerun":   ["security_lead", "admin"],
-    "approve": ["security_lead", "admin"],
-    "revoke":  ["security_lead", "admin"],
+    "explain":  ["developer", "security_lead", "admin"],
+    "fix":      ["developer", "security_lead", "admin"],
+    "report":   ["developer", "security_lead", "admin"],
+    "scan":     ["security_lead", "admin"],
+    "rerun":    ["security_lead", "admin"],
+    "approve":  ["security_lead", "admin"],
+    "revoke":   ["security_lead", "admin"],
+    # Báo cáo tiến độ docx ch.4.3 — 4 lệnh còn lại
+    "status":   ["developer", "security_lead", "admin"],
+    "results":  ["developer", "security_lead", "admin"],
+    "help":     ["developer", "security_lead", "admin"],
+    "feedback": ["developer", "security_lead", "admin"],
 }
 
 _command_service = CommandService()

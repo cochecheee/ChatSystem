@@ -114,11 +114,13 @@ class ProcessResponse(BaseModel):
 class WebhookRunPayload(BaseModel):
     """Body của POST /webhook/pipeline-complete từ CI.
 
-    CI gửi run-metadata.json có nhiều fields — chỉ cần run_id,
-    các field khác được ignore tự động.
+    CI gửi run-metadata.json có nhiều fields — required là `run_id`.
+    `repository` (V2.8 multi-tenant) cho phép backend route đúng project;
+    nếu thiếu hoặc match nothing → fallback settings.GITHUB_OWNER/REPO.
     """
     run_id: int
     pipeline_status: str = "unknown"
+    repository: str | None = None  # "owner/repo" — V2.8 multi-tenant routing key
 
     model_config = {"extra": "ignore"}
 
@@ -147,6 +149,10 @@ class CommandRequest(BaseModel):
     finding_id: int | None = None
     run_id: int | None = None
     justification: str | None = None
+    # /feedback — free-form text comment about an AI analysis
+    feedback_text: str | None = None
+    # /status, /results — optional repo override (defaults to configured repo)
+    repo: str | None = None
 
 
 class CommandResponse(BaseModel):

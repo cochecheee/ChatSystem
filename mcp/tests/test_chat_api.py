@@ -245,3 +245,122 @@ async def test_report_download(client):
     assert "text/html" in resp.headers["content-type"]
     assert "security-report.html" in resp.headers.get("content-disposition", "")
     assert b"Sentinel SAST" in resp.content
+
+
+# ---------------------------------------------------------------------------
+# /help, /feedback, /results, /status — báo cáo tiến độ docx ch.4.3
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_help_lists_ten_commands(client):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/help"},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    cmds = body["data"]["commands"]
+    names = {c["name"] for c in cmds}
+    # All 10 commands from docx ch.4.3 + /revoke (project addition)
+    assert {"/status", "/scan", "/results", "/explain", "/fix", "/rerun",
+            "/approve", "/revoke", "/report", "/help", "/feedback"} <= names
+    assert body["data"]["current_role"] == "developer"
+
+
+@pytest.mark.asyncio
+async def test_feedback_requires_text(client):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/feedback"},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_feedback_persists(client, finding_id):
+    resp = await client.post(
+        "/api/chat/command",
+        json={
+            "command": "/feedback",
+            "finding_id": finding_id,
+            "feedback_text": "Suggestion was helpful, fixed in PR #42",
+        },
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["data"]["feedback_id"] > 0
+    assert body["data"]["finding_id"] == finding_id
+
+
+@pytest.mark.asyncio
+async def test_feedback_unknown_finding(client):
+    resp = await client.post(
+        "/api/chat/command",
+        json={
+            "command": "/feedback",
+            "finding_id": 99999,
+            "feedback_text": "Note about non-existent finding",
+        },
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_results_empty_db(client):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/results"},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["data"]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_results_with_findings(client, finding_id):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/results"},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"]["total"] >= 1
+    assert "by_severity" in body["data"]
+
+
+@pytest.mark.asyncio
+async def test_results_unknown_run_id(client):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/results", "run_id": 99999999},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_status_developer_allowed(client, monkeypatch):
+    # Avoid hitting real GitHub API in tests
+    async def fake_list(*args, **kwargs):
+        return []
+
+    from src.services import command_service as cs_mod
+
+    monkeypatch.setattr(cs_mod.GitHubClient, "list_workflow_runs", fake_list)
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/status"},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["data"]["runs"] == []

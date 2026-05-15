@@ -5,7 +5,8 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...models.entities import Finding
+from ...core.config import settings
+from ...models.entities import Artifact, Finding, Project
 from ...models.schemas import AnalysisResult
 from ..github_client import GitHubClient
 from ...core.guardrails import InjectionGuardrail, ScrubbingService
@@ -34,16 +35,65 @@ class LLMAnalysisService:
         client: GeminiClient | None = None,
         github_client: GitHubClient | None = None,
     ) -> None:
-        self._client = client or GeminiClient()
-        self._github_client = github_client or GitHubClient()
+        # Khi client/github_client truyền explicit (test injection) → giữ.
+        # Khi None → V2.8 B4: build từ project credentials per-call.
+        self._injected_client = client
+        self._injected_github = github_client
         self._scrubber = ScrubbingService()
         self._guardrail = InjectionGuardrail()
+        # Cache GeminiClient theo (api_key, model) tránh tạo lại mỗi finding
+        self._gemini_cache: dict[tuple[str, str], GeminiClient] = {}
+
+    async def _resolve_project(
+        self, finding: Finding, session: AsyncSession,
+    ) -> Project | None:
+        """Truy ngược Finding → Artifact → Project để lấy credentials.
+
+        Trả None nếu chain bị đứt — caller fallback env client.
+        """
+        artifact = await session.get(Artifact, finding.artifact_id)
+        if artifact is None:
+            return None
+        return await session.get(Project, artifact.project_id)
+
+    def _get_gemini(self, api_key: str, model: str) -> GeminiClient:
+        cache_key = (api_key, model)
+        client = self._gemini_cache.get(cache_key)
+        if client is None:
+            client = GeminiClient(api_key=api_key, model=model)
+            self._gemini_cache[cache_key] = client
+        return client
 
     async def analyze_finding(
         self,
         finding: Finding,
         session: AsyncSession,
     ) -> AnalysisResult:
+        # B4 — resolve project để chọn credentials Gemini + GitHub fetch
+        project = None
+        if not self._injected_client or not self._injected_github:
+            project = await self._resolve_project(finding, session)
+
+        if self._injected_github is not None:
+            github_client = self._injected_github
+        elif project and project.github_token and project.github_owner and project.github_repo:
+            github_client = GitHubClient.for_project(project)
+        else:
+            github_client = GitHubClient()
+
+        if self._injected_client is not None:
+            gemini = self._injected_client
+        elif project and project.gemini_api_key:
+            gemini = self._get_gemini(
+                project.gemini_api_key,
+                project.gemini_model or settings.GEMINI_MODEL,
+            )
+        else:
+            gemini = self._get_gemini(
+                settings.GEMINI_API_KEY,
+                settings.GEMINI_MODEL,
+            )
+
         source_code: str | None = None
         raw = finding.raw_data or {}
         source_code = raw.get("source_code")
@@ -56,7 +106,7 @@ class LLMAnalysisService:
             and not finding.file_path.endswith((".jar", ".class", ".war", ".ear"))
         ):
             try:
-                fetched = await self._github_client.fetch_file_content(finding.file_path)
+                fetched = await github_client.fetch_file_content(finding.file_path)
                 if fetched:
                     # Scrub for PII/secrets before storing or passing to Gemini
                     source_code = self._scrubber.scrub_content(fetched)
@@ -93,7 +143,7 @@ class LLMAnalysisService:
             code_context=self._guardrail.sanitize(code_context),
         )
 
-        output: AnalysisOutput = await self._client.analyze(prompt)
+        output: AnalysisOutput = await gemini.analyze(prompt)
 
         result = AnalysisResult(
             finding_id=finding.id,

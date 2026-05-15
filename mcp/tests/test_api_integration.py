@@ -193,6 +193,122 @@ async def test_webhook_pipeline_complete_requires_token_when_configured(client):
 
 
 # ---------------------------------------------------------------------------
+# V2.8 multi-tenant routing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_webhook_multi_tenant_routes_by_repository(client):
+    """MULTI_TENANT_ENABLED=true + repository khớp existing project → dùng project đó."""
+    # Seed project tương ứng repository payload
+    create_resp = await client.post("/projects", json={
+        "name": "Multi-tenant test",
+        "github_url": "https://github.com/cochecheee/SAST_CICD",
+    })
+    assert create_resp.status_code == 201
+    expected_id = create_resp.json()["id"]
+
+    metadata = {
+        "run_id": 99100,
+        "repository": "cochecheee/SAST_CICD",
+        "pipeline_status": "success",
+    }
+    with patch("src.api.artifacts.settings") as mock_settings, \
+         patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
+        mock_settings.CI_WEBHOOK_TOKEN = ""
+        mock_settings.MULTI_TENANT_ENABLED = True
+        mock_settings.GITHUB_OWNER = "other"
+        mock_settings.GITHUB_REPO = "fallback"
+        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["project_id"] == expected_id  # routed by payload.repository
+
+
+@pytest.mark.asyncio
+async def test_webhook_multi_tenant_falls_back_when_no_match(client):
+    """MULTI_TENANT_ENABLED=true + repository không match → fallback settings."""
+    metadata = {
+        "run_id": 99101,
+        "repository": "cochecheee/non-existent-repo",
+        "pipeline_status": "success",
+    }
+    with patch("src.api.artifacts.settings") as mock_settings, \
+         patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
+        mock_settings.CI_WEBHOOK_TOKEN = ""
+        mock_settings.MULTI_TENANT_ENABLED = True
+        mock_settings.GITHUB_OWNER = "fallback-owner"
+        mock_settings.GITHUB_REPO = "fallback-repo"
+        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+
+    assert resp.status_code == 202
+    # Project created from fallback env values
+    list_resp = await client.get("/projects")
+    names = [p["name"] for p in list_resp.json()]
+    assert "fallback-owner/fallback-repo" in names
+
+
+@pytest.mark.asyncio
+async def test_webhook_legacy_ignores_repository_when_flag_off(client):
+    """MULTI_TENANT_ENABLED=false → ignore payload.repository, always env path."""
+    # Seed project that WOULD match repository nếu flag on
+    await client.post("/projects", json={
+        "name": "Would-match",
+        "github_url": "https://github.com/cochecheee/different",
+    })
+
+    metadata = {
+        "run_id": 99102,
+        "repository": "cochecheee/different",
+        "pipeline_status": "success",
+    }
+    with patch("src.api.artifacts.settings") as mock_settings, \
+         patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
+        mock_settings.CI_WEBHOOK_TOKEN = ""
+        mock_settings.MULTI_TENANT_ENABLED = False
+        mock_settings.GITHUB_OWNER = "legacy-owner"
+        mock_settings.GITHUB_REPO = "legacy-repo"
+        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+
+    assert resp.status_code == 202
+    # Phải create project mới từ env, không dùng "Would-match"
+    list_resp = await client.get("/projects")
+    names = [p["name"] for p in list_resp.json()]
+    assert "legacy-owner/legacy-repo" in names
+
+
+# ---------------------------------------------------------------------------
+# V2.8 P7 — POST /projects persist 9 field
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_project_persists_all_fields(client):
+    payload = {
+        "name": "Full Test",
+        "github_url": f"https://github.com/test/{uuid.uuid4().hex}",
+        "github_owner": "test",
+        "github_repo": "demo-repo",
+        "github_token": "ghp_xxxFAKE",
+        "gemini_api_key": "AIzaSyFAKE",
+        "gemini_model": "gemini-2.5-flash",
+        "polling_workflow_name": "Security",
+        "polling_branch": "main",
+        "active": True,
+    }
+    resp = await client.post("/projects", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["github_owner"] == "test"
+    assert data["github_repo"] == "demo-repo"
+    # Secrets KHÔNG expose raw
+    assert "github_token" not in data or data.get("github_token") in (None, "")
+    assert data["has_github_token"] is True
+    assert data["has_gemini_api_key"] is True
+    assert data["polling_workflow_name"] == "Security"
+    assert data["active"] is True
+
+
+# ---------------------------------------------------------------------------
 # GET /findings
 # ---------------------------------------------------------------------------
 
