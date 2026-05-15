@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from ..core.config import settings
 from ..core.db import AsyncSessionLocal
 from ..models.entities import Project
+from ..repositories import ProjectRepository
 from .github_client import GitHubClient
 from .processor import SecurityProcessor
 
@@ -16,13 +17,14 @@ log = logging.getLogger(__name__)
 
 
 class GitHubPoller:
-    """Background task — polls GitHub for new completed workflow runs every N seconds.
+    """Background task — poll GitHub cho workflow runs mới.
 
-    Single-tenant flow scoped to one repo (settings.GITHUB_OWNER/REPO).
-    Multi-project polling is scaffolded in the entity layer (Project
-    has per-tenant credentials + GitHubClient.for_project), but the
-    runtime loop here stays single-tenant until packaging is done and
-    the demo target is verified end-to-end on ALOUTE.
+    Hai mode dựa trên settings.MULTI_TENANT_ENABLED:
+      - False (legacy): poll 1 repo configured qua settings.GITHUB_OWNER/REPO.
+        Tự create Project nếu chưa có, dùng env credentials.
+      - True (V2.8 B3): mỗi cycle query `ProjectRepository.list_active()` →
+        poll song song cho từng project (asyncio.gather + semaphore cap).
+        Per-project GitHubClient với credentials từ row.
     """
 
     def __init__(
@@ -30,6 +32,7 @@ class GitHubPoller:
         processor: SecurityProcessor | None = None,
         github_client: GitHubClient | None = None,
         session_factory: async_sessionmaker | None = None,
+        max_concurrent: int = 3,
     ) -> None:
         self.processor = processor or SecurityProcessor()
         self.github_client = github_client or GitHubClient()
@@ -40,15 +43,17 @@ class GitHubPoller:
         self._github_url = (
             f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
         )
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
         log.info(
-            "Poller started — interval=%ds workflow=%r branch=%r",
+            "Poller started — interval=%ds workflow=%r branch=%r multi_tenant=%s",
             self.interval,
             self.workflow_name,
             self.branch,
+            settings.MULTI_TENANT_ENABLED,
         )
         while True:
             await asyncio.sleep(self.interval)
@@ -60,6 +65,80 @@ class GitHubPoller:
     # ------------------------------------------------------------------
 
     async def _poll(self) -> None:
+        """Route mode theo MULTI_TENANT_ENABLED."""
+        if settings.MULTI_TENANT_ENABLED:
+            await self._poll_multi_tenant()
+        else:
+            await self._poll_single_tenant()
+
+    async def _poll_multi_tenant(self) -> None:
+        """V2.8 B3 — iterate ProjectRepository.list_active() in parallel.
+
+        Mỗi project chạy trong coroutine riêng, asyncio.Semaphore cap
+        concurrency để không hit GitHub rate limit 5000/h per PAT.
+        1 project lỗi không crash cycle (return_exceptions=True).
+        """
+        async with self.session_factory() as session:
+            projects = await ProjectRepository(session).list_active()
+
+        if not projects:
+            log.debug("No active projects to poll")
+            return
+
+        log.info("Multi-tenant poll: %d active project(s)", len(projects))
+        await asyncio.gather(
+            *(self._poll_one_project(p) for p in projects),
+            return_exceptions=True,
+        )
+
+    async def _poll_one_project(self, project) -> None:
+        """Single project polling — guarded by semaphore."""
+        async with self._semaphore:
+            try:
+                gh = GitHubClient.for_project(project)
+                runs = await gh.list_workflow_runs(
+                    project.polling_workflow_name or self.workflow_name,
+                    project.polling_branch or self.branch,
+                )
+                last_run_id = project.last_processed_run_id or 0
+                new_runs = sorted(
+                    [
+                        r for r in runs
+                        if r["id"] > last_run_id and r.get("conclusion") == "success"
+                    ],
+                    key=lambda r: r["id"],
+                )
+                if not new_runs:
+                    log.debug(
+                        "Project %d (%s): no new runs since %d",
+                        project.id, project.github_repo, last_run_id,
+                    )
+                    return
+
+                log.info(
+                    "Project %d (%s/%s): %d new run(s)",
+                    project.id, project.github_owner, project.github_repo,
+                    len(new_runs),
+                )
+                for run in new_runs:
+                    try:
+                        await self.processor.process_run(project.id, run["id"])
+                        # Update last_processed_run_id transactionally
+                        async with self.session_factory() as session:
+                            db_proj = await session.get(Project, project.id)
+                            if db_proj is not None:
+                                db_proj.last_processed_run_id = run["id"]
+                                await session.commit()
+                    except Exception as exc:  # noqa: BLE001
+                        log.error(
+                            "Project %d run %d failed: %s",
+                            project.id, run["id"], exc,
+                        )
+            except Exception:  # noqa: BLE001
+                log.exception("Poll project %d failed", project.id)
+
+    async def _poll_single_tenant(self) -> None:
+        """Legacy single-tenant flow — 1 project from env settings."""
         async with self.session_factory() as session:
             project = await self._get_or_create_project(session)
             last_run_id = project.last_processed_run_id or 0
