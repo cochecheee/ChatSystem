@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type AlertItem, type UptimeCheck, type UptimeSummary } from '../api/client';
+import { POLL_INTERVAL_MS } from '../lib/constants';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 
@@ -35,7 +36,7 @@ export function PageMonitor() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 30_000);
+    const id = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 

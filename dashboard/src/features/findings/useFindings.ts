@@ -2,15 +2,16 @@ import { useState } from 'react';
 import { api } from '../../api/client';
 import type { FindingListParams } from '../../api/client';
 import { usePolling } from '../../hooks/usePolling';
+import { POLL_INTERVAL_MS } from '../../lib/constants';
 import type { Finding } from '../../types';
 
 /**
  * Polling hook cho list findings — wrap api.findings.list + setInterval.
  *
  * Usage:
- *   const { findings, loading } = useFindings({ limit: 200 }, 60_000);
+ *   const { findings, loading } = useFindings({ limit: 200 });
  */
-export function useFindings(params: FindingListParams = {}, intervalMs = 60_000) {
+export function useFindings(params: FindingListParams = {}, intervalMs = POLL_INTERVAL_MS) {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(true);
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client';
+import { POLL_INTERVAL_MS } from './lib/constants';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
 import { AuthProvider } from './features/auth/AuthContext';
 import { PageChat } from './pages/Chat';
@@ -35,7 +36,7 @@ export default function App() {
       }).catch(() => {});
     };
     fetchData();
-    const id = setInterval(fetchData, 60_000);
+    const id = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 
