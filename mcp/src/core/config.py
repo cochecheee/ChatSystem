@@ -41,6 +41,18 @@ class Settings(BaseSettings):
 
     SENTRY_DSN: str = ""
 
+    # V2.8 — Multi-tenant runtime
+    # False (default): legacy single-tenant — webhook luôn dùng
+    #   GITHUB_OWNER/REPO từ env, không quan tâm payload.repository.
+    #   Poller chỉ poll 1 repo configured.
+    # True: webhook route theo `repository` field → lookup Project
+    #   bằng github_url. Poller iterate active projects.
+    #   Vẫn fallback env nếu không tìm được project (audit log warning).
+    MULTI_TENANT_ENABLED: bool = False
+    # Optional Fernet key cho encrypt-at-rest credentials (Phase A1).
+    # Tạo: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    FERNET_KEY: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("DATABASE_URL", mode="after")

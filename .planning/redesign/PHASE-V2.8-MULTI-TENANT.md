@@ -74,14 +74,14 @@ D1 Project selector mỗi page · D2 Add-project wizard · D3 Audit log per-proj
 
 | Item | Status | Commit | Note |
 |---|---|---|---|
-| P1 snapshot | TODO | — | — |
-| P2 audit webhook | TODO | — | — |
-| P3 fallback path | TODO | — | — |
-| P4 feature flag | TODO | — | — |
-| P5 test fixture | TODO | — | — |
-| P6 Fernet | TODO | — | (defer Phase A1) |
-| P7 persist 9 field | TODO | — | — |
-| Phase A | TODO | — | — |
-| Phase B | TODO | — | — |
-| Phase C | TODO | — | — |
-| Phase D | TODO | — | optional |
+| P1 snapshot | DONE | (file backup, no commit) | mcp.db.20260515-223558.bak + Render projects/findings JSON |
+| P2 audit webhook | DONE | (in-place note) | sast-action notify + ALOUTE notify.py đều gửi `repository` field |
+| P3 fallback path | DONE | (pending) | webhook handler match repo → fallback env nếu thiếu |
+| P4 feature flag | DONE | (pending) | `MULTI_TENANT_ENABLED` default False |
+| P5 test coverage | DONE | (pending) | 3 routing test + 1 persist 9 field, 228/228 pass |
+| P6 Fernet | TODO | — | defer Phase A1 |
+| P7 persist 9 field | DONE | (pending) | `model_dump()` instead of name+url only |
+| Phase A — Foundation | TODO | — | post pre-flight |
+| Phase B — Runtime switch | PARTIAL | (pending) | B1 webhook routing done; B2/B3/B4 chưa |
+| Phase C — Multi-inheritor verify | TODO | — | sau Phase A+B |
+| Phase D — UI polish | TODO | — | optional |
