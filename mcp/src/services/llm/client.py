@@ -14,9 +14,20 @@ log = logging.getLogger(__name__)
 
 
 class GeminiClient:
-    def __init__(self) -> None:
-        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model = settings.GEMINI_MODEL
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        """V2.8 B4 — per-project credentials.
+
+        api_key / model rỗng → fallback settings (single-tenant default).
+        Caller multi-tenant pass project-specific values để các project
+        khác nhau dùng quota Gemini khác nhau (tránh đụng rate-limit).
+        """
+        effective_key = api_key or settings.GEMINI_API_KEY
+        self._client = genai.Client(api_key=effective_key)
+        self._model = model or settings.GEMINI_MODEL
         self._max_retries = settings.GEMINI_MAX_RETRIES
 
     async def analyze(self, prompt: str) -> AnalysisOutput:

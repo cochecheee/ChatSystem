@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -194,3 +194,123 @@ async def test_analyze_skips_fetch_for_unknown_path():
     await service.analyze_finding(finding, session)
 
     mock_github.fetch_file_content.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# V2.8 B4 — per-project Gemini key
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_analyze_uses_project_gemini_key_when_set():
+    """Project có gemini_api_key → tạo GeminiClient mới với key đó (cached)."""
+    from src.services.llm import service as svc_mod
+
+    captured: list[tuple[str, str]] = []
+
+    class FakeGeminiClient:
+        def __init__(self, api_key=None, model=None):
+            captured.append((api_key, model))
+            self.analyze = AsyncMock(return_value=SAMPLE_OUTPUT)
+
+    project = MagicMock()
+    project.github_token = "ghp_xxx"
+    project.github_owner = "test"
+    project.github_repo = "repo"
+    project.gemini_api_key = "AIzaProject"
+    project.gemini_model = "gemini-2.5-pro"
+
+    artifact = MagicMock()
+    artifact.project_id = 5
+
+    session = AsyncMock()
+    # session.get sequence: Artifact, Project
+    session.get = AsyncMock(side_effect=[artifact, project])
+
+    with patch.object(svc_mod, "GeminiClient", FakeGeminiClient), \
+         patch.object(svc_mod, "GitHubClient") as mock_gh_cls:
+        mock_gh = MagicMock()
+        mock_gh.fetch_file_content = AsyncMock(return_value=None)
+        mock_gh_cls.for_project = MagicMock(return_value=mock_gh)
+        mock_gh_cls.return_value = mock_gh
+
+        service = LLMAnalysisService()  # no injection → resolves from project
+        finding = _make_finding()
+        await service.analyze_finding(finding, session)
+
+    assert captured == [("AIzaProject", "gemini-2.5-pro")]
+
+
+@pytest.mark.asyncio
+async def test_analyze_falls_back_to_env_when_project_has_no_key():
+    """Project rỗng gemini_api_key → dùng settings (env)."""
+    from src.services.llm import service as svc_mod
+    from src.core.config import settings
+
+    captured: list[tuple[str, str]] = []
+
+    class FakeGeminiClient:
+        def __init__(self, api_key=None, model=None):
+            captured.append((api_key, model))
+            self.analyze = AsyncMock(return_value=SAMPLE_OUTPUT)
+
+    project = MagicMock()
+    project.github_token = ""
+    project.github_owner = ""
+    project.github_repo = ""
+    project.gemini_api_key = ""  # empty → fallback
+    project.gemini_model = ""
+
+    artifact = MagicMock()
+    artifact.project_id = 6
+    session = AsyncMock()
+    session.get = AsyncMock(side_effect=[artifact, project])
+
+    with patch.object(svc_mod, "GeminiClient", FakeGeminiClient), \
+         patch.object(svc_mod, "GitHubClient") as mock_gh_cls:
+        mock_gh = MagicMock()
+        mock_gh.fetch_file_content = AsyncMock(return_value=None)
+        mock_gh_cls.return_value = mock_gh
+
+        service = LLMAnalysisService()
+        finding = _make_finding()
+        await service.analyze_finding(finding, session)
+
+    assert captured == [(settings.GEMINI_API_KEY, settings.GEMINI_MODEL)]
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_cached_per_key():
+    """Cùng key gọi nhiều lần → tạo GeminiClient 1 lần (cache hit)."""
+    from src.services.llm import service as svc_mod
+
+    init_count = 0
+
+    class FakeGeminiClient:
+        def __init__(self, api_key=None, model=None):
+            nonlocal init_count
+            init_count += 1
+            self.analyze = AsyncMock(return_value=SAMPLE_OUTPUT)
+
+    project = MagicMock()
+    project.github_token = ""
+    project.gemini_api_key = "AIzaSame"
+    project.gemini_model = "gemini-2.5-flash"
+    project.github_owner = ""
+    project.github_repo = ""
+
+    artifact = MagicMock()
+    artifact.project_id = 7
+
+    with patch.object(svc_mod, "GeminiClient", FakeGeminiClient), \
+         patch.object(svc_mod, "GitHubClient") as mock_gh_cls:
+        mock_gh = MagicMock()
+        mock_gh.fetch_file_content = AsyncMock(return_value=None)
+        mock_gh_cls.return_value = mock_gh
+
+        service = LLMAnalysisService()
+        for _ in range(3):
+            session = AsyncMock()
+            session.get = AsyncMock(side_effect=[artifact, project])
+            await service.analyze_finding(_make_finding(), session)
+
+    assert init_count == 1  # cached after first instantiation

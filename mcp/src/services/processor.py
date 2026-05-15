@@ -69,18 +69,40 @@ class SecurityProcessor:
     ) -> None:
         """Fetch security artifacts from a GitHub workflow run and process each one.
 
-        When `project` is supplied (poller flow), build a per-project
-        GitHubClient and load that project's artifact profile. Otherwise
-        fall back to the default singleton (single-tenant compat).
+        Routing (V2.8 B2):
+          - Background task được spawn từ webhook handler chỉ pass project_id
+            (tránh detached ORM instance khi request session closed). Method
+            tự fetch Project bằng id và xây per-project GitHubClient nếu có
+            credentials.
+          - Poller flow có thể pass `project` ORM object trực tiếp (đang
+            trong session) — short-circuit lookup.
+          - Project thiếu credentials (github_token/owner/repo trống) →
+            fallback `self.github_client` (env-bound, single-tenant).
         """
         from ..models.entities import Artifact as ArtifactModel
+        from ..models.entities import Project as ProjectModel
 
-        if project is not None:
+        if project is None:
+            async with self.session_factory() as session:
+                project = await session.get(ProjectModel, project_id)
+                # Detach để dùng ngoài session (read-only access vào field)
+                if project is not None:
+                    session.expunge(project)
+
+        if project is not None and project.github_token and project.github_owner and project.github_repo:
             gh = GitHubClient.for_project(project)
             profile = load_profile(project.artifact_profile or None)
+            log.info(
+                "process_run %d: using per-project credentials for %s/%s",
+                github_run_id, project.github_owner, project.github_repo,
+            )
         else:
             gh = self.github_client
             profile = load_profile()
+            log.info(
+                "process_run %d: using env-bound GitHub client (no per-project credentials)",
+                github_run_id,
+            )
 
         all_artifacts = await gh.list_artifacts(github_run_id)
         security_artifacts = [

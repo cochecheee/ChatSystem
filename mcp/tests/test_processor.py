@@ -155,6 +155,89 @@ async def test_process_artifact_raises_if_not_found(db):
         await processor.process_artifact(db_artifact_id=9999, github_artifact_id=1)
 
 
+# ---------------------------------------------------------------------------
+# V2.8 B2 — per-project GitHub client routing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_process_run_uses_per_project_client_when_credentials_set(db, monkeypatch):
+    """Project có github_token+owner+repo → SecurityProcessor build
+    per-project GitHubClient (KHÔNG dùng env)."""
+    # Seed project có credentials
+    async with db() as session:
+        proj = Project(
+            name="ALOUTE",
+            github_url="https://github.com/cochecheee/SAST_CICD",
+            github_owner="cochecheee",
+            github_repo="SAST_CICD",
+            github_token="ghp_aloute_token",
+        )
+        session.add(proj)
+        await session.commit()
+        await session.refresh(proj)
+        pid = proj.id
+
+    # Capture which client class is instantiated
+    instances: list = []
+
+    from src.services import github_client as gh_mod
+    original_for_project = gh_mod.GitHubClient.for_project
+
+    @classmethod
+    def spy_for_project(cls, project):
+        client = original_for_project(project)
+        instances.append(("for_project", project.github_owner, project.github_repo))
+        # Stub remote calls
+        client.list_artifacts = AsyncMock(return_value=[])
+        return client
+
+    monkeypatch.setattr(gh_mod.GitHubClient, "for_project", spy_for_project)
+
+    env_client = AsyncMock()
+    env_client.list_artifacts = AsyncMock(return_value=[])
+    processor = SecurityProcessor(session_factory=db, github_client=env_client)
+
+    await processor.process_run(project_id=pid, github_run_id=12345)
+
+    # Per-project path called
+    assert len(instances) == 1
+    assert instances[0] == ("for_project", "cochecheee", "SAST_CICD")
+    # Env client NOT used
+    env_client.list_artifacts.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_run_falls_back_to_env_when_no_credentials(db):
+    """Project credentials trống → fallback env-bound github_client."""
+    async with db() as session:
+        proj = Project(
+            name="legacy",
+            github_url="https://github.com/x/y",
+            # github_token/owner/repo intentionally empty
+        )
+        session.add(proj)
+        await session.commit()
+        await session.refresh(proj)
+        pid = proj.id
+
+    env_client = AsyncMock()
+    env_client.list_artifacts = AsyncMock(return_value=[])
+    processor = SecurityProcessor(session_factory=db, github_client=env_client)
+    await processor.process_run(project_id=pid, github_run_id=99)
+
+    env_client.list_artifacts.assert_awaited_once_with(99)
+
+
+@pytest.mark.asyncio
+async def test_process_run_handles_missing_project_falls_back(db):
+    """project_id không tồn tại → fallback env (không raise)."""
+    env_client = AsyncMock()
+    env_client.list_artifacts = AsyncMock(return_value=[])
+    processor = SecurityProcessor(session_factory=db, github_client=env_client)
+    await processor.process_run(project_id=99999, github_run_id=77)
+    env_client.list_artifacts.assert_awaited_once_with(77)
+
+
 @pytest.mark.asyncio
 async def test_process_artifact_deduplicates_within_batch(db, project_and_artifact):
     _, artifact_id = project_and_artifact
