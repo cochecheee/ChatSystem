@@ -57,14 +57,11 @@ Honest assessment — không phải marketing.
 
 ## Naming / Architecture
 
-### "MCP" misnomer
-- **Issue**: Tên folder `mcp/` + "MCP Gateway" trong docs gây hiểu nhầm
-- **Reality**: Đây là REST API gateway, KHÔNG phải Model Context Protocol server của Anthropic
-- **Resolve options**:
-  - A. Rename `mcp/` → `gateway/` / `backend/` (~30 phút refactor)
-  - B. Implement MCP thật (2-3 ngày, biến thành AI-native tool — recommend cho thesis)
-  - C. Add disclaimer ở README + slide
-- **Decision**: Defer post-defense, document clearly ở [02-architecture.md](02-architecture.md)
+### ~~"MCP" misnomer~~ → V2.7 fixed
+- **Trước V2.7**: Tên folder `mcp/` + "MCP Gateway" docs gây hiểu nhầm với Anthropic Model Context Protocol mà code chỉ có REST.
+- **V2.7 (2026-05-15)**: Implement MCP server thật bằng `fastmcp` SDK. `mcp/src/mcp_server.py` expose 8 tool (list_findings, get_finding, explain_finding, approve/revoke, list_pipelines, stats, trigger_scan). Dual-protocol: FastAPI cho dashboard + MCP cho Claude Desktop / Cursor.
+- **Remaining work**: Implement **resources** + **prompts** dimension của MCP (hiện chỉ có **tools**). Roadmap v0.3.
+- Xem [`docs/mcp-server.md`](../mcp-server.md).
 
 ## Security
 

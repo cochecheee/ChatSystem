@@ -119,5 +119,5 @@
 | 3 G8 guardrail docs | DONE | — | guardrails.md rewrite 4-layer + 24/24 tests pass |
 | 4 G3 Security Gate (sast-action) | DONE | sast-action:0577b81 | YAML lint pass + Python jq-equiv smoke (1 crit→fail, clean→pass). Live CI verify deferred to merge time. |
 | 5 G4 CodeQL wire (sast-action) | DONE | sast-action:a1a2328 | YAML valid, 5 CodeQL steps added; ESLint+SpotBugs+DepCheck đã có từ V2.1. Live CI verify deferred. |
-| 6 G5 MCP server thật | TODO | — | — |
-| 7 B1-B4 docx alignment | TODO | — | — |
+| 6 G5 MCP server thật | DONE | ed175ec | 13 unit test pass (call_tool), 221/221 full suite, stdio + HTTP transport runnable |
+| 7 B1-B4 docx alignment | DONE | pending | docs/project 02/08/09 + 01 updated; REQUIREMENTS.md restored + updated; DOCX-DELTA-V2.7.md tạo cho user paste vào docx |

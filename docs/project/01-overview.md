@@ -34,7 +34,8 @@
 | V2.4 | ✅ | Monitor + uptime check + email alert + Sentry hook + Monitor tab |
 | V2.5 | 🔄 | Dashboard Static Site Blueprint pushed — chờ Render Sync |
 | V2.6 | 🔄 | Postgres persistence + Monitor→Uptime rename pushed — chờ Render Sync |
-| Tag | 🏁 | `v0.2.0` sau khi V2.5+V2.6 verify end-to-end |
+| V2.7 | ✅ | Docx alignment: polling 15s, 10 ChatOps, 4-layer guardrail docs, Security Gate, CodeQL, Anthropic MCP server thật |
+| Tag | 🏁 | `v0.2.0` sau khi V2.5+V2.6+V2.7 verify end-to-end |
 
 ## Stack tổng
 
