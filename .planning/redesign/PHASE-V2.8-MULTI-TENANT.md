@@ -74,14 +74,18 @@ D1 Project selector mỗi page · D2 Add-project wizard · D3 Audit log per-proj
 
 | Item | Status | Commit | Note |
 |---|---|---|---|
-| P1 snapshot | DONE | (file backup, no commit) | mcp.db.20260515-223558.bak + Render projects/findings JSON |
-| P2 audit webhook | DONE | (in-place note) | sast-action notify + ALOUTE notify.py đều gửi `repository` field |
-| P3 fallback path | DONE | (pending) | webhook handler match repo → fallback env nếu thiếu |
-| P4 feature flag | DONE | (pending) | `MULTI_TENANT_ENABLED` default False |
-| P5 test coverage | DONE | (pending) | 3 routing test + 1 persist 9 field, 228/228 pass |
-| P6 Fernet | TODO | — | defer Phase A1 |
-| P7 persist 9 field | DONE | (pending) | `model_dump()` instead of name+url only |
-| Phase A — Foundation | TODO | — | post pre-flight |
-| Phase B — Runtime switch | PARTIAL | (pending) | B1 webhook routing done; B2/B3/B4 chưa |
-| Phase C — Multi-inheritor verify | TODO | — | sau Phase A+B |
-| Phase D — UI polish | TODO | — | optional |
+| P1 snapshot | DONE | file backup | mcp.db.20260515-223558.bak + Render projects/findings JSON |
+| P2 audit webhook | DONE | in-place note | sast-action notify + ALOUTE notify.py đều gửi `repository` field |
+| P3 fallback path | DONE | 93ab28d | webhook lookup → fallback env |
+| P4 feature flag | DONE | 93ab28d | `MULTI_TENANT_ENABLED` default False, `FERNET_KEY` empty |
+| P5 test coverage | DONE | 93ab28d | 3 routing + 1 persist 9 field, 228/228 |
+| P6 Fernet | DONE | 77e4126 | (moved up — done with A1) |
+| P7 persist 9 field | DONE | 93ab28d | `model_dump()` instead of name+url only |
+| Phase A1 Fernet encrypt | DONE | 77e4126 | 5 unit + live smoke at rest |
+| Phase A2 migration | DEFER | — | chỉ cần khi prod có row plaintext + key rotate |
+| Phase B1 webhook routing | DONE | 93ab28d | (with P3) |
+| Phase B2 SecurityProcessor | DONE | 27d07cd | per-project github client + 3 test |
+| Phase B3 GitHubPoller | DONE | 095e614 | asyncio.gather + semaphore + 3 test |
+| Phase B4 LLMAnalysisService | DONE | 27d07cd | per-project gemini key, cache, 3 test |
+| Phase C verify | DONE | local smoke script | 2 project routing + decrypt verified |
+| Phase D UI polish | TODO | — | optional v0.3 |
