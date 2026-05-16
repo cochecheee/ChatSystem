@@ -3,6 +3,7 @@ import { api } from './api/client';
 import { POLL_INTERVAL_MS } from './lib/constants';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
 import { AuthProvider } from './features/auth/AuthContext';
+import { ProjectProvider, useProjectContext } from './contexts/ProjectContext';
 import { PageChat } from './pages/Chat';
 import { PageOverview } from './pages/Overview';
 import { PagePipelines } from './pages/Pipelines';
@@ -13,11 +14,12 @@ import { PageSCA } from './pages/Sca';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
 
-export default function App() {
+function AppInner() {
   const [active, setActive] = useState<PageId>('overview');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [openVulnId, setOpenVulnId] = useState<number | undefined>();
   const [newCritHighCount, setNewCritHighCount] = useState(0);
+  const { activeProjectId } = useProjectContext();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -26,8 +28,12 @@ export default function App() {
   const critHighRef = useRef(0);
 
   useEffect(() => {
+    // Reset baseline when switching projects so a higher-count tenant doesn't
+    // produce a spurious "+N new" badge on the first poll.
+    critHighRef.current = 0;
+    setNewCritHighCount(0);
     const fetchData = () => {
-      api.stats.overview().then(s => {
+      api.stats.overview(activeProjectId !== null ? { project_id: activeProjectId } : undefined).then(s => {
         const critHigh = s.critical_high;
         if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
           setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));
@@ -38,7 +44,7 @@ export default function App() {
     fetchData();
     const id = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [activeProjectId]);
 
   const onNav = (id: PageId) => {
     setActive(id);
@@ -65,21 +71,29 @@ export default function App() {
   }
 
   return (
-    <AuthProvider>
-      <div className="app-shell">
-        <Sidebar active={active} onNav={onNav} />
-        <div className="main">
-          <Topbar
-            active={active}
-            onNav={onNav}
-            theme={theme}
-            onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            newCritHighCount={newCritHighCount}
-            onClearCritHigh={() => setNewCritHighCount(0)}
-          />
-          {page}
-        </div>
+    <div className="app-shell">
+      <Sidebar active={active} onNav={onNav} />
+      <div className="main">
+        <Topbar
+          active={active}
+          onNav={onNav}
+          theme={theme}
+          onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+          newCritHighCount={newCritHighCount}
+          onClearCritHigh={() => setNewCritHighCount(0)}
+        />
+        {page}
       </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ProjectProvider>
+        <AppInner />
+      </ProjectProvider>
     </AuthProvider>
   );
 }

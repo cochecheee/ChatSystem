@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
+import { useActiveProjectParam } from '../../contexts/ProjectContext';
 import { POLL_INTERVAL_MS } from '../../lib/constants';
 
 export interface OverviewStats {
@@ -30,18 +31,20 @@ const DEPS_TOOLS = new Set([
 export function useOverviewStats(intervalMs = POLL_INTERVAL_MS) {
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const projParam = useActiveProjectParam();
+  const projectId = projParam.project_id;
 
   useEffect(() => {
     let cancelled = false;
     const fetch = () => {
-      api.stats.overview()
+      api.stats.overview(projectId !== undefined ? { project_id: projectId } : undefined)
         .then(s => { if (!cancelled) { setStats(s); setLoading(false); } })
         .catch(() => { if (!cancelled) setLoading(false); });
     };
     fetch();
     const id = setInterval(fetch, intervalMs);
     return () => { cancelled = true; clearInterval(id); };
-  }, [intervalMs]);
+  }, [intervalMs, projectId]);
 
   return { stats, loading };
 }

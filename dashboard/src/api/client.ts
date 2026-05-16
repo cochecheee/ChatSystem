@@ -144,15 +144,25 @@ export const api = {
   },
   projects: {
     list: () => get<Project[]>('/projects'),
-    create: (name: string, github_url: string) =>
-      post<Project>('/projects', { name, github_url }),
+    create: (body: {
+      name: string;
+      github_url: string;
+      github_owner?: string;
+      github_repo?: string;
+      github_token?: string;
+      gemini_api_key?: string;
+      gemini_model?: string;
+      polling_workflow_name?: string;
+      polling_branch?: string;
+      active?: boolean;
+    }) => post<Project>('/projects', body),
     delete: (id: number) =>
       fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: authHeaders() }).then(res => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
       }),
   },
   stats: {
-    overview: () => get<{
+    overview: (params?: { project_id?: number }) => get<{
       total: number;
       critical_high: number;
       ai_analyzed: number;
@@ -170,8 +180,8 @@ export const api = {
       approved: number;
       revoked: number;
       pending: number;
-    }>('/stats/overview'),
-    latestScan: () => get<{
+    }>('/stats/overview', params as Record<string, string | number> | undefined),
+    latestScan: (params?: { project_id?: number }) => get<{
       run_id: number | null;
       run_number: number | null;
       head_branch: string | null;
@@ -184,7 +194,7 @@ export const api = {
       by_severity: Record<string, number>;
       by_status: Record<string, number>;
       by_tool: Record<string, number>;
-    }>('/stats/latest-scan'),
+    }>('/stats/latest-scan', params as Record<string, string | number> | undefined),
     runs: (days = 30) => get<{
       days: number;
       total: number;
@@ -194,8 +204,12 @@ export const api = {
     }>('/stats/runs', { days }),
   },
   github: {
-    runs: (branch?: string) =>
-      get<WorkflowRun[]>('/github/runs', branch ? { branch } : {}),
+    runs: (branch?: string, project_id?: number) => {
+      const params: Record<string, string | number> = {};
+      if (branch) params.branch = branch;
+      if (project_id !== undefined) params.project_id = project_id;
+      return get<WorkflowRun[]>('/github/runs', Object.keys(params).length ? params : undefined);
+    },
     artifacts: (runId: number) =>
       get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
     runFindings: (runId: number) =>

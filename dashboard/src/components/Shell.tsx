@@ -1,4 +1,5 @@
 import { Icon } from './Icon';
+import { ProjectSelector } from './ProjectSelector';
 
 export type PageId =
   | 'overview'
@@ -120,6 +121,7 @@ export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, 
         ))}
       </div>
       <div className="topbar-right">
+        <ProjectSelector />
         <div className="search-box">
           <Icon name="search" size={14} />
           <input placeholder="Search vulnerabilities, repos, runs…" readOnly />

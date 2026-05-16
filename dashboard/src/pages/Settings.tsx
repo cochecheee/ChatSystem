@@ -78,7 +78,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
     setLoading(true);
     setError('');
     try {
-      const p = await api.projects.create(name.trim(), url.trim());
+      const p = await api.projects.create({ name: name.trim(), github_url: url.trim() });
       onAdded(p);
       setName('');
       setUrl('');
