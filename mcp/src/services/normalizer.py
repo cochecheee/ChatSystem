@@ -33,9 +33,9 @@ _SPOTBUGS_PRIORITY_TO_SEVERITY: dict[str, str] = {
 }
 
 _ESLINT_SEVERITY_TO_SEVERITY: dict[int, str] = {
-    2: "high",
-    1: "medium",
-    0: "info",
+    2: "high",     # eslint "error"
+    1: "low",      # eslint "warn" — usually style/lint, not security
+    0: "info",     # eslint "off"
 }
 
 _UPPERCASE_TO_SEVERITY: dict[str, str] = {
@@ -43,7 +43,6 @@ _UPPERCASE_TO_SEVERITY: dict[str, str] = {
     "HIGH": "high",
     "MEDIUM": "medium",
     "LOW": "low",
-    "UNKNOWN": "info",
     "INFO": "info",
     # Semgrep `properties.severity` variants
     "ERROR": "high",
@@ -51,7 +50,44 @@ _UPPERCASE_TO_SEVERITY: dict[str, str] = {
     "INFORMATIONAL": "info",
     # CodeQL `properties["problem.severity"]` variants
     "RECOMMENDATION": "low",
+    # NOTE: "UNKNOWN" deliberately NOT mapped — handled by _sca_severity()
+    # which falls back to CVSS or "medium" (pending triage) rather than info.
 }
+
+# CWE classes severe enough that a tool-reported "high" should be promoted to
+# "critical" when seen via DAST. Mirrors OWASP Top 10 (Injection / RCE classes).
+_CRITICAL_CWE_IDS: frozenset[str] = frozenset({
+    "CWE-77",   # Command Injection
+    "CWE-78",   # OS Command Injection
+    "CWE-89",   # SQL Injection
+    "CWE-94",   # Code Injection
+    "CWE-95",   # eval() Injection
+    "CWE-502",  # Deserialization of Untrusted Data
+    "CWE-917",  # Expression Language Injection
+})
+
+
+def _sca_severity(sev_raw: str, cvss_score: float | None) -> str:
+    """SCA tools (DepCheck/Trivy) severity resolution.
+
+    Preference order:
+      1. CVSS numeric score (when present) — most trustworthy signal
+      2. String severity label
+      3. Default "medium" (treat-as-pending-triage, NOT info)
+    """
+    s = (sev_raw or "").strip().upper()
+    # When the tool says UNKNOWN or empty, lean on CVSS if available.
+    if s in {"", "UNKNOWN"}:
+        if cvss_score is not None and cvss_score > 0:
+            return _security_severity_to_label(float(cvss_score))
+        return "medium"
+    mapped = _UPPERCASE_TO_SEVERITY.get(s)
+    if mapped:
+        return mapped
+    # Fallback for unrecognised strings: CVSS if available, else medium
+    if cvss_score is not None and cvss_score > 0:
+        return _security_severity_to_label(float(cvss_score))
+    return "medium"
 
 
 def _security_severity_to_label(score: float) -> str:
@@ -153,6 +189,26 @@ class SarifNormalizer(BaseNormalizer):
             for result in run.get("results") or []:
                 if not isinstance(result, dict):
                     continue
+                # SARIF spec: level="none" means the result is NOT a problem
+                # (informational metric, suppressed kind, etc.). Skip — storing
+                # these inflates info-tier counts with non-actionable entries.
+                # However, if `properties.security-severity` overrides to a
+                # real risk score, keep it (some tools mis-emit level=none).
+                if (result.get("level") or "").lower() == "none":
+                    props = result.get("properties") or {}
+                    rule_def_for_none = rules_index.get(result.get("ruleId") or "") or {}
+                    rule_props = rule_def_for_none.get("properties") or {}
+                    has_override = False
+                    for src in (props, rule_props):
+                        if isinstance(src, dict) and src.get("security-severity"):
+                            try:
+                                if float(src["security-severity"]) > 0:
+                                    has_override = True
+                                    break
+                            except (TypeError, ValueError):
+                                pass
+                    if not has_override:
+                        continue
                 try:
                     findings.append(
                         self._result_to_finding(
@@ -457,8 +513,7 @@ class DepCheckNormalizer(BaseNormalizer):
 
             for vuln in dep.get("vulnerabilities", []):
                 rule_id = vuln.get("name") or "unknown-cve"
-                sev_raw = vuln.get("severity", "").upper()
-                severity = _UPPERCASE_TO_SEVERITY.get(sev_raw, "medium")
+                sev_raw = vuln.get("severity", "")
                 message = vuln.get("description") or rule_id
                 cwes: list[str] = vuln.get("cwes") or []
                 cwe_id = cwes[0] if cwes else None
@@ -468,6 +523,8 @@ class DepCheckNormalizer(BaseNormalizer):
                     cvss_score = cvssv3.get("baseScore")
                 elif cvssv2 := vuln.get("cvssv2"):
                     cvss_score = cvssv2.get("score")
+
+                severity = _sca_severity(sev_raw, cvss_score)
 
                 dedup = compute_dedup_hash(rule_id, file_path, message)
                 findings.append(
@@ -510,8 +567,7 @@ class TrivyJsonNormalizer(BaseNormalizer):
 
             for vuln in result_entry.get("Vulnerabilities") or []:
                 rule_id = vuln.get("VulnerabilityID") or "unknown-cve"
-                sev_raw = vuln.get("Severity", "").upper()
-                severity = _UPPERCASE_TO_SEVERITY.get(sev_raw, "medium")
+                sev_raw = vuln.get("Severity", "")
                 message = vuln.get("Title") or vuln.get("Description") or rule_id
                 cwe_ids: list[str] = vuln.get("CweIDs") or []
                 cwe_id = cwe_ids[0] if cwe_ids else None
@@ -520,6 +576,8 @@ class TrivyJsonNormalizer(BaseNormalizer):
                 cvss = vuln.get("CVSS") or {}
                 if nvd := cvss.get("nvd"):
                     cvss_score = nvd.get("V3Score") or nvd.get("V2Score")
+
+                severity = _sca_severity(sev_raw, cvss_score)
 
                 pkg_name = vuln.get("PkgName", "")
                 file_path = f"{target}:{pkg_name}" if pkg_name else target
@@ -581,6 +639,16 @@ class ZapJsonNormalizer(BaseNormalizer):
                 solution = alert.get("solution", "")
                 cwe_raw = alert.get("cweid")
                 cwe_id = f"CWE-{cwe_raw}" if cwe_raw and cwe_raw != "-1" else None
+
+                # Promote DAST high→critical for injection/RCE CWE classes when
+                # ZAP itself reports high confidence (riskcode max is 3 → "high"
+                # so without this clamp the worst DAST findings never surface).
+                if (
+                    severity == "high"
+                    and cwe_id in _CRITICAL_CWE_IDS
+                    and str(alert.get("confidence", "")) in {"3", "high", "High"}
+                ):
+                    severity = "critical"
 
                 instances = alert.get("instances") or [{}]
                 for inst in instances:

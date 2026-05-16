@@ -8,6 +8,7 @@ from src.services.normalizer import (
     SarifNormalizer,
     SpotBugsXMLNormalizer,
     TrivyJsonNormalizer,
+    ZapJsonNormalizer,
 )
 
 # ---------------------------------------------------------------------------
@@ -180,8 +181,8 @@ def test_eslint_parses_two_findings():
 
 def test_eslint_severity_mapping():
     findings = ESLintNormalizer().normalize(ESLINT_JSON, artifact_id=3)
-    assert findings[0].severity == "high"   # severity=2
-    assert findings[1].severity == "medium" # severity=1
+    assert findings[0].severity == "high"  # severity=2 (eslint "error")
+    assert findings[1].severity == "low"   # severity=1 (eslint "warn" — style/lint)
 
 
 def test_eslint_extracts_file_and_line():
@@ -359,6 +360,52 @@ def test_trivy_none_vulnerabilities_skipped():
     # "Java" target has Vulnerabilities: None — should not crash
     findings = TrivyJsonNormalizer().normalize(TRIVY_JSON, artifact_id=20)
     assert len(findings) == 1
+
+
+# ---------------------------------------------------------------------------
+# ZapJsonNormalizer — DAST critical bump for injection CWEs
+# ---------------------------------------------------------------------------
+
+def _zap_payload(cwe: str, riskcode: str = "3", confidence: str = "3") -> str:
+    return json.dumps({
+        "site": [{
+            "@name": "https://example.com",
+            "alerts": [{
+                "pluginid": "12345",
+                "alert": "SQL Injection",
+                "riskcode": riskcode,
+                "confidence": confidence,
+                "cweid": cwe.replace("CWE-", ""),
+                "desc": "test",
+                "instances": [{"uri": "/path", "method": "POST"}],
+            }],
+        }],
+    })
+
+
+def test_zap_high_sqli_with_high_confidence_promoted_to_critical():
+    findings = ZapJsonNormalizer().normalize(_zap_payload("CWE-89"), artifact_id=1)
+    assert findings[0].severity == "critical"
+
+
+def test_zap_high_xss_not_promoted():
+    # CWE-79 is not in critical set (intentional — XSS is high not critical by default)
+    findings = ZapJsonNormalizer().normalize(_zap_payload("CWE-79"), artifact_id=1)
+    assert findings[0].severity == "high"
+
+
+def test_zap_high_sqli_with_low_confidence_not_promoted():
+    findings = ZapJsonNormalizer().normalize(
+        _zap_payload("CWE-89", confidence="1"), artifact_id=1
+    )
+    assert findings[0].severity == "high"
+
+
+def test_zap_medium_not_promoted_regardless_of_cwe():
+    findings = ZapJsonNormalizer().normalize(
+        _zap_payload("CWE-89", riskcode="2"), artifact_id=1
+    )
+    assert findings[0].severity == "medium"
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +596,21 @@ def test_sarif_severity_falls_back_to_level_when_no_props():
     assert findings[0].severity == "low"
 
 
+def test_sarif_level_none_without_override_is_skipped():
+    # SARIF spec: level=none means "not a problem" — don't store it
+    sarif = _sarif_with_rule_props("py/style-hint", "none", {})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert findings == []
+
+
+def test_sarif_level_none_with_security_severity_kept():
+    # Some tools mis-emit level=none but populate security-severity — keep these
+    sarif = _sarif_with_rule_props("py/cve", "none", {"security-severity": "7.5"})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert len(findings) == 1
+    assert findings[0].severity == "high"
+
+
 def test_sarif_severity_invalid_security_severity_falls_through():
     sarif = _sarif_with_rule_props("py/x", "error", {"security-severity": "not-a-number"})
     findings = SarifNormalizer().normalize(sarif, artifact_id=1)
@@ -603,6 +665,81 @@ DEP_CHECK_JSON_NO_PURL = json.dumps({
         }]
     }]
 })
+
+# ---------------------------------------------------------------------------
+# SCA severity correctness (DepCheck/Trivy) — CVSS override + UNKNOWN handling
+# ---------------------------------------------------------------------------
+
+DEP_CHECK_UNKNOWN_WITH_CVSS = json.dumps({
+    "dependencies": [{
+        "fileName": "newlib.jar",
+        "vulnerabilities": [{
+            "name": "CVE-2026-99999",
+            "severity": "UNKNOWN",
+            "description": "Unscored CVE",
+            "cvssv3": {"baseScore": 8.2},
+            "source": "NVD",
+        }]
+    }]
+})
+
+DEP_CHECK_UNKNOWN_NO_CVSS = json.dumps({
+    "dependencies": [{
+        "fileName": "newlib.jar",
+        "vulnerabilities": [{
+            "name": "CVE-2026-88888",
+            "severity": "UNKNOWN",
+            "description": "Unscored CVE, no CVSS yet",
+            "source": "NVD",
+        }]
+    }]
+})
+
+DEP_CHECK_EMPTY_SEVERITY_WITH_CVSS = json.dumps({
+    "dependencies": [{
+        "fileName": "lib.jar",
+        "vulnerabilities": [{
+            "name": "CVE-2026-77777",
+            "severity": "",
+            "cvssv3": {"baseScore": 9.5},
+            "source": "NVD",
+        }]
+    }]
+})
+
+
+def test_depcheck_unknown_with_cvss_uses_score():
+    findings = DepCheckNormalizer().normalize(DEP_CHECK_UNKNOWN_WITH_CVSS, artifact_id=1)
+    assert findings[0].severity == "high"   # CVSS 8.2 -> high (not info)
+
+
+def test_depcheck_unknown_without_cvss_defaults_medium():
+    findings = DepCheckNormalizer().normalize(DEP_CHECK_UNKNOWN_NO_CVSS, artifact_id=1)
+    assert findings[0].severity == "medium"  # NOT info anymore
+
+
+def test_depcheck_empty_severity_with_cvss_promotes_to_critical():
+    findings = DepCheckNormalizer().normalize(DEP_CHECK_EMPTY_SEVERITY_WITH_CVSS, artifact_id=1)
+    assert findings[0].severity == "critical"   # CVSS 9.5 -> critical
+
+
+TRIVY_UNKNOWN_NO_CVSS = json.dumps({
+    "SchemaVersion": 2,
+    "Results": [{
+        "Target": "img",
+        "Vulnerabilities": [{
+            "VulnerabilityID": "CVE-2026-NEW",
+            "PkgName": "x",
+            "Severity": "UNKNOWN",
+        }]
+    }]
+})
+
+
+def test_trivy_unknown_no_cvss_defaults_medium():
+    findings = TrivyJsonNormalizer().normalize(TRIVY_UNKNOWN_NO_CVSS, artifact_id=2)
+    assert findings[0].severity == "medium"  # NOT info
+
 
 def test_depcheck_missing_purl_graceful():
     findings = DepCheckNormalizer().normalize(DEP_CHECK_JSON_NO_PURL, artifact_id=4)
