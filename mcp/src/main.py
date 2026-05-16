@@ -132,6 +132,23 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/health/flags")
+async def health_flags():
+    """Expose feature-flag state for ops diagnostics.
+
+    Non-secret: just booleans + a build marker so callers can verify what
+    the live container thinks its env vars are set to. Critical for ruling
+    out 'flag flipped on Render UI but instance not restarted' confusion.
+    """
+    from .core.config import settings
+    return {
+        "multi_tenant_enabled": bool(settings.MULTI_TENANT_ENABLED),
+        "rbac_per_project": bool(settings.RBAC_PER_PROJECT),
+        "fernet_configured": bool(settings.FERNET_KEY),
+        "version_marker": "v3.0",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Test-only endpoints — only registered when TEST_MODE=1
 # ---------------------------------------------------------------------------
