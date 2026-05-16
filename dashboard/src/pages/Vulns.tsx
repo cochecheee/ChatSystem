@@ -4,6 +4,7 @@ import type { FindingListParams } from '../api/client';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { AiTriageModal } from '../components/AiTriageModal';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { useOverviewStats } from '../features/findings/useStats';
 import type { AnalysisResult, Finding, Project } from '../types';
@@ -420,6 +421,8 @@ export function PageVulns({ initialId }: { initialId?: number }) {
 
   const { stats } = useOverviewStats(POLL_INTERVAL_MS);
   const ambient = useActiveProjectParam();
+  const [triageOpen, setTriageOpen] = useState(false);
+  const [refetchTick, setRefetchTick] = useState(0);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => {});
@@ -469,7 +472,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, projectFilter, sevFilter, statusFilter, toolFilter, search, ambient.project_id]);
+  }, [page, projectFilter, sevFilter, statusFilter, toolFilter, search, ambient.project_id, refetchTick]);
 
   useEffect(() => { if (initialId != null) setSelectedId(initialId); }, [initialId]);
 
@@ -524,6 +527,15 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             <span className="muted" style={{ fontSize: 12 }}>
               {stats == null ? '…' : `${sastTotal} total`}
             </span>
+            <div style={{ flex: 1 }} />
+            <button
+              className="btn primary sm"
+              style={{ padding: '4px 10px', fontSize: 11 }}
+              onClick={() => setTriageOpen(true)}
+              title="Gemini classify pending findings — auto-revoke false positives"
+            >
+              <Icon name="sparkle" size={11} /> AI Triage
+            </button>
           </div>
 
           {/* Project selector */}
@@ -694,6 +706,16 @@ export function PageVulns({ initialId }: { initialId?: number }) {
         </div>
 
       </div>
+      <AiTriageModal
+        open={triageOpen}
+        onClose={() => setTriageOpen(false)}
+        projectId={
+          projectFilter !== 'all'
+            ? (projectFilter as number)
+            : ambient.project_id
+        }
+        onTriaged={() => setRefetchTick(t => t + 1)}
+      />
     </div>
   );
 }

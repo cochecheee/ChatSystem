@@ -117,6 +117,48 @@ export const api = {
       getWithTotal<Finding[]>('/findings', params as Record<string, string | number>),
     get: (id: number) => get<Finding>(`/findings/${id}`),
     explain: (id: number) => post<AnalysisResult>(`/findings/${id}/explain`),
+    triage: (params: {
+      project_id?: number;
+      run_id?: number;
+      confidence_threshold?: number;
+      dry_run?: boolean;
+      limit?: number;
+    }) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null) q.set(k, String(v));
+      }
+      return post<{
+        total: number;
+        classified?: number;
+        classifications?: Record<string, number>;
+        auto_revoked: number;
+        batches?: number;
+        confidence_threshold?: number;
+        dry_run: boolean;
+        items: {
+          finding_id: number;
+          classification: string;
+          confidence: number;
+          reason: string;
+          applied: boolean;
+        }[];
+      }>(`/findings/triage${q.toString() ? '?' + q.toString() : ''}`);
+    },
+    gateCount: (params: { project_id?: number; run_id?: number }) => {
+      const q = new URLSearchParams();
+      if (params.project_id !== undefined) q.set('project_id', String(params.project_id));
+      if (params.run_id !== undefined) q.set('run_id', String(params.run_id));
+      return get<{
+        project_id: number | null;
+        run_id: number | null;
+        exclude_revoked: boolean;
+        critical: number;
+        high: number;
+        medium: number;
+        low: number;
+      }>(`/findings/gate-count${q.toString() ? '?' + q.toString() : ''}`);
+    },
   },
   monitor: {
     summary: (hours = 24) =>

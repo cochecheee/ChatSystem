@@ -392,6 +392,161 @@ async def test_expired_suppression_inactive(db):
         assert f.status == "pending_review"
 
 
+# ---------------------------------------------------------------------------
+# V3.1 Tier 3 — AI batch triage
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_triage_service_auto_revokes_high_confidence_fp(db):
+    """Stubbed LLM classifies one of two findings as FALSE_POSITIVE @ 0.95 →
+    only that one is auto-revoked; the other (TRUE_POSITIVE) stays pending."""
+    from src.services.llm.triage import TriageService, TriageBatch, TriageItem
+
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-triage")
+
+    async with db() as session:
+        f1 = Finding(
+            artifact_id=artifact_id, tool="semgrep", rule_id="r1",
+            severity="high", message="exec()", file_path="src/a.py",
+            status="pending_review", dedup_hash="h1",
+        )
+        f2 = Finding(
+            artifact_id=artifact_id, tool="semgrep", rule_id="r2",
+            severity="critical", message="path traversal", file_path="src/b.py",
+            status="pending_review", dedup_hash="h2",
+        )
+        session.add_all([f1, f2])
+        await session.commit()
+        await session.refresh(f1)
+        await session.refresh(f2)
+        f1_id, f2_id = f1.id, f2.id
+
+    async def stub_llm(client, findings):
+        return TriageBatch(items=[
+            TriageItem(finding_id=f1_id, classification="FALSE_POSITIVE",
+                       confidence=0.95, reason="Intended in test fixture"),
+            TriageItem(finding_id=f2_id, classification="TRUE_POSITIVE",
+                       confidence=0.90, reason="Real RCE risk"),
+        ])
+
+    svc = TriageService(llm_caller=stub_llm)
+    async with db() as session:
+        findings = (await session.execute(
+            select(Finding).where(Finding.id.in_([f1_id, f2_id]))
+        )).scalars().all()
+        result = await svc.triage_findings(session, list(findings))
+
+    assert result["classifications"]["FALSE_POSITIVE"] == 1
+    assert result["classifications"]["TRUE_POSITIVE"] == 1
+    assert result["auto_revoked"] == 1
+
+    async with db() as session:
+        fresh = (await session.execute(
+            select(Finding).order_by(Finding.id)
+        )).scalars().all()
+        statuses = {f.id: f.status for f in fresh}
+        assert statuses[f1_id] == "REVOKED"
+        assert statuses[f2_id] == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_triage_dry_run_does_not_revoke(db):
+    """dry_run=true: classify but don't write."""
+    from src.services.llm.triage import TriageService, TriageBatch, TriageItem
+
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-dry")
+    async with db() as session:
+        f = Finding(
+            artifact_id=artifact_id, tool="semgrep", rule_id="r",
+            severity="high", message="m", file_path="x.py",
+            status="pending_review", dedup_hash="hd",
+        )
+        session.add(f)
+        await session.commit()
+        await session.refresh(f)
+        fid = f.id
+
+    async def stub_llm(client, findings):
+        return TriageBatch(items=[TriageItem(
+            finding_id=fid, classification="FALSE_POSITIVE",
+            confidence=0.99, reason="x",
+        )])
+
+    svc = TriageService(llm_caller=stub_llm)
+    async with db() as session:
+        findings = list((await session.execute(select(Finding))).scalars().all())
+        result = await svc.triage_findings(session, findings, dry_run=True)
+
+    assert result["auto_revoked"] == 0
+    assert result["items"][0]["applied"] is False
+    async with db() as session:
+        unchanged = (await session.execute(select(Finding))).scalar_one()
+        assert unchanged.status == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_triage_low_confidence_left_alone(db):
+    """Confidence below threshold → no auto-revoke even when FALSE_POSITIVE."""
+    from src.services.llm.triage import TriageService, TriageBatch, TriageItem
+
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-low")
+    async with db() as session:
+        f = Finding(
+            artifact_id=artifact_id, tool="semgrep", rule_id="r",
+            severity="high", message="m", file_path="x.py",
+            status="pending_review", dedup_hash="hl",
+        )
+        session.add(f)
+        await session.commit()
+        await session.refresh(f)
+        fid = f.id
+
+    async def stub_llm(client, findings):
+        return TriageBatch(items=[TriageItem(
+            finding_id=fid, classification="FALSE_POSITIVE",
+            confidence=0.50, reason="unsure",
+        )])
+
+    svc = TriageService(llm_caller=stub_llm)
+    async with db() as session:
+        findings = list((await session.execute(select(Finding))).scalars().all())
+        result = await svc.triage_findings(
+            session, findings, confidence_threshold=0.8,
+        )
+    assert result["auto_revoked"] == 0
+
+
+@pytest.mark.asyncio
+async def test_triage_batches_at_size(db):
+    """When findings > BATCH_SIZE, llm_caller is invoked N=ceil(total/batch) times."""
+    from src.services.llm.triage import TriageService, TriageBatch
+
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-batch")
+    async with db() as session:
+        # 25 findings → 2 batches at BATCH_SIZE=20
+        for i in range(25):
+            session.add(Finding(
+                artifact_id=artifact_id, tool="t", rule_id=f"r-{i}",
+                severity="low", message=f"m{i}", file_path=f"f{i}.py",
+                status="pending_review", dedup_hash=f"h{i}",
+            ))
+        await session.commit()
+
+    call_count = 0
+    async def stub_llm(client, findings):
+        nonlocal call_count
+        call_count += 1
+        return TriageBatch(items=[])
+
+    svc = TriageService(llm_caller=stub_llm)
+    async with db() as session:
+        findings = list((await session.execute(select(Finding))).scalars().all())
+        result = await svc.triage_findings(session, findings)
+
+    assert call_count == 2  # 25 / 20 → 2 batches
+    assert result["batches"] == 2
+
+
 @pytest.mark.asyncio
 async def test_suppression_severity_max_caps(db):
     """severity_max=medium means high/critical findings are NOT auto-revoked."""

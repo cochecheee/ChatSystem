@@ -620,6 +620,57 @@ async def list_findings(
     return await repo.list_with_filters(skip=skip, limit=limit, **filter_kwargs)
 
 
+@router.post("/findings/triage")
+async def triage_findings(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    confidence_threshold: float = 0.8,
+    dry_run: bool = False,
+    limit: int = 50,
+    session: AsyncSession = Depends(get_session),
+    current: User = Depends(get_current_user_required),
+) -> dict:
+    """V3.1 Tier 3 — batch AI triage. Sends pending findings (max `limit`) to
+    Gemini for FP/TP classification; REVOKES findings classified FALSE_POSITIVE
+    with confidence ≥ threshold unless `dry_run=true` (preview only).
+
+    Scope by project_id and/or run_id. Requires security_lead+ on the project
+    (or global admin) — AI-driven mass revoke is a privileged operation.
+    """
+    from ..repositories import ProjectMemberRepository, role_satisfies
+    from ..services.llm.triage import TriageService
+
+    if project_id is not None and current.role != "admin":
+        member_role = await ProjectMemberRepository(session).get_role(
+            project_id, current.username,
+        )
+        if member_role is None or not role_satisfies(member_role, "security_lead"):
+            raise HTTPException(
+                status_code=403,
+                detail="security_lead role required for AI triage",
+            )
+
+    repo = FindingRepository(session)
+    findings = await repo.list_with_filters(
+        project_id=project_id,
+        run_id=run_id,
+        status="pending_review",
+        skip=0,
+        limit=limit,
+    )
+
+    if not findings:
+        return {"total": 0, "auto_revoked": 0, "items": [], "dry_run": dry_run}
+
+    svc = TriageService()
+    return await svc.triage_findings(
+        session, findings,
+        confidence_threshold=confidence_threshold,
+        dry_run=dry_run,
+        invoked_by=f"ai-triage (by {current.username})",
+    )
+
+
 @router.get("/findings/gate-count")
 async def findings_gate_count(
     project_id: int | None = None,
