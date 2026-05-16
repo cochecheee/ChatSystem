@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { AlertBanner } from '../components/AlertBanner';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { ProjectMembers } from '../components/ProjectMembers';
 import { StatusDot } from '../components/StatusDot';
 import { useAppConfig } from '../features/config/useAppConfig';
 import { useAuth } from '../features/auth/AuthContext';
@@ -365,26 +366,29 @@ export function PageSettings() {
               <div className="empty" style={{ padding: '12px 16px', fontSize: 12 }}>No projects — add one below</div>
             ) : (
               projects.map(p => (
-                <div key={p.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Icon name="github" size={14} style={{ color: 'var(--fg-3)', flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
-                    <div className="mono muted" style={{ fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {p.github_url}
+                <div key={p.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Icon name="github" size={14} style={{ color: 'var(--fg-3)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
+                      <div className="mono muted" style={{ fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.github_url}
+                      </div>
+                      {p.last_processed_run_id != null && (
+                        <div className="muted" style={{ fontSize: 10.5 }}>Last run: #{p.last_processed_run_id}</div>
+                      )}
                     </div>
-                    {p.last_processed_run_id != null && (
-                      <div className="muted" style={{ fontSize: 10.5 }}>Last run: #{p.last_processed_run_id}</div>
-                    )}
+                    <span className="chip dot status-passed" style={{ fontSize: 10 }}>active</span>
+                    <ProjectMembers projectId={p.id} />
+                    <button
+                      className="btn ghost sm"
+                      style={{ padding: '4px 8px', fontSize: 11 }}
+                      onClick={() => handleDeleteProject(p.id, p.name)}
+                      title="Xoá project (cascade artifacts/findings)"
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
                   </div>
-                  <span className="chip dot status-passed" style={{ fontSize: 10 }}>active</span>
-                  <button
-                    className="btn ghost sm"
-                    style={{ padding: '4px 8px', fontSize: 11 }}
-                    onClick={() => handleDeleteProject(p.id, p.name)}
-                    title="Xoá project (cascade artifacts/findings)"
-                  >
-                    <Icon name="trash" size={12} />
-                  </button>
                 </div>
               ))
             )}

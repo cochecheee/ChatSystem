@@ -144,6 +144,22 @@ export const api = {
   },
   projects: {
     list: () => get<Project[]>('/projects'),
+    listMembers: (projectId: number) =>
+      get<{ username: string; role: string; created_at: string }[]>(
+        `/projects/${projectId}/members`,
+      ),
+    addMember: (projectId: number, username: string, role: string) =>
+      post<{ username: string; role: string }>(
+        `/projects/${projectId}/members`,
+        { username, role },
+      ),
+    removeMember: (projectId: number, username: string) =>
+      fetch(`${BASE}/projects/${projectId}/members/${encodeURIComponent(username)}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      }).then(res => {
+        if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
+      }),
     create: (body: {
       name: string;
       github_url: string;
