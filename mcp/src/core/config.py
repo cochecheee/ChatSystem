@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     #   without a membership get 403. Global role `admin` always bypasses.
     RBAC_PER_PROJECT: bool = False
 
+    # V3.3 — Anonymous read kill-switch.
+    # False (default, secure): all read endpoints require a JWT. Returning to
+    #   True restores V2.x behavior for emergency rollback only.
+    # gate-count is the only exception — it accepts CI_WEBHOOK_TOKEN as
+    #   an alternative auth so the Security Gate composite still works
+    #   without issuing JWTs to the CI runner.
+    ANONYMOUS_READ_ENABLED: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("DATABASE_URL", mode="after")

@@ -4,6 +4,10 @@ import uuid
 # Must be set before any project imports so pydantic-settings picks up the test DB
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["APP_ENV"] = "testing"
+# V3.3 — keep reads open in tests by default so existing test suites don't
+# need to bolt on auth headers. Tests that exercise the V3.3 gate flip this
+# setting locally via patch().
+os.environ.setdefault("ANONYMOUS_READ_ENABLED", "true")
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402

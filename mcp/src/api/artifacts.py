@@ -16,7 +16,7 @@ from ..models.schemas import (
     ProjectOut,
     WebhookRunPayload,
 )
-from ..core.auth import User, get_current_user, security as _bearer_auth
+from ..core.auth import User, allowed_project_ids, get_current_user, require_read_access, security as _bearer_auth
 from ..repositories import ArtifactRepository, FindingRepository, ProjectRepository
 from ..services.github_client import GitHubClient
 from ..services.processor import SecurityProcessor
@@ -109,10 +109,12 @@ async def create_project(
 async def list_projects(
     session: AsyncSession = Depends(get_session),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    _: User | None = Depends(require_read_access),
 ) -> list[Project]:
     """List projects. When V3.0 RBAC is on AND a JWT is provided, results
     are filtered to projects the caller has a membership in (admins see all).
-    Anonymous callers and the RBAC-off case retain V2.x behavior (see all).
+    When ANONYMOUS_READ_ENABLED is on, anonymous callers see everything; when
+    off (V3.3 default), all callers must present a JWT.
     """
     all_projects = await ProjectRepository(session).list_all()
     if not settings.RBAC_PER_PROJECT or credentials is None:
@@ -430,13 +432,21 @@ async def list_github_runs(
     project_id: int | None = None,
     session: AsyncSession = Depends(get_session),
     github: GitHubClient = Depends(get_github_client),
+    user: User | None = Depends(require_read_access),
 ) -> list[dict]:
     """Return recent workflow runs for the configured repo.
     Use the `id` field as input for **GET /github/runs/{run_id}/artifacts**.
 
     `?project_id=` (V2.9): dùng credentials per-project thay vì env. 404 nếu
     project không tồn tại.
+    V3.3: khi RBAC on + non-admin, project_id phải nằm trong memberships.
     """
+    scope_ids = allowed_project_ids(user)
+    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project {project_id} not in your memberships",
+        )
     if project_id is not None:
         project = await ProjectRepository(session).get(project_id)
         if project is None:
@@ -459,6 +469,7 @@ async def list_github_runs(
 async def list_github_artifacts(
     run_id: int,
     github: GitHubClient = Depends(get_github_client),
+    _: User | None = Depends(require_read_access),
 ) -> list[dict]:
     """Return artifacts for the given workflow run.
     Use the `id` field as `github_artifact_id` in **POST /artifacts/process**.
@@ -588,6 +599,7 @@ async def list_findings(
     skip: int = 0,
     limit: int = 50,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
 ) -> list[Finding]:
     """List findings với filter mở rộng.
 
@@ -604,8 +616,16 @@ async def list_findings(
     - X-Total-Count: tổng số findings match filter (trước khi apply skip/limit)
     """
     repo = FindingRepository(session)
+    # V3.3 — when RBAC on + non-admin, scope to user's memberships only.
+    scope_ids = allowed_project_ids(user)
+    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project {project_id} not in your memberships",
+        )
     filter_kwargs = dict(
         project_id=project_id,
+        project_ids=scope_ids if project_id is None else None,
         severity=severity,
         tool=tool,
         status=status,
@@ -676,6 +696,7 @@ async def findings_gate_count(
     project_id: int | None = None,
     run_id: int | None = None,
     session: AsyncSession = Depends(get_session),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict:
     """Severity counts excluding REVOKED — for the V3.1 Tier 4 Security Gate.
 
@@ -683,7 +704,21 @@ async def findings_gate_count(
     decides pass/fail based on the active (non-suppressed) finding counts.
     The point: once a developer has triaged false positives, the next run
     can pass without anyone touching code.
+
+    V3.3 auth: accepts EITHER
+      • a valid JWT (dashboard caller), OR
+      • CI_WEBHOOK_TOKEN as a bearer (CI runner — same secret used for
+        /webhook/pipeline-complete so callers don't manage two tokens), OR
+      • anonymous when ANONYMOUS_READ_ENABLED=true (legacy bypass).
     """
+    if not settings.ANONYMOUS_READ_ENABLED:
+        token = credentials.credentials if credentials else None
+        # CI fast path — token matches the webhook shared secret.
+        if token and settings.CI_WEBHOOK_TOKEN and token == settings.CI_WEBHOOK_TOKEN:
+            pass
+        else:
+            # Otherwise, demand a real JWT.
+            await get_current_user(credentials)
     repo = FindingRepository(session)
     common = dict(project_id=project_id, run_id=run_id, exclude_revoked=True)
     critical = await repo.count_with_filters(severity="critical", **common)
@@ -705,6 +740,7 @@ async def findings_gate_count(
 async def get_finding(
     finding_id: int,
     session: AsyncSession = Depends(get_session),
+    _: User | None = Depends(require_read_access),
 ) -> Finding:
     finding = await FindingRepository(session).get(finding_id)
     if finding is None:
@@ -748,7 +784,10 @@ async def reprocess_run(
     return {"status": "accepted", "run_id": run_id, "deleted_artifacts": len(artifacts)}
 
 
-@router.get("/github/runs/{run_id}/findings", response_model=list[FindingOut])
+@router.get(
+    "/github/runs/{run_id}/findings", response_model=list[FindingOut],
+    dependencies=[Depends(require_read_access)],
+)
 async def get_run_findings(
     run_id: int,
     session: AsyncSession = Depends(get_session),

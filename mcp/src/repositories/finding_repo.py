@@ -41,6 +41,7 @@ class FindingRepository:
         self,
         *,
         project_id: int | None = None,
+        project_ids: list[int] | None = None,
         severity: str | None = None,
         tool: str | None = None,
         status: str | None = None,
@@ -51,12 +52,21 @@ class FindingRepository:
         skip: int = 0,
         limit: int = 50,
     ) -> list[Finding]:
-        """List findings với filter mở rộng + pagination."""
+        """List findings với filter mở rộng + pagination.
+
+        project_ids (V3.3): khi non-None, restrict to that set — used by the
+        RBAC layer to enforce membership-scoped reads. Empty list → empty
+        result (user authed but no memberships).
+        """
         # V3.2 SMELL-6: eager-load Artifact so FindingOut.project_id resolves
         # without triggering an async lazy load during serialization.
         query = select(Finding).join(Artifact).options(selectinload(Finding.artifact))
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
+        if project_ids is not None:
+            if not project_ids:
+                return []
+            query = query.where(Artifact.project_id.in_(project_ids))
         if run_id is not None:
             query = query.where(Artifact.github_run_id == run_id)
         if severity is not None:
@@ -141,6 +151,7 @@ class FindingRepository:
         self,
         *,
         project_id: int | None = None,
+        project_ids: list[int] | None = None,
         severity: str | None = None,
         tool: str | None = None,
         status: str | None = None,
@@ -153,6 +164,10 @@ class FindingRepository:
         query = select(sql_func.count(Finding.id)).select_from(Finding).join(Artifact)
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
+        if project_ids is not None:
+            if not project_ids:
+                return 0
+            query = query.where(Artifact.project_id.in_(project_ids))
         if run_id is not None:
             query = query.where(Artifact.github_run_id == run_id)
         if severity is not None:

@@ -53,6 +53,42 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+def allowed_project_ids(user: User | None) -> list[int] | None:
+    """V3.3 — return the set of project ids the caller may read, or None for
+    'no restriction' (admin, anonymous bypass, or RBAC off).
+
+    Callers fold this into their filter clauses; a caller that gets a non-None
+    list MUST scope results to those ids only. Returning an empty list means
+    "user is authenticated but has zero memberships" — the route should then
+    return an empty result, not unfiltered data.
+    """
+    if not settings.RBAC_PER_PROJECT:
+        return None
+    if user is None or user.role == "admin":
+        return None
+    if user.memberships is None:
+        return []  # JWT without memberships claim → conservative empty scope
+    return list(user.memberships.keys())
+
+
+async def require_read_access(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> User | None:
+    """V3.3 — Gate read endpoints with a kill-switch.
+
+    When `ANONYMOUS_READ_ENABLED=true` (legacy V2.x bypass) → return None
+    without checking the token, so callers can stay anonymous.
+
+    When `ANONYMOUS_READ_ENABLED=false` (default, secure) → behave like
+    `get_current_user`: require a valid JWT, return the User. Callers that
+    need the User object (for membership filtering) can use the return
+    value; callers that just need a gate can ignore it.
+    """
+    if settings.ANONYMOUS_READ_ENABLED:
+        return None
+    return await get_current_user(credentials)
+
+
 # V3.0 — per-project access dependency factory.
 #
 # Usage in a route:

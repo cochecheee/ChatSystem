@@ -6,10 +6,15 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.auth import require_read_access
 from ..core.db import get_session
 from ..services.stats_service import StatsService
 
-router = APIRouter(prefix="/stats", tags=["stats"])
+router = APIRouter(
+    prefix="/stats", tags=["stats"],
+    # V3.3 — every stats endpoint goes through the read kill-switch.
+    dependencies=[Depends(require_read_access)],
+)
 
 
 @router.get("/overview", summary="Aggregated KPI cho Overview page")
