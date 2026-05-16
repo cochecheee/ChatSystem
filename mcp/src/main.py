@@ -136,16 +136,31 @@ async def health():
 async def health_flags():
     """Expose feature-flag state for ops diagnostics.
 
-    Non-secret: just booleans + a build marker so callers can verify what
-    the live container thinks its env vars are set to. Critical for ruling
-    out 'flag flipped on Render UI but instance not restarted' confusion.
+    Non-secret: just booleans + a build marker + raw env values (truncated)
+    so callers can verify what the live container actually received. Critical
+    for ruling out spelling errors, quoting issues, or 'flag flipped on Render
+    UI but instance not restarted' confusion.
     """
+    import os
     from .core.config import settings
+
+    def _safe(v: str | None) -> str:
+        if v is None:
+            return "<unset>"
+        # Echo as-is (these are non-secret booleans + a key prefix).
+        return repr(v)[:60]
+
     return {
         "multi_tenant_enabled": bool(settings.MULTI_TENANT_ENABLED),
         "rbac_per_project": bool(settings.RBAC_PER_PROJECT),
         "fernet_configured": bool(settings.FERNET_KEY),
         "version_marker": "v3.0",
+        # Raw env values seen by the container — surfaces typos/quotes
+        "raw_env": {
+            "MULTI_TENANT_ENABLED": _safe(os.environ.get("MULTI_TENANT_ENABLED")),
+            "RBAC_PER_PROJECT": _safe(os.environ.get("RBAC_PER_PROJECT")),
+            "FERNET_KEY_prefix": (os.environ.get("FERNET_KEY", "")[:8] + "...") if os.environ.get("FERNET_KEY") else "<unset>",
+        },
     }
 
 
