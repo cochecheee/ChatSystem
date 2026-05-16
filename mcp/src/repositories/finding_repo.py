@@ -195,6 +195,42 @@ class FindingRepository:
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
 
+    async def find_revoked_hashes(
+        self, hashes: set[str], *, project_id: int | None = None,
+    ) -> dict[str, dict]:
+        """Return {dedup_hash: {revoked_by, justification, revoked_at}} for any
+        prior Finding rows with that hash currently marked REVOKED. Used by the
+        V3.1 cross-run learning loop to auto-suppress findings that a human
+        already dismissed in a previous run.
+
+        Scoped by project when given — same hash on two repos is still two
+        independent decisions.
+        """
+        if not hashes:
+            return {}
+        query = select(
+            Finding.dedup_hash,
+            Finding.revoked_by,
+            Finding.revoke_justification,
+            Finding.revoked_at,
+        ).where(
+            Finding.status == "REVOKED",
+            Finding.dedup_hash.in_(hashes),
+        )
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        result = await self.session.execute(query)
+        out: dict[str, dict] = {}
+        for h, by, just, at in result.all():
+            # First revoke wins (oldest decision is the canonical one)
+            if h not in out:
+                out[h] = {
+                    "revoked_by": by,
+                    "revoke_justification": just,
+                    "revoked_at": at,
+                }
+        return out
+
     async def count_total(self, *, project_id: int | None = None) -> int:
         query = select(sql_func.count(Finding.id))
         if project_id is not None:

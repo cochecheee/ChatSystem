@@ -167,11 +167,37 @@ class SecurityProcessor:
             files = await client.fetch_artifact(github_artifact_id)
             db_findings = self._build_findings(files, db_artifact_id)
 
+            # V3.1 Tier 1 — cross-run auto-revoke. If any of these findings'
+            # dedup_hashes already exist in DB with status=REVOKED, inherit
+            # that decision: copy revoke metadata and mark new row REVOKED
+            # too. The original justification carries forward so audit trail
+            # stays intact ("auto-suppressed by prior decision of <user>").
+            from ..repositories.finding_repo import FindingRepository
+            repo = FindingRepository(session)
+            hashes = {f.dedup_hash for f in db_findings if f.dedup_hash}
+            project_id = artifact.project_id
+            prior = await repo.find_revoked_hashes(hashes, project_id=project_id)
+            auto_count = 0
+            for f in db_findings:
+                if f.dedup_hash and f.dedup_hash in prior:
+                    p = prior[f.dedup_hash]
+                    f.status = "REVOKED"
+                    f.revoked_by = "auto-suppress"
+                    f.revoke_justification = (
+                        f"Auto-suppressed (V3.1): inherited revoke from "
+                        f"{p['revoked_by']!r} — {p['revoke_justification']}"
+                    )
+                    f.revoked_at = datetime.now(UTC)
+                    auto_count += 1
+
             session.add_all(db_findings)
             artifact.status = "processed"
             await session.commit()
 
-            log.info("Stored %d findings for artifact %d", len(db_findings), db_artifact_id)
+            log.info(
+                "Stored %d findings for artifact %d (auto-revoked %d via dedup_hash match)",
+                len(db_findings), db_artifact_id, auto_count,
+            )
             return len(db_findings)
 
         except Exception as exc:
