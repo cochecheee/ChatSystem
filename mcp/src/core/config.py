@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # Tạo: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     FERNET_KEY: str = ""
 
+    # V3.0 — Per-project RBAC kill-switch.
+    # False (default): legacy single-role check; any authenticated user can
+    #   access any project. Matches V2.9 behavior.
+    # True: every project-scoped endpoint also checks ProjectMember; users
+    #   without a membership get 403. Global role `admin` always bypasses.
+    RBAC_PER_PROJECT: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("DATABASE_URL", mode="after")

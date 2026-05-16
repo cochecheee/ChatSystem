@@ -173,6 +173,33 @@ class CommandFeedback(Base):
     )
 
 
+class ProjectMember(Base):
+    """V3.0 — per-project RBAC.
+
+    Maps a username (carried in the JWT `sub` claim) to a role for one
+    project. The composite primary key prevents double-membership and
+    lets the membership lookup hit an index. Roles form a 4-level lattice:
+        viewer < developer < security_lead < owner
+    Only `owner` may add/remove members. Global `admin` (encoded in the
+    JWT `role` claim) bypasses every check — operator override for demo /
+    incident response. Gated by settings.RBAC_PER_PROJECT.
+    """
+
+    __tablename__ = "project_members"
+
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id"), primary_key=True,
+    )
+    # `username` (not user_id) — the system has no `users` table; identity
+    # comes from the JWT, issued via /api/chat/auth/token. Keeps V3.0
+    # additive: no schema-level migration of existing users needed.
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="viewer")
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
+    )
+
+
 class Alert(Base):
     """Operational alert raised by the monitor (down event, CVE diff, etc).
 

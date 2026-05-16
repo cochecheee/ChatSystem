@@ -16,9 +16,37 @@ from ..models.schemas import (
     ProjectOut,
     WebhookRunPayload,
 )
+from ..core.auth import User, get_current_user, security as _bearer_auth
 from ..repositories import ArtifactRepository, FindingRepository, ProjectRepository
 from ..services.github_client import GitHubClient
 from ..services.processor import SecurityProcessor
+
+
+# V3.0 — helpers for member CRUD endpoints. `_optional` returns None
+# instead of raising when no JWT is provided so legacy callers still work.
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
+) -> User | None:
+    if credentials is None:
+        return None
+    try:
+        return await get_current_user(credentials)
+    except HTTPException:
+        return None
+
+
+async def get_current_user_required(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
+) -> User:
+    return await get_current_user(credentials)
+
+
+from pydantic import BaseModel  # noqa: E402 — local to this module
+
+
+class MemberUpsert(BaseModel):
+    username: str
+    role: str  # viewer | developer | security_lead | owner
 
 router = APIRouter()
 
@@ -78,8 +106,104 @@ async def create_project(
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-async def list_projects(session: AsyncSession = Depends(get_session)) -> list[Project]:
-    return await ProjectRepository(session).list_all()
+async def list_projects(
+    session: AsyncSession = Depends(get_session),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> list[Project]:
+    """List projects. When V3.0 RBAC is on AND a JWT is provided, results
+    are filtered to projects the caller has a membership in (admins see all).
+    Anonymous callers and the RBAC-off case retain V2.x behavior (see all).
+    """
+    all_projects = await ProjectRepository(session).list_all()
+    if not settings.RBAC_PER_PROJECT or credentials is None:
+        return all_projects
+    # Decode token best-effort; opaque/expired tokens fall back to legacy.
+    try:
+        from jose import jwt
+        payload = jwt.decode(
+            credentials.credentials, settings.SECRET_KEY, algorithms=["HS256"],
+        )
+    except Exception:
+        return all_projects
+    if payload.get("role") == "admin":
+        return all_projects
+    raw_m = payload.get("memberships") or {}
+    member_ids = {int(k) for k in raw_m.keys()}
+    return [p for p in all_projects if p.id in member_ids]
+
+
+# ---------------------------------------------------------------------------
+# V3.0 — Per-project membership management
+# ---------------------------------------------------------------------------
+
+@router.get("/projects/{project_id}/members")
+async def list_project_members(
+    project_id: int,
+    session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_optional),
+) -> list[dict]:
+    """List members of a project. Requires authenticated user; when RBAC
+    is on, the caller must have any role on the project (or be admin).
+    """
+    from ..repositories import ProjectMemberRepository
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repo = ProjectMemberRepository(session)
+    if settings.RBAC_PER_PROJECT and current and current.role != "admin":
+        if await repo.get_role(project_id, current.username) is None:
+            raise HTTPException(status_code=403, detail="Not a project member")
+    members = await repo.list_for_project(project_id)
+    return [
+        {"username": m.username, "role": m.role, "created_at": m.created_at.isoformat()}
+        for m in members
+    ]
+
+
+@router.post("/projects/{project_id}/members", status_code=201)
+async def add_project_member(
+    project_id: int,
+    body: "MemberUpsert",
+    session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_required),
+) -> dict:
+    """Add or update a member. Caller must be project `owner` (or global admin)."""
+    from ..repositories import ProjectMemberRepository, ROLE_LATTICE
+    if body.role not in ROLE_LATTICE:
+        raise HTTPException(status_code=400, detail=f"role must be one of {ROLE_LATTICE}")
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repo = ProjectMemberRepository(session)
+    # Authorization: only owner can invite. Admins bypass.
+    if current.role != "admin":
+        caller_role = await repo.get_role(project_id, current.username)
+        if caller_role != "owner":
+            raise HTTPException(status_code=403, detail="Only project owner may add members")
+    member = await repo.upsert(
+        project_id=project_id, username=body.username, role=body.role,
+    )
+    return {"username": member.username, "role": member.role}
+
+
+@router.delete("/projects/{project_id}/members/{username}", status_code=204)
+async def remove_project_member(
+    project_id: int,
+    username: str,
+    session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_required),
+) -> Response:
+    """Remove a member. Caller must be project `owner` or global admin."""
+    from ..repositories import ProjectMemberRepository
+    repo = ProjectMemberRepository(session)
+    if current.role != "admin":
+        caller_role = await repo.get_role(project_id, current.username)
+        if caller_role != "owner":
+            raise HTTPException(status_code=403, detail="Only project owner may remove members")
+    removed = await repo.remove(project_id=project_id, username=username)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return Response(status_code=204)
 
 
 @router.get("/projects/{project_id}/integration")

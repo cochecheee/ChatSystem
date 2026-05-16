@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import User, create_access_token, get_current_user
 from ..core.db import get_session
-from ..repositories import FindingRepository
+from ..repositories import FindingRepository, ProjectMemberRepository
 from ..models.schemas import (
     CommandRequest,
     CommandResponse,
@@ -205,14 +205,23 @@ async def auth_me(current_user: User = Depends(get_current_user)) -> AuthMeRespo
 
 
 @router.post("/auth/token", response_model=TokenResponse, tags=["auth"])
-async def demo_login(request: TokenRequest) -> TokenResponse:
+async def demo_login(
+    request: TokenRequest,
+    session: AsyncSession = Depends(get_session),
+) -> TokenResponse:
     """Demo login — trả về JWT không cần password (dành cho thesis demo).
 
     Trong production, thay bằng auth thật (LDAP, OAuth2, v.v.)
+
+    V3.0: JWT còn chứa per-project memberships (snapshot lúc issue) để
+    `require_project_access` kiểm tra không cần hit DB mỗi request.
     """
     valid_roles = {"developer", "security_lead", "admin"}
     if request.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Role không hợp lệ. Chọn: {valid_roles}")
 
-    token = create_access_token(username=request.username, role=request.role)
+    memberships = await ProjectMemberRepository(session).memberships_dict(request.username)
+    token = create_access_token(
+        username=request.username, role=request.role, memberships=memberships,
+    )
     return TokenResponse(access_token=token)

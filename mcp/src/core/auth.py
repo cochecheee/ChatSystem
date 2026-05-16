@@ -4,8 +4,10 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
+from .db import get_session
 
 security = HTTPBearer(auto_error=False)
 
@@ -13,11 +15,21 @@ security = HTTPBearer(auto_error=False)
 class User(BaseModel):
     username: str
     role: str  # "developer" | "security_lead" | "admin"
+    # V3.0: { project_id: role } snapshot from issue time. None means the
+    # token predates V3.0 and the dep should re-fetch from DB.
+    memberships: dict[int, str] | None = None
 
 
-def create_access_token(username: str, role: str) -> str:
+def create_access_token(
+    username: str,
+    role: str,
+    memberships: dict[int, str] | None = None,
+) -> str:
     expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": username, "role": role, "exp": expire}
+    payload: dict = {"sub": username, "role": role, "exp": expire}
+    if memberships is not None:
+        # JSON cannot key int — stringify project ids.
+        payload["memberships"] = {str(k): v for k, v in memberships.items()}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
 
@@ -32,6 +44,77 @@ async def get_current_user(
         role: str | None = payload.get("role")
         if not username or not role:
             raise HTTPException(status_code=401, detail="Invalid token payload")
-        return User(username=username, role=role)
+        raw_m = payload.get("memberships")
+        memberships: dict[int, str] | None = None
+        if isinstance(raw_m, dict):
+            memberships = {int(k): v for k, v in raw_m.items()}
+        return User(username=username, role=role, memberships=memberships)
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+# V3.0 — per-project access dependency factory.
+#
+# Usage in a route:
+#     @router.post("/findings/{fid}/approve",
+#                  dependencies=[Depends(require_project_access(min_role="security_lead"))])
+#
+# When `RBAC_PER_PROJECT=false`, behaves like get_current_user (no-op gate).
+# `project_id` is resolved from path/query param of the same name on the
+# request; if absent, the check is skipped (route-level current_user still
+# needed). Global role `admin` always bypasses.
+
+
+def require_project_access(min_role: str = "viewer"):
+    """Return a FastAPI dependency that enforces per-project role >= min_role.
+
+    Resolves project_id from request.path_params first, then query params.
+    Routes without a project_id in either place fall back to the global
+    role check (legacy V2.x behavior). Returns the authenticated User on
+    success so the caller can read .username for audit logs.
+    """
+    from fastapi import Request
+    from ..repositories import ProjectMemberRepository, role_satisfies
+
+    async def _dep(
+        request: Request,
+        current: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> User:
+        # Kill-switch: flag off → behave like a plain auth check.
+        if not settings.RBAC_PER_PROJECT:
+            return current
+
+        # Admin global role bypasses every per-project gate. Operator
+        # override for demo / incident response.
+        if current.role == "admin":
+            return current
+
+        raw_pid = (
+            request.path_params.get("project_id")
+            or request.query_params.get("project_id")
+        )
+        if raw_pid is None:
+            # No project scope on this route → can't gate; fall back to auth.
+            return current
+        try:
+            project_id = int(raw_pid)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid project_id")
+
+        # Trust JWT membership snapshot if present; else hit DB.
+        actual_role: str | None
+        if current.memberships is not None:
+            actual_role = current.memberships.get(project_id)
+        else:
+            repo = ProjectMemberRepository(session)
+            actual_role = await repo.get_role(project_id, current.username)
+
+        if actual_role is None or not role_satisfies(actual_role, min_role):
+            raise HTTPException(
+                status_code=403,
+                detail=f"User '{current.username}' lacks '{min_role}' on project {project_id}",
+            )
+        return current
+
+    return _dep
