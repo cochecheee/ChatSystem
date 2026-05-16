@@ -160,6 +160,35 @@ export const api = {
       }).then(res => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
       }),
+    listSuppressions: (projectId: number) =>
+      get<{
+        id: number;
+        rule_id: string | null;
+        file_glob: string | null;
+        tool: string | null;
+        severity_max: string | null;
+        reason: string;
+        created_by: string;
+        created_at: string;
+        expires_at: string | null;
+      }[]>(`/projects/${projectId}/suppressions`),
+    addSuppression: (projectId: number, body: {
+      reason: string;
+      rule_id?: string | null;
+      file_glob?: string | null;
+      tool?: string | null;
+      severity_max?: string | null;
+      expires_in_days?: number | null;
+    }) => post<{ id: number; reason: string; expires_at: string | null }>(
+      `/projects/${projectId}/suppressions`, body,
+    ),
+    deleteSuppression: (projectId: number, ruleId: number) =>
+      fetch(`${BASE}/projects/${projectId}/suppressions/${ruleId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      }).then(res => {
+        if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
+      }),
     create: (body: {
       name: string;
       github_url: string;

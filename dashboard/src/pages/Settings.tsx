@@ -4,6 +4,7 @@ import { AlertBanner } from '../components/AlertBanner';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import { ProjectMembers } from '../components/ProjectMembers';
+import { ProjectSuppressions } from '../components/ProjectSuppressions';
 import { StatusDot } from '../components/StatusDot';
 import { useAppConfig } from '../features/config/useAppConfig';
 import { useAuth } from '../features/auth/AuthContext';
@@ -380,6 +381,7 @@ export function PageSettings() {
                     </div>
                     <span className="chip dot status-passed" style={{ fontSize: 10 }}>active</span>
                     <ProjectMembers projectId={p.id} />
+                    <ProjectSuppressions projectId={p.id} />
                     <button
                       className="btn ghost sm"
                       style={{ padding: '4px 8px', fontSize: 11 }}
