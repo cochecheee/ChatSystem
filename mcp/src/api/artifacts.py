@@ -467,6 +467,8 @@ async def list_findings(
     status: str | None = None,
     category: str | None = None,
     q: str | None = None,
+    run_id: int | None = None,
+    exclude_revoked: bool = False,
     skip: int = 0,
     limit: int = 50,
     session: AsyncSession = Depends(get_session),
@@ -493,11 +495,43 @@ async def list_findings(
         status=status,
         category=category,
         q=q,
+        run_id=run_id,
+        exclude_revoked=exclude_revoked,
     )
     total = await repo.count_with_filters(**filter_kwargs)
     response.headers["X-Total-Count"] = str(total)
     response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     return await repo.list_with_filters(skip=skip, limit=limit, **filter_kwargs)
+
+
+@router.get("/findings/gate-count")
+async def findings_gate_count(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Severity counts excluding REVOKED — for the V3.1 Tier 4 Security Gate.
+
+    A pipeline step in sast-action calls this with the current run's id and
+    decides pass/fail based on the active (non-suppressed) finding counts.
+    The point: once a developer has triaged false positives, the next run
+    can pass without anyone touching code.
+    """
+    repo = FindingRepository(session)
+    common = dict(project_id=project_id, run_id=run_id, exclude_revoked=True)
+    critical = await repo.count_with_filters(severity="critical", **common)
+    high = await repo.count_with_filters(severity="high", **common)
+    medium = await repo.count_with_filters(severity="medium", **common)
+    low = await repo.count_with_filters(severity="low", **common)
+    return {
+        "project_id": project_id,
+        "run_id": run_id,
+        "exclude_revoked": True,
+        "critical": critical,
+        "high": high,
+        "medium": medium,
+        "low": low,
+    }
 
 
 @router.get("/findings/{finding_id}", response_model=FindingOut)

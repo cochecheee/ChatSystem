@@ -182,3 +182,84 @@ async def test_no_prior_revokes_no_change(db):
         all_findings = (await session.execute(select(Finding))).scalars().all()
         assert len(all_findings) == 1
         assert all_findings[0].status == "pending_review"
+
+
+# ---------------------------------------------------------------------------
+# V3.1 Tier 4 — gate-count endpoint + exclude_revoked filter
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_gate_count_excludes_revoked(client, db_session):
+    """The Security Gate composite reads /findings/gate-count for verdict.
+    REVOKED findings must NOT count toward critical/high totals.
+    """
+    p = Project(name="P", github_url="https://github.com/test/x")
+    db_session.add(p)
+    await db_session.flush()
+    a = Artifact(github_artifact_id="x", project_id=p.id, github_run_id=42, status="processed")
+    db_session.add(a)
+    await db_session.flush()
+    db_session.add_all([
+        Finding(artifact_id=a.id, tool="semgrep", rule_id="r1", severity="critical",
+                message="m", file_path="f.py", status="pending_review"),
+        Finding(artifact_id=a.id, tool="codeql", rule_id="r2", severity="high",
+                message="m", file_path="f.py", status="REVOKED"),
+        Finding(artifact_id=a.id, tool="codeql", rule_id="r3", severity="high",
+                message="m", file_path="f.py", status="pending_review"),
+    ])
+    await db_session.commit()
+
+    resp = await client.get(f"/findings/gate-count?project_id={p.id}&run_id=42")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["critical"] == 1   # 1 pending
+    assert body["high"] == 1        # 1 pending, 1 revoked excluded
+    assert body["exclude_revoked"] is True
+
+
+@pytest.mark.asyncio
+async def test_findings_exclude_revoked_param(client, db_session):
+    """GET /findings?exclude_revoked=true filters out REVOKED rows."""
+    p = Project(name="P", github_url="https://github.com/test/y")
+    db_session.add(p)
+    await db_session.flush()
+    a = Artifact(github_artifact_id="y", project_id=p.id, github_run_id=7, status="processed")
+    db_session.add(a)
+    await db_session.flush()
+    db_session.add_all([
+        Finding(artifact_id=a.id, tool="trivy", rule_id="cve1", severity="high",
+                message="m", file_path="g.py", status="pending_review"),
+        Finding(artifact_id=a.id, tool="trivy", rule_id="cve2", severity="high",
+                message="m", file_path="g.py", status="REVOKED"),
+    ])
+    await db_session.commit()
+
+    all_findings = (await client.get(f"/findings?project_id={p.id}")).json()
+    active = (await client.get(f"/findings?project_id={p.id}&exclude_revoked=true")).json()
+    assert len(all_findings) == 2
+    assert len(active) == 1
+    assert active[0]["status"] != "REVOKED"
+
+
+@pytest.mark.asyncio
+async def test_findings_run_id_filter(client, db_session):
+    """GET /findings?run_id= filters to that workflow run's artifacts only."""
+    p = Project(name="P", github_url="https://github.com/test/z")
+    db_session.add(p)
+    await db_session.flush()
+    a1 = Artifact(github_artifact_id="z1", project_id=p.id, github_run_id=100, status="processed")
+    a2 = Artifact(github_artifact_id="z2", project_id=p.id, github_run_id=200, status="processed")
+    db_session.add_all([a1, a2])
+    await db_session.flush()
+    db_session.add_all([
+        Finding(artifact_id=a1.id, tool="trivy", rule_id="r1", severity="high",
+                message="m", file_path="f.py", status="pending_review"),
+        Finding(artifact_id=a2.id, tool="trivy", rule_id="r2", severity="high",
+                message="m", file_path="f.py", status="pending_review"),
+    ])
+    await db_session.commit()
+
+    run100 = (await client.get(f"/findings?run_id=100")).json()
+    run200 = (await client.get(f"/findings?run_id=200")).json()
+    assert len(run100) == 1 and run100[0]["rule_id"] == "r1"
+    assert len(run200) == 1 and run200[0]["rule_id"] == "r2"

@@ -39,6 +39,8 @@ class FindingRepository:
         status: str | None = None,
         category: str | None = None,
         q: str | None = None,
+        run_id: int | None = None,
+        exclude_revoked: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> list[Finding]:
@@ -46,12 +48,16 @@ class FindingRepository:
         query = select(Finding).join(Artifact)
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
+        if run_id is not None:
+            query = query.where(Artifact.github_run_id == run_id)
         if severity is not None:
             query = query.where(Finding.severity == severity)
         if tool is not None:
             query = query.where(Finding.tool == tool)
         if status is not None:
             query = query.where(Finding.status == status)
+        if exclude_revoked:
+            query = query.where(Finding.status != "REVOKED")
         if category is not None:
             cat = category.lower()
             if cat == "deps":
@@ -131,17 +137,23 @@ class FindingRepository:
         status: str | None = None,
         category: str | None = None,
         q: str | None = None,
+        run_id: int | None = None,
+        exclude_revoked: bool = False,
     ) -> int:
         """Count rows match filter — dùng cho pagination total + stats."""
         query = select(sql_func.count(Finding.id)).select_from(Finding).join(Artifact)
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
+        if run_id is not None:
+            query = query.where(Artifact.github_run_id == run_id)
         if severity is not None:
             query = query.where(Finding.severity == severity)
         if tool is not None:
             query = query.where(Finding.tool == tool)
         if status is not None:
             query = query.where(Finding.status == status)
+        if exclude_revoked:
+            query = query.where(Finding.status != "REVOKED")
         if category is not None:
             cat = category.lower()
             if cat == "deps":
