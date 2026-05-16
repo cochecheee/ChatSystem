@@ -4,6 +4,7 @@ import type { FindingListParams } from '../api/client';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { useOverviewStats } from '../features/findings/useStats';
 import type { AnalysisResult, Finding, Project } from '../types';
 
@@ -418,6 +419,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const [showAI, setShowAI] = useState(true);
 
   const { stats } = useOverviewStats(POLL_INTERVAL_MS);
+  const ambient = useActiveProjectParam();
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => {});
@@ -431,6 +433,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
       ...override,
     };
     if (projectFilter !== 'all') params.project_id = projectFilter as number;
+    else if (ambient.project_id !== undefined) params.project_id = ambient.project_id;
     if (sevFilter !== 'all') params.severity = sevFilter;
     if (toolFilter !== 'all') params.tool = toolFilter;
     if (statusFilter !== 'all') {
@@ -466,7 +469,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, projectFilter, sevFilter, statusFilter, toolFilter, search]);
+  }, [page, projectFilter, sevFilter, statusFilter, toolFilter, search, ambient.project_id]);
 
   useEffect(() => { if (initialId != null) setSelectedId(initialId); }, [initialId]);
 

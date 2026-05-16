@@ -23,81 +23,6 @@ function parseCommand(input: string): { cmd: string; args: string[] } {
   return { cmd, args };
 }
 
-function LoginOverlay() {
-  const { login } = useAuth();
-  const [username, setUsername] = useState('');
-  const [role, setRole] = useState('developer');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleLogin = async () => {
-    if (!username.trim()) { setError('Nhập tên đăng nhập'); return; }
-    setLoading(true);
-    try {
-      await login(username.trim(), role);
-    } catch (e) {
-      setError(String(e));
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'absolute', inset: 0, zIndex: 50,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
-    }}>
-      <div style={{
-        background: 'var(--bg-elev)', border: '1px solid var(--line)',
-        borderRadius: 12, padding: '28px 32px', width: 340,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div className="ai-orb" style={{ width: 28, height: 28 }} />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Sentinel AI Login</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Demo — chọn role để tiếp tục</div>
-          </div>
-        </div>
-
-        <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--fg-3)' }}>Username</label>
-        <input
-          style={{
-            width: '100%', padding: '7px 10px', background: 'var(--bg-muted)',
-            border: '1px solid var(--line)', borderRadius: 6, color: 'var(--fg)',
-            fontSize: 13, marginBottom: 12, outline: 'none',
-          }}
-          placeholder="alice"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') handleLogin(); }}
-        />
-
-        <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--fg-3)' }}>Role</label>
-        <select
-          style={{
-            width: '100%', padding: '7px 10px', background: 'var(--bg-muted)',
-            border: '1px solid var(--line)', borderRadius: 6, color: 'var(--fg)',
-            fontSize: 13, marginBottom: 16, outline: 'none',
-          }}
-          value={role}
-          onChange={e => setRole(e.target.value)}
-        >
-          <option value="developer">developer</option>
-          <option value="security_lead">security_lead</option>
-          <option value="admin">admin</option>
-        </select>
-
-        {error && <div style={{ color: 'var(--sev-high-fg)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-
-        <button className="btn primary" style={{ width: '100%' }} onClick={handleLogin} disabled={loading}>
-          {loading ? 'Đang đăng nhập…' : 'Đăng nhập'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function PageChat() {
   const [messages, setMessages] = useState<Message[]>([{
     role: 'ai',
@@ -253,7 +178,16 @@ export function PageChat() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', position: 'relative' }}>
-      {!authLoading && !authed && <LoginOverlay />}
+      {!authLoading && !authed && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 5,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)',
+          fontSize: 13, color: 'var(--fg-2)', textAlign: 'center', padding: 24,
+        }}>
+          Đăng nhập qua nút <strong>Sign in</strong> ở góc phải topbar để dùng AI Chat.
+        </div>
+      )}
 
       <div style={{ padding: '20px 28px 0', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 16 }}>

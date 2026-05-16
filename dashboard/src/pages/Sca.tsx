@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { FindingListParams } from '../api/client';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { useActiveProjectParam } from '../contexts/ProjectContext';
 import type { Finding, Project } from '../types';
 
 const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
@@ -242,14 +243,18 @@ export function PageSCA() {
     api.projects.list().then(setProjects).catch(() => {});
   }, []);
 
+  const ambient = useActiveProjectParam();
+
   useEffect(() => {
     setLoading(true);
     const params: FindingListParams = { category: 'deps', limit: PAGE_SIZE, skip: 0 };
+    // Page-level dropdown wins; otherwise fall back to the topbar selection.
     if (projectFilter !== 'all') params.project_id = projectFilter as number;
+    else if (ambient.project_id !== undefined) params.project_id = ambient.project_id;
     api.findings.listWithTotal(params)
       .then(({ data }) => { setFindings(data); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [projectFilter]);
+  }, [projectFilter, ambient.project_id]);
 
   const groups = useMemo(() => {
     const floor = SEV_RANK[sevFloor] ?? 3;

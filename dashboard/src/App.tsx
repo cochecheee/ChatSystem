@@ -3,7 +3,9 @@ import { api } from './api/client';
 import { POLL_INTERVAL_MS } from './lib/constants';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
 import { AuthProvider } from './features/auth/AuthContext';
+import { LoginModal } from './components/LoginModal';
 import { ProjectProvider, useProjectContext } from './contexts/ProjectContext';
+import { useAuth } from './features/auth/AuthContext';
 import { PageChat } from './pages/Chat';
 import { PageOverview } from './pages/Overview';
 import { PagePipelines } from './pages/Pipelines';
@@ -19,7 +21,13 @@ function AppInner() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [openVulnId, setOpenVulnId] = useState<number | undefined>();
   const [newCritHighCount, setNewCritHighCount] = useState(0);
-  const { activeProjectId } = useProjectContext();
+  const [loginOpen, setLoginOpen] = useState(false);
+  const { activeProjectId, refresh: refreshProjects } = useProjectContext();
+  const { user } = useAuth();
+
+  // Re-fetch projects whenever auth identity changes so RBAC-filtered lists
+  // appear/disappear immediately on login/logout.
+  useEffect(() => { void refreshProjects(); }, [user?.username, refreshProjects]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -81,9 +89,11 @@ function AppInner() {
           onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
           newCritHighCount={newCritHighCount}
           onClearCritHigh={() => setNewCritHighCount(0)}
+          onOpenLogin={() => setLoginOpen(true)}
         />
         {page}
       </div>
+      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
     </div>
   );
 }

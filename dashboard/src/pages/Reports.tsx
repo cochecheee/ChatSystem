@@ -3,6 +3,7 @@ import { api, getAuthToken } from '../api/client';
 import { AlertBanner } from '../components/AlertBanner';
 import { SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
+import { useActiveProjectParam } from '../contexts/ProjectContext';
 import type { Finding, Project } from '../types';
 import { SEVERITY_ORDER } from '../types';
 
@@ -30,14 +31,17 @@ export function PageReports() {
   // Total count match filter (server-side accurate, không phụ thuộc limit)
   const [filterTotal, setFilterTotal] = useState(0);
 
+  const ambient = useActiveProjectParam();
+
   useEffect(() => {
     const params: Parameters<typeof api.findings.listWithTotal>[0] = { limit: 500 };
     if (projectId !== 'all') params.project_id = projectId as number;
+    else if (ambient.project_id !== undefined) params.project_id = ambient.project_id;
     if (sevFilter !== 'all') params.severity = sevFilter;
     api.findings.listWithTotal(params)
       .then(({ data, total }) => { setFindings(data); setFilterTotal(total); })
       .catch(() => {});
-  }, [projectId, sevFilter]);
+  }, [projectId, sevFilter, ambient.project_id]);
 
   // Counts trên 500 records loaded — đủ cho KPI distribution; total đúng từ server.
   // Khi filterTotal > 500 thì counts là sample chứ không phải full population.

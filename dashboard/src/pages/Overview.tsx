@@ -4,6 +4,7 @@ import { POLL_INTERVAL_MS } from '../lib/constants';
 import { AreaTrend, Donut, Heatmap, Sparkline } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { PageId } from '../components/Shell';
+import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { useRuns } from '../features/pipelines/useRuns';
 import { usePolling } from '../hooks/usePolling';
 import type { Finding, WorkflowRun } from '../types';
@@ -69,15 +70,18 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
   const [latestFindings, setLatestFindings] = useState<Finding[]>([]);
   const [loadingFindings, setLoadingFindings] = useState(false);
 
-  // Poll latest scan stats every 60s.
+  const { project_id } = useActiveProjectParam();
+
+  // Poll latest scan stats every 60s — scoped to active project when set.
   useEffect(() => {
     const fetch = () => {
-      api.stats.latestScan().then(setLatestStats).catch(() => {});
+      api.stats.latestScan(project_id !== undefined ? { project_id } : undefined)
+        .then(setLatestStats).catch(() => {});
     };
     fetch();
     const id = setInterval(fetch, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [project_id]);
 
   // Lazy-load full findings list của latest run (cho recent crit/high + top rules).
   useEffect(() => {

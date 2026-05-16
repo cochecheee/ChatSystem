@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import { AreaTrend, SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
+import { useActiveProjectParam } from '../contexts/ProjectContext';
 import type { Finding, WorkflowArtifact, WorkflowRun } from '../types';
 import { SEVERITY_ORDER } from '../types';
 
@@ -386,12 +387,13 @@ export function PagePipelines() {
   // PIPE-05: per-run finding count cache — populated on demand when a run is selected
   const [findingCountCache, setFindingCountCache] = useState<Map<number, { critical: number; high: number; medium: number; low: number; tools: string[] }>>(new Map());
   const [loadingCounts, setLoadingCounts] = useState<Set<number>>(new Set());
+  const { project_id } = useActiveProjectParam();
 
   const refresh = () => {
     setLoading(true);
     setFetchError(null);
     setRuns([]);  // clear stale list so tab activation never shows stale "No runs"
-    api.github.runs()
+    api.github.runs(undefined, project_id)
       .then(arr => {
         setRuns(arr);
         setLoading(false);
@@ -414,7 +416,7 @@ export function PagePipelines() {
     // On mount (fires on every tab activation since pages remount via App.tsx switch),
     // fetch runs and auto-select latest CI run. setRuns([]) + setLoading are called only
     // in callbacks to avoid the react-hooks/set-state-in-effect lint rule.
-    api.github.runs()
+    api.github.runs(undefined, project_id)
       .then(arr => {
         setRuns(arr);
         setLoading(false);
@@ -431,12 +433,12 @@ export function PagePipelines() {
         setLoading(false);
       });
     const id = setInterval(() => {
-      api.github.runs()
+      api.github.runs(undefined, project_id)
         .then(arr => setRuns(arr))
         .catch(() => {});
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [project_id]);
 
   // PIPE-05: fetch finding counts for the selected run if not yet cached
   useEffect(() => {

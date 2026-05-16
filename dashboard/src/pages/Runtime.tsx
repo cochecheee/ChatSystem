@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { useActiveProjectParam } from '../contexts/ProjectContext';
 import type { Finding } from '../types';
 
 /**
@@ -16,13 +17,17 @@ export function PageRuntime() {
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ open?: number; critHigh?: number } | null>(null);
 
+  const { project_id } = useActiveProjectParam();
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    const findingParams: any = { category: 'dast', limit: 200 };
+    if (project_id !== undefined) findingParams.project_id = project_id;
     Promise.all([
-      api.findings.list({ category: 'dast', limit: 200 }),
-      api.stats.overview(),
+      api.findings.list(findingParams),
+      api.stats.overview(project_id !== undefined ? { project_id } : undefined),
     ])
       .then(([list, ov]) => {
         if (cancelled) return;
@@ -40,7 +45,7 @@ export function PageRuntime() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [project_id]);
 
   if (loading) {
     return (

@@ -1,3 +1,4 @@
+import { useAuth } from '../features/auth/AuthContext';
 import { Icon } from './Icon';
 import { ProjectSelector } from './ProjectSelector';
 
@@ -60,6 +61,12 @@ interface SidebarProps {
 }
 
 export function Sidebar({ active, onNav }: SidebarProps) {
+  const { user } = useAuth();
+  const initials = user
+    ? user.username.slice(0, 2).toUpperCase()
+    : '?';
+  const chipName = user?.username ?? 'Not signed in';
+  const chipRole = user?.role ?? 'anonymous';
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -87,10 +94,10 @@ export function Sidebar({ active, onNav }: SidebarProps) {
       ))}
       <div className="sidebar-footer">
         <div className="user-chip">
-          <div className="avatar">MT</div>
+          <div className="avatar">{initials}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="user-chip-name">Minh Tran</div>
-            <div className="user-chip-role">fintrace · admin</div>
+            <div className="user-chip-name">{chipName}</div>
+            <div className="user-chip-role">{chipRole}</div>
           </div>
           <Icon name="chevron_down" size={12} style={{ color: 'var(--fg-3)' }} />
         </div>
@@ -106,9 +113,11 @@ interface TopbarProps {
   onToggleTheme: () => void;
   newCritHighCount?: number;
   onClearCritHigh?: () => void;
+  onOpenLogin: () => void;
 }
 
-export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, onClearCritHigh }: TopbarProps) {
+export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, onClearCritHigh, onOpenLogin }: TopbarProps) {
+  const { user, logout } = useAuth();
   const crumbs = CRUMB[active] ?? [];
   return (
     <div className="topbar">
@@ -140,6 +149,24 @@ export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, 
           <Icon name="sparkle" size={13} />
           Ask AI
         </button>
+        {user ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+              className="chip"
+              title={`Logged in as ${user.username} (${user.role})`}
+              style={{ fontSize: 11, padding: '3px 8px' }}
+            >
+              <Icon name="user" size={11} /> {user.username}:{user.role}
+            </span>
+            <button className="btn ghost sm" onClick={logout} style={{ padding: '4px 8px', fontSize: 11 }}>
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <button className="btn sm" onClick={onOpenLogin} style={{ padding: '4px 10px', fontSize: 12 }}>
+            <Icon name="user" size={12} /> Sign in
+          </button>
+        )}
       </div>
     </div>
   );
