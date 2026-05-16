@@ -102,13 +102,18 @@ for a tech lead. Output JSON matching the schema.
 
 Rules:
 - Vietnamese language for all narrative fields.
-- overview_md: 2-3 sentences. MUST cite exact numbers from the stats input
-  (total findings, critical count, high count, AI-analyzed count). Use
-  **bold** around key numbers.
-- top_risks: pick 3-5 most impactful from the input list. one_line_reason
-  in Vietnamese, <=20 words, MUST cite the actual vulnerability mechanism
-  (e.g., "SSRF qua user-supplied URL", "snakeyaml CVE chưa fix"),
-  NOT just "security issue".
+- overview_md: 2-3 sentences. MUST cite exact numbers from the stats input.
+  Use the ACTIVE numbers (total active, active critical, active high) as
+  the primary signal — these reflect what still needs work. Mention the
+  total/revoked split only if revoked count is nontrivial (e.g., > 5),
+  framed as triage progress ("đã revoke X FP"). Use **bold** around key
+  numbers.
+- top_risks: pick 3-5 from the input list. The input has already been
+  deduplicated by vulnerability family — pick the DIVERSE highest-impact
+  ones, NOT 5 variants of the same CVE/library/file. one_line_reason in
+  Vietnamese, <=20 words, MUST cite the actual vulnerability mechanism
+  (e.g., "SSRF qua user-supplied URL", "snakeyaml DoS chưa fix"), NOT
+  just "security issue".
 - recommendations_md: numbered list 1-3 items, start each with a verb
   ("Fix", "Upgrade", "Triage", "Review"), tie to specific finding counts
   from the input. Format as markdown "1. Fix...\n2. ...".
@@ -134,13 +139,70 @@ async def _call_gemini_summary(client: GeminiClient, prompt: str) -> AiSummaryOu
     return AiSummaryOutput.model_validate_json(response.text)
 
 
+def _risk_group_key(f) -> tuple[str, str]:
+    """Bucket a finding so we can pick diverse representatives.
+
+    Group key = (tool, family) where family captures the vulnerability
+    *class*, deliberately ignoring the specific file or CVE id:
+      - Slash rules ("java/path-injection"): full rule id — different rules
+        in the same language stay distinct (path-injection ≠ ssrf).
+      - CVE rules: bucket by file_path (= library coordinate like
+        "Java:org.yaml:snakeyaml") so a 5-CVE family on one library
+        collapses to one group.
+      - Anything else: full rule id.
+    """
+    import re
+    tool = (f.tool or "unknown").lower()
+    rid = (f.rule_id or "").strip()
+    if "/" in rid:
+        family = rid.lower()
+    elif re.match(r"^CVE-\d{4}", rid, re.IGNORECASE):
+        family = (f.file_path or "cve").lower()
+    else:
+        family = rid.lower() or (f.file_path or "").lower()
+    return (tool, family)
+
+
+def _pick_diverse(pool, k: int):
+    """Round-robin one finding per group, biggest groups first, until we
+    have k items or the pool runs out. Preserves severity ordering inside
+    each group (the pool is already sorted critical→low)."""
+    from collections import defaultdict
+    groups: dict[tuple[str, str], list] = defaultdict(list)
+    for f in pool:
+        groups[_risk_group_key(f)].append(f)
+
+    selected: list = []
+    seen: set = set()
+    # First pass — one from each distinct group, in pool order
+    for f in pool:
+        g = _risk_group_key(f)
+        if g in seen:
+            continue
+        seen.add(g)
+        selected.append(f)
+        if len(selected) >= k:
+            return selected
+    # Second pass — fill remaining slots with extras from the largest groups
+    remaining = [
+        f for f in pool
+        if f not in selected
+    ]
+    selected.extend(remaining[: k - len(selected)])
+    return selected
+
+
 def _heuristic_trend(pass_rate: float, runs_total: int) -> Literal["improving", "stable", "degrading"]:
+    """Snapshot pass-rate → 3-bucket label.
+
+    Note: real "improving" needs a previous window to compare against,
+    which we don't persist. Until trend history lands we report stable
+    when pass_rate is healthy and degrading only when it visibly is.
+    """
     if runs_total < 3:
+        return "stable"  # not enough data
+    if pass_rate >= 70:
         return "stable"
-    if pass_rate >= 80:
-        return "stable"
-    if pass_rate >= 60:
-        return "degrading"
     return "degrading"
 
 
@@ -159,51 +221,77 @@ class SummaryService:
         repo = FindingRepository(session)
 
         common = dict(project_id=project_id, run_id=run_id)
-        total = await repo.count_with_filters(**common)
-        critical = await repo.count_with_filters(severity="critical", **common)
-        high = await repo.count_with_filters(severity="high", **common)
-        medium = await repo.count_with_filters(severity="medium", **common)
+        # V3.4 BUG-2 — switch primary numbers to ACTIVE (exclude REVOKED).
+        # Revoked findings are developer-triaged false positives; reporting
+        # them as outstanding work confuses the briefing. We still expose
+        # the historical total so Gemini can mention "X total, Y revoked"
+        # when the kill rate is meaningful.
+        total = await repo.count_with_filters(**common)                                       # historical
+        active_total = await repo.count_with_filters(exclude_revoked=True, **common)          # what to act on
+        critical = await repo.count_with_filters(severity="critical", exclude_revoked=True, **common)
+        high = await repo.count_with_filters(severity="high", exclude_revoked=True, **common)
+        medium = await repo.count_with_filters(severity="medium", exclude_revoked=True, **common)
         ai_analyzed = await repo.count_with_filters(status="ai_analyzed", **common)
-        active_total = await repo.count_with_filters(exclude_revoked=True, **common)
+        revoked = total - active_total
 
-        # Top 10 critical/high findings — input to top_risks
-        top_findings = await repo.list_with_filters(
+        # Pull a wide pool, then pick diverse representatives. Without this,
+        # severity-first sorting can return 5 CVEs all from the same library
+        # (V3.4 BUG-3 — ALOUTE returned 5 snakeyaml CVEs in a row).
+        pool = await repo.list_with_filters(
             project_id=project_id, run_id=run_id, exclude_revoked=True,
-            limit=10, skip=0,
+            limit=50, skip=0,
         )
-        # Sort: critical first, then high
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        top_findings.sort(key=lambda f: (sev_order.get(f.severity, 9), -f.id))
+        pool.sort(key=lambda f: (sev_order.get(f.severity, 9), -f.id))
+        diverse = _pick_diverse(pool, k=8)
         top_for_prompt = [
             {
                 "id": f.id, "severity": f.severity, "rule_id": f.rule_id,
                 "file_path": f.file_path,
                 "message": (f.message or "")[:200],
             }
-            for f in top_findings[:8]
+            for f in diverse
         ]
 
-        # Pipeline health — count from Artifact.github_run_id distinct runs and
-        # rough heuristic. Real pass rate calls GitHub API; for the summary
-        # card we use what's locally observable.
-        result = await session.execute(
-            select(Artifact.github_run_id).where(Artifact.github_run_id.is_not(None))
-        )
-        run_ids = {row[0] for row in result.all() if row[0]}
-        runs_total = len(run_ids)
-        # Without GitHub API calls we don't know conclusion. Treat 'has any
-        # finding' as 'observed'; pass-rate is naive but documented as such.
-        runs_passed = max(1, runs_total - critical)  # crude but stable
+        # V3.4 BUG-1 — replace the bogus `runs_passed = total - critical`
+        # heuristic with real GitHub conclusions. We call list_workflow_runs
+        # at most once per summary; the 10-min cache means ~6 API calls/hour/
+        # project against the 5000/hour quota. If the call fails (network,
+        # bad credentials), fall back to "stable, unknown" rather than lying.
+        runs_total = 0
+        runs_passed = 0
+        try:
+            from ..github_client import GitHubClient as _GH
+            if project_id is not None:
+                project = await session.get(Project, project_id)
+                gh = _GH.for_project(project) if (project and project.github_token) else _GH()
+            else:
+                gh = _GH()
+            recent_runs = await gh.list_workflow_runs(
+                workflow_name="", branch="", status="",
+            )
+            runs_total = len(recent_runs)
+            runs_passed = sum(1 for r in recent_runs if r.get("conclusion") == "success")
+        except Exception as exc:
+            log.warning("AI summary: pipeline_health GitHub call failed (%s), falling back to local", exc)
+            # Fall back to local artifact count — at least we know runs_total
+            result = await session.execute(
+                select(Artifact.github_run_id).where(Artifact.github_run_id.is_not(None))
+            )
+            run_ids = {row[0] for row in result.all() if row[0]}
+            runs_total = len(run_ids)
+            runs_passed = 0  # honest: we don't know
         pass_rate = round((runs_passed / runs_total * 100), 1) if runs_total else 0.0
 
         return {
             "stats": {
                 "total": total,
-                "critical": critical,
+                "active": active_total,
+                "revoked": revoked,
+                "critical": critical,        # active counts
                 "high": high,
                 "medium": medium,
                 "ai_analyzed": ai_analyzed,
-                "active_total": active_total,
             },
             "top_findings": top_for_prompt,
             "pipeline_health": PipelineHealth(
@@ -217,12 +305,19 @@ class SummaryService:
     def _build_prompt(self, project_name: str, inputs: dict) -> str:
         s = inputs["stats"]
         top = inputs["top_findings"]
+        # V3.4 BUG-2 — emphasize ACTIVE counts; mention revoked only when
+        # the kill rate is nontrivial so Gemini can show the triage progress.
+        revoked_clause = (
+            f" ({s['revoked']} đã revoke từ tổng {s['total']})"
+            if s.get("revoked", 0) > 0 else ""
+        )
         return (
             f"Project: {project_name}\n\n"
-            f"Stats: total={s['total']}, critical={s['critical']}, high={s['high']}, "
-            f"medium={s['medium']}, ai_analyzed={s['ai_analyzed']}, "
-            f"active(not revoked)={s['active_total']}\n\n"
-            f"Top findings (id, severity, rule, file, message):\n"
+            f"ACTIVE counts (used for all narrative numbers):\n"
+            f"  total active = {s['active']}{revoked_clause}\n"
+            f"  critical = {s['critical']}, high = {s['high']}, medium = {s['medium']}\n"
+            f"  AI-analyzed = {s['ai_analyzed']}\n\n"
+            f"Top active findings (id, severity, rule, file, message):\n"
             + "\n".join(
                 f"- id={f['id']}, {f['severity']}, {f['rule_id']}, {f['file_path']}, "
                 f"\"{f['message']}\""
