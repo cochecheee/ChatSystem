@@ -19,13 +19,13 @@ class StatsService:
         self.findings = FindingRepository(session)
         self.artifacts = ArtifactRepository(session)
 
-    async def overview(self) -> dict[str, Any]:
-        """KPI cards cho Overview page."""
-        sev = await self.findings.count_by_severity()
-        status = await self.findings.count_by_status()
-        tool = await self.findings.count_by_tool()
-        ai_analyzed = await self.findings.count_ai_analyzed()
-        total = await self.findings.count_total()
+    async def overview(self, *, project_id: int | None = None) -> dict[str, Any]:
+        """KPI cards cho Overview page. project_id=None ⇒ aggregate toàn hệ thống."""
+        sev = await self.findings.count_by_severity(project_id=project_id)
+        status = await self.findings.count_by_status(project_id=project_id)
+        tool = await self.findings.count_by_tool(project_id=project_id)
+        ai_analyzed = await self.findings.count_ai_analyzed(project_id=project_id)
+        total = await self.findings.count_total(project_id=project_id)
 
         critical = sev.get("critical", 0)
         high = sev.get("high", 0)
@@ -35,28 +35,24 @@ class StatsService:
 
         # Per-category open counts so the Vulns badge (SAST-only) and
         # SCA badge (deps-only) match what their pages actually show.
-        sast_total = await self.findings.count_with_filters(category="sast")
-        sast_approved = await self.findings.count_with_filters(category="sast", status="APPROVED")
-        sast_revoked = await self.findings.count_with_filters(category="sast", status="REVOKED")
-        deps_total = await self.findings.count_with_filters(category="deps")
-        deps_approved = await self.findings.count_with_filters(category="deps", status="APPROVED")
-        deps_revoked = await self.findings.count_with_filters(category="deps", status="REVOKED")
+        sast_total = await self.findings.count_with_filters(project_id=project_id, category="sast")
+        sast_approved = await self.findings.count_with_filters(project_id=project_id, category="sast", status="APPROVED")
+        sast_revoked = await self.findings.count_with_filters(project_id=project_id, category="sast", status="REVOKED")
+        deps_total = await self.findings.count_with_filters(project_id=project_id, category="deps")
+        deps_approved = await self.findings.count_with_filters(project_id=project_id, category="deps", status="APPROVED")
+        deps_revoked = await self.findings.count_with_filters(project_id=project_id, category="deps", status="REVOKED")
 
-        # Actionable counts = critical + high. Trivy container scans flood the
-        # raw deps_open with thousands of low/medium OS-level CVEs that drown
-        # signal in noise; the SCA tab defaults to severity ≥ high so the
-        # badge needs to match that bar.
-        sast_crit = await self.findings.count_with_filters(category="sast", severity="critical")
-        sast_high = await self.findings.count_with_filters(category="sast", severity="high")
-        deps_crit = await self.findings.count_with_filters(category="deps", severity="critical")
-        deps_high = await self.findings.count_with_filters(category="deps", severity="high")
+        sast_crit = await self.findings.count_with_filters(project_id=project_id, category="sast", severity="critical")
+        sast_high = await self.findings.count_with_filters(project_id=project_id, category="sast", severity="high")
+        deps_crit = await self.findings.count_with_filters(project_id=project_id, category="deps", severity="critical")
+        deps_high = await self.findings.count_with_filters(project_id=project_id, category="deps", severity="high")
 
         # DAST counts (V2.3 — OWASP ZAP runtime scan)
-        dast_total = await self.findings.count_with_filters(category="dast")
-        dast_approved = await self.findings.count_with_filters(category="dast", status="APPROVED")
-        dast_revoked = await self.findings.count_with_filters(category="dast", status="REVOKED")
-        dast_crit = await self.findings.count_with_filters(category="dast", severity="critical")
-        dast_high = await self.findings.count_with_filters(category="dast", severity="high")
+        dast_total = await self.findings.count_with_filters(project_id=project_id, category="dast")
+        dast_approved = await self.findings.count_with_filters(project_id=project_id, category="dast", status="APPROVED")
+        dast_revoked = await self.findings.count_with_filters(project_id=project_id, category="dast", status="REVOKED")
+        dast_crit = await self.findings.count_with_filters(project_id=project_id, category="dast", severity="critical")
+        dast_high = await self.findings.count_with_filters(project_id=project_id, category="dast", severity="high")
 
         return {
             "total": total,
@@ -78,14 +74,14 @@ class StatsService:
             "pending": pending,
         }
 
-    async def latest_scan(self) -> dict[str, Any]:
+    async def latest_scan(self, *, project_id: int | None = None) -> dict[str, Any]:
         """Stats cho run mới nhất CÓ findings trong DB (không phải latest GitHub run).
 
         Dashboard Overview dùng endpoint này để hiển thị "kết quả scan mới nhất".
         Cố gắng enrich với run metadata từ GitHub (run_number, head_branch, created_at);
         nếu GitHub fail thì vẫn trả run_id + counts.
         """
-        run_id = await self.artifacts.latest_run_id_with_findings()
+        run_id = await self.artifacts.latest_run_id_with_findings(project_id=project_id)
         if run_id is None:
             return {
                 "run_id": None,

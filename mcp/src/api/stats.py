@@ -13,19 +13,30 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 @router.get("/overview", summary="Aggregated KPI cho Overview page")
-async def stats_overview(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    """Trả về counts theo severity/status/tool + AI percent + total. Auth=none."""
-    return await StatsService(session).overview()
+async def stats_overview(
+    project_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Trả về counts theo severity/status/tool + AI percent + total. Auth=none.
+
+    `?project_id=` (V2.9): lọc theo project. Bỏ qua → aggregate toàn hệ thống.
+    """
+    return await StatsService(session).overview(project_id=project_id)
 
 
 @router.get("/latest-scan", summary="Stats của run mới nhất có findings")
-async def stats_latest_scan(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def stats_latest_scan(
+    project_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
     """Aggregated KPI cho 'scan mới nhất' (run_id mới nhất có findings trong DB).
 
     Khác với /stats/overview (toàn bộ findings cumulative) — endpoint này scope
     về 1 run duy nhất, dùng cho Dashboard Overview.
+
+    `?project_id=` (V2.9): chỉ xét scan của project đó.
     """
-    return await StatsService(session).latest_scan()
+    return await StatsService(session).latest_scan(project_id=project_id)
 
 
 @router.get("/runs", summary="Pass/fail trend cho last N runs")

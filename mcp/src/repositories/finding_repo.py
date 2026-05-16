@@ -164,30 +164,40 @@ class FindingRepository:
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
 
-    async def count_by_severity(self) -> dict[str, int]:
-        result = await self.session.execute(
-            select(Finding.severity, sql_func.count(Finding.id)).group_by(Finding.severity)
-        )
+    async def count_by_severity(self, *, project_id: int | None = None) -> dict[str, int]:
+        query = select(Finding.severity, sql_func.count(Finding.id))
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        query = query.group_by(Finding.severity)
+        result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
-    async def count_by_status(self) -> dict[str, int]:
-        result = await self.session.execute(
-            select(Finding.status, sql_func.count(Finding.id)).group_by(Finding.status)
-        )
+    async def count_by_status(self, *, project_id: int | None = None) -> dict[str, int]:
+        query = select(Finding.status, sql_func.count(Finding.id))
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        query = query.group_by(Finding.status)
+        result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
-    async def count_by_tool(self) -> dict[str, int]:
-        result = await self.session.execute(
-            select(Finding.tool, sql_func.count(Finding.id)).group_by(Finding.tool)
-        )
+    async def count_by_tool(self, *, project_id: int | None = None) -> dict[str, int]:
+        query = select(Finding.tool, sql_func.count(Finding.id))
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        query = query.group_by(Finding.tool)
+        result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
-    async def count_ai_analyzed(self) -> int:
-        result = await self.session.execute(
-            select(sql_func.count(Finding.id)).where(Finding.ai_analysis.is_not(None))
-        )
+    async def count_ai_analyzed(self, *, project_id: int | None = None) -> int:
+        query = select(sql_func.count(Finding.id)).where(Finding.ai_analysis.is_not(None))
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
 
-    async def count_total(self) -> int:
-        result = await self.session.execute(select(sql_func.count(Finding.id)))
+    async def count_total(self, *, project_id: int | None = None) -> int:
+        query = select(sql_func.count(Finding.id))
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        result = await self.session.execute(query)
         return int(result.scalar_one() or 0)

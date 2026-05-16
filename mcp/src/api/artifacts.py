@@ -187,11 +187,21 @@ async def delete_project(
 async def list_github_runs(
     branch: str = "",
     status: str = "",
+    project_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
     github: GitHubClient = Depends(get_github_client),
 ) -> list[dict]:
     """Return recent workflow runs for the configured repo.
     Use the `id` field as input for **GET /github/runs/{run_id}/artifacts**.
+
+    `?project_id=` (V2.9): dùng credentials per-project thay vì env. 404 nếu
+    project không tồn tại.
     """
+    if project_id is not None:
+        project = await ProjectRepository(session).get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        github = GitHubClient.for_project(project)
     try:
         return await github.list_workflow_runs(
             workflow_name="",

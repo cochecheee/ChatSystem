@@ -107,3 +107,74 @@ async def test_latest_scan_returns_most_recent_run(client, db_session):
     assert body["ai_analyzed_pct"] == 50.0
     assert body["by_severity"]["critical"] == 1
     assert body["by_severity"]["medium"] == 1
+
+
+# V2.9 — multi-project filtering on /stats endpoints
+
+
+@pytest.mark.asyncio
+async def test_stats_overview_filters_by_project_id(client, db_session):
+    """`?project_id=` chỉ tính findings của project đó."""
+    p1 = Project(name="P1", github_url="https://github.com/a/b")
+    p2 = Project(name="P2", github_url="https://github.com/c/d")
+    db_session.add_all([p1, p2])
+    await db_session.flush()
+
+    a1 = Artifact(github_artifact_id="a1", project_id=p1.id, status="processed")
+    a2 = Artifact(github_artifact_id="a2", project_id=p2.id, status="processed")
+    db_session.add_all([a1, a2])
+    await db_session.flush()
+
+    db_session.add_all([
+        Finding(artifact_id=a1.id, tool="semgrep", rule_id="r1", severity="critical",
+                message="m", file_path="f.py", status="pending_review"),
+        Finding(artifact_id=a1.id, tool="codeql", rule_id="r2", severity="high",
+                message="m", file_path="f.py", status="pending_review"),
+        Finding(artifact_id=a2.id, tool="trivy", rule_id="r3", severity="medium",
+                message="m", file_path="g.py", status="pending_review"),
+    ])
+    await db_session.commit()
+
+    # Aggregate toàn bộ
+    full = (await client.get("/stats/overview")).json()
+    assert full["total"] == 3
+
+    # Filter P1
+    only_p1 = (await client.get(f"/stats/overview?project_id={p1.id}")).json()
+    assert only_p1["total"] == 2
+    assert only_p1["critical_high"] == 2
+    assert only_p1["by_tool"].get("trivy") is None
+
+    # Filter P2
+    only_p2 = (await client.get(f"/stats/overview?project_id={p2.id}")).json()
+    assert only_p2["total"] == 1
+    assert only_p2["critical_high"] == 0
+
+
+@pytest.mark.asyncio
+async def test_latest_scan_filters_by_project_id(client, db_session):
+    """`?project_id=` trên /latest-scan chỉ pick run của project đó."""
+    p1 = Project(name="P1", github_url="https://github.com/a/b")
+    p2 = Project(name="P2", github_url="https://github.com/c/d")
+    db_session.add_all([p1, p2])
+    await db_session.flush()
+
+    a1 = Artifact(github_artifact_id="a1", project_id=p1.id,
+                  github_run_id=100, status="processed")
+    a2 = Artifact(github_artifact_id="a2", project_id=p2.id,
+                  github_run_id=200, status="processed")
+    db_session.add_all([a1, a2])
+    await db_session.flush()
+    db_session.add_all([
+        Finding(artifact_id=a1.id, tool="semgrep", rule_id="r1", severity="critical",
+                message="m", file_path="f.py", status="pending_review"),
+        Finding(artifact_id=a2.id, tool="trivy", rule_id="r2", severity="high",
+                message="m", file_path="g.py", status="pending_review"),
+    ])
+    await db_session.commit()
+
+    # P1 → run 100 (only P1 run)
+    body_p1 = (await client.get(f"/stats/latest-scan?project_id={p1.id}")).json()
+    assert body_p1["run_id"] == 100
+    body_p2 = (await client.get(f"/stats/latest-scan?project_id={p2.id}")).json()
+    assert body_p2["run_id"] == 200

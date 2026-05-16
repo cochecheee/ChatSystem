@@ -26,7 +26,7 @@ class ArtifactRepository:
         )
         return list(result.scalars().all())
 
-    async def latest_run_id_with_findings(self) -> int | None:
+    async def latest_run_id_with_findings(self, *, project_id: int | None = None) -> int | None:
         """Run ID mới nhất có findings (theo Artifact.created_at).
 
         Một run có thể có nhiều artifacts; trả về run_id của artifact mới nhất
@@ -34,14 +34,19 @@ class ArtifactRepository:
         """
         from sqlalchemy import desc, func as sql_func
         from ..models.entities import Finding
-        result = await self.session.execute(
+        query = (
             select(Artifact.github_run_id, sql_func.max(Artifact.created_at).label("latest"))
             .join(Finding, Finding.artifact_id == Artifact.id)
             .where(Artifact.github_run_id.is_not(None))
-            .group_by(Artifact.github_run_id)
+        )
+        if project_id is not None:
+            query = query.where(Artifact.project_id == project_id)
+        query = (
+            query.group_by(Artifact.github_run_id)
             .order_by(desc("latest"))
             .limit(1)
         )
+        result = await self.session.execute(query)
         row = result.first()
         return row[0] if row else None
 
