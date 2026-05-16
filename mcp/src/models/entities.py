@@ -200,6 +200,41 @@ class ProjectMember(Base):
     )
 
 
+class SuppressionRule(Base):
+    """V3.1 Tier 2 — pattern-based false-positive suppression.
+
+    When ingest produces a Finding that matches an active rule, the
+    Finding's status is auto-set to REVOKED with audit pointing back at
+    the rule id. Unlike Tier 1's per-dedup-hash inherit, this catches
+    NEW findings that resemble triaged ones (same rule on a file under
+    same directory, etc).
+
+    Match semantics: `rule_id == finding.rule_id` (or NULL = match all)
+    AND fnmatch(finding.file_path, file_glob) (or NULL = any)
+    AND tool == finding.tool (or NULL)
+    AND severity rank <= severity_max (or NULL = any).
+
+    `expires_at` lets temp suppressions self-expire (default 90d in API).
+    """
+
+    __tablename__ = "suppression_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=False, index=True,
+    )
+    rule_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    file_glob: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    tool: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    severity_max: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
+
+
 class Alert(Base):
     """Operational alert raised by the monitor (down event, CVE diff, etc).
 

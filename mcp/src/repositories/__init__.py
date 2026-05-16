@@ -14,6 +14,7 @@ from .project_repo import ProjectRepository
 from .artifact_repo import ArtifactRepository
 from .config_repo import ConfigRepository
 from .project_member_repo import ProjectMemberRepository, role_satisfies, ROLE_LATTICE
+from .suppression_repo import SuppressionRuleRepository, rule_matches
 
 __all__ = [
     "FindingRepository",
@@ -23,4 +24,6 @@ __all__ = [
     "ProjectMemberRepository",
     "role_satisfies",
     "ROLE_LATTICE",
+    "SuppressionRuleRepository",
+    "rule_matches",
 ]

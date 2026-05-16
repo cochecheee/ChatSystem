@@ -186,6 +186,122 @@ async def add_project_member(
     return {"username": member.username, "role": member.role}
 
 
+@router.get("/projects/{project_id}/suppressions")
+async def list_suppressions(
+    project_id: int,
+    include_expired: bool = False,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """List suppression rules (V3.1 Tier 2). `include_expired=true` to show all
+    rules (history), otherwise only currently-active rules are returned.
+    """
+    from ..repositories import SuppressionRuleRepository
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repo = SuppressionRuleRepository(session)
+    rules = (
+        await repo.list_all_for_project(project_id)
+        if include_expired
+        else await repo.list_active_for_project(project_id)
+    )
+    return [
+        {
+            "id": r.id,
+            "rule_id": r.rule_id,
+            "file_glob": r.file_glob,
+            "tool": r.tool,
+            "severity_max": r.severity_max,
+            "reason": r.reason,
+            "created_by": r.created_by,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+        }
+        for r in rules
+    ]
+
+
+class SuppressionCreate(BaseModel):
+    reason: str
+    rule_id: str | None = None
+    file_glob: str | None = None
+    tool: str | None = None
+    severity_max: str | None = None
+    expires_in_days: int | None = 90  # default 90d expiry — temp by design
+
+
+@router.post("/projects/{project_id}/suppressions", status_code=201)
+async def create_suppression(
+    project_id: int,
+    body: SuppressionCreate,
+    session: AsyncSession = Depends(get_session),
+    current: User = Depends(get_current_user_required),
+) -> dict:
+    """Create a suppression rule. Requires security_lead+ role (per-project)
+    or global admin. Auto-applied to new findings on next ingest.
+    """
+    from datetime import timedelta
+    from ..repositories import SuppressionRuleRepository, ProjectMemberRepository, role_satisfies
+
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Authorization: global admin OR project security_lead+
+    if current.role != "admin":
+        member_role = await ProjectMemberRepository(session).get_role(project_id, current.username)
+        if member_role is None or not role_satisfies(member_role, "security_lead"):
+            raise HTTPException(
+                status_code=403,
+                detail="security_lead role (or higher) required on this project",
+            )
+
+    expires_at = None
+    if body.expires_in_days:
+        from datetime import datetime, UTC
+        expires_at = datetime.now(UTC) + timedelta(days=body.expires_in_days)
+
+    repo = SuppressionRuleRepository(session)
+    rule = await repo.create(
+        project_id=project_id,
+        reason=body.reason,
+        created_by=current.username,
+        rule_id=body.rule_id,
+        file_glob=body.file_glob,
+        tool=body.tool,
+        severity_max=body.severity_max,
+        expires_at=expires_at,
+    )
+    return {
+        "id": rule.id,
+        "reason": rule.reason,
+        "expires_at": rule.expires_at.isoformat() if rule.expires_at else None,
+    }
+
+
+@router.delete("/projects/{project_id}/suppressions/{rule_pk}", status_code=204)
+async def delete_suppression(
+    project_id: int,
+    rule_pk: int,
+    session: AsyncSession = Depends(get_session),
+    current: User = Depends(get_current_user_required),
+) -> Response:
+    """Delete a suppression rule. Same authorization as create."""
+    from ..repositories import SuppressionRuleRepository, ProjectMemberRepository, role_satisfies
+
+    if current.role != "admin":
+        member_role = await ProjectMemberRepository(session).get_role(project_id, current.username)
+        if member_role is None or not role_satisfies(member_role, "security_lead"):
+            raise HTTPException(status_code=403, detail="security_lead role required")
+
+    repo = SuppressionRuleRepository(session)
+    rule = await repo.get(rule_pk)
+    if rule is None or rule.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Suppression rule not found")
+    await repo.delete(rule_pk)
+    return Response(status_code=204)
+
+
 @router.delete("/projects/{project_id}/members/{username}", status_code=204)
 async def remove_project_member(
     project_id: int,

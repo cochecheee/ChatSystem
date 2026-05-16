@@ -263,3 +263,151 @@ async def test_findings_run_id_filter(client, db_session):
     run200 = (await client.get(f"/findings?run_id=200")).json()
     assert len(run100) == 1 and run100[0]["rule_id"] == "r1"
     assert len(run200) == 1 and run200[0]["rule_id"] == "r2"
+
+
+# ---------------------------------------------------------------------------
+# V3.1 Tier 2 — suppression rules
+# ---------------------------------------------------------------------------
+
+async def _login_admin(client) -> str:
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "root", "role": "admin"},
+    )
+    return resp.json()["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_suppression_crud_admin(client, project):
+    """Admin can create/list/delete suppression rules."""
+    admin = await _login_admin(client)
+    headers = {"Authorization": f"Bearer {admin}"}
+
+    resp = await client.post(
+        f"/projects/{project['id']}/suppressions",
+        json={
+            "rule_id": "java/path-injection",
+            "file_glob": "src/test/**",
+            "reason": "Test code, not production path",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    rule_id = resp.json()["id"]
+
+    listed = (await client.get(f"/projects/{project['id']}/suppressions")).json()
+    assert any(r["id"] == rule_id for r in listed)
+
+    resp = await client.delete(
+        f"/projects/{project['id']}/suppressions/{rule_id}", headers=headers,
+    )
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_suppression_requires_security_lead(client, project):
+    """A plain developer without project membership cannot create rules."""
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "junior", "role": "developer"},
+    )
+    token = resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = await client.post(
+        f"/projects/{project['id']}/suppressions",
+        json={"reason": "Why not"},
+        headers=headers,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_suppression_rule_matches_at_ingest(db):
+    """A matching rule auto-revokes new findings on ingest."""
+    from src.models.entities import SuppressionRule
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-rule")
+    async with db() as session:
+        session.add(SuppressionRule(
+            project_id=project_id,
+            rule_id="python.lang.security.exec-use",
+            file_glob="src/*.py",
+            tool="semgrep",
+            severity_max="critical",
+            reason="Internal-use only — exec() is intentional",
+            created_by="alice",
+        ))
+        await session.commit()
+
+    await _ingest(db, artifact_id)
+
+    async with db() as session:
+        f = (await session.execute(select(Finding))).scalar_one()
+        assert f.status == "REVOKED"
+        assert f.revoked_by.startswith("auto-suppress (rule #")
+        assert "Internal-use only" in f.revoke_justification
+
+
+@pytest.mark.asyncio
+async def test_suppression_rule_glob_mismatch(db):
+    """Rule with file_glob that doesn't match leaves the finding pending."""
+    from src.models.entities import SuppressionRule
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-no-glob")
+    async with db() as session:
+        session.add(SuppressionRule(
+            project_id=project_id,
+            rule_id="python.lang.security.exec-use",
+            file_glob="src/test/**",   # Sample SARIF puts file at src/app.py — won't match
+            reason="Only test code is exempt",
+            created_by="alice",
+        ))
+        await session.commit()
+
+    await _ingest(db, artifact_id)
+
+    async with db() as session:
+        f = (await session.execute(select(Finding))).scalar_one()
+        assert f.status == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_expired_suppression_inactive(db):
+    """A rule past its expires_at must not match."""
+    from datetime import datetime, UTC, timedelta
+    from src.models.entities import SuppressionRule
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-expired")
+    async with db() as session:
+        session.add(SuppressionRule(
+            project_id=project_id,
+            rule_id="python.lang.security.exec-use",
+            reason="Expired rule",
+            created_by="alice",
+            expires_at=datetime.now(UTC) - timedelta(days=1),
+        ))
+        await session.commit()
+
+    await _ingest(db, artifact_id)
+
+    async with db() as session:
+        f = (await session.execute(select(Finding))).scalar_one()
+        assert f.status == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_suppression_severity_max_caps(db):
+    """severity_max=medium means high/critical findings are NOT auto-revoked."""
+    from src.models.entities import SuppressionRule
+    project_id, artifact_id = await _create_project_and_artifact(db, "art-sevmax")
+    async with db() as session:
+        session.add(SuppressionRule(
+            project_id=project_id,
+            rule_id="python.lang.security.exec-use",
+            severity_max="medium",  # SARIF level=error → "high" — above cap
+            reason="Only mute medium-and-below for this rule",
+            created_by="alice",
+        ))
+        await session.commit()
+
+    await _ingest(db, artifact_id)
+    async with db() as session:
+        f = (await session.execute(select(Finding))).scalar_one()
+        assert f.status == "pending_review"   # severity=high > severity_max=medium

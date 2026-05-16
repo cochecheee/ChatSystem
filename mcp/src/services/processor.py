@@ -167,36 +167,59 @@ class SecurityProcessor:
             files = await client.fetch_artifact(github_artifact_id)
             db_findings = self._build_findings(files, db_artifact_id)
 
-            # V3.1 Tier 1 — cross-run auto-revoke. If any of these findings'
-            # dedup_hashes already exist in DB with status=REVOKED, inherit
-            # that decision: copy revoke metadata and mark new row REVOKED
-            # too. The original justification carries forward so audit trail
-            # stays intact ("auto-suppressed by prior decision of <user>").
+            # V3.1 Tier 1 — cross-run auto-revoke by dedup_hash match.
+            # V3.1 Tier 2 — pattern-based auto-revoke from suppression_rules.
+            # Tier 1 wins when both match (more specific = exact hash).
             from ..repositories.finding_repo import FindingRepository
+            from ..repositories.suppression_repo import (
+                SuppressionRuleRepository, rule_matches,
+            )
             repo = FindingRepository(session)
+            sup_repo = SuppressionRuleRepository(session)
             hashes = {f.dedup_hash for f in db_findings if f.dedup_hash}
             project_id = artifact.project_id
             prior = await repo.find_revoked_hashes(hashes, project_id=project_id)
-            auto_count = 0
+            active_rules = await sup_repo.list_active_for_project(project_id)
+            auto_count_t1 = 0
+            auto_count_t2 = 0
             for f in db_findings:
                 if f.dedup_hash and f.dedup_hash in prior:
                     p = prior[f.dedup_hash]
                     f.status = "REVOKED"
                     f.revoked_by = "auto-suppress"
                     f.revoke_justification = (
-                        f"Auto-suppressed (V3.1): inherited revoke from "
+                        f"Auto-suppressed (V3.1 Tier 1): inherited revoke from "
                         f"{p['revoked_by']!r} — {p['revoke_justification']}"
                     )
                     f.revoked_at = datetime.now(UTC)
-                    auto_count += 1
+                    auto_count_t1 += 1
+                    continue
+                for rule in active_rules:
+                    if rule_matches(
+                        rule,
+                        finding_rule_id=f.rule_id,
+                        finding_file_path=f.file_path,
+                        finding_tool=f.tool,
+                        finding_severity=f.severity,
+                    ):
+                        f.status = "REVOKED"
+                        f.revoked_by = f"auto-suppress (rule #{rule.id})"
+                        f.revoke_justification = (
+                            f"Auto-suppressed (V3.1 Tier 2 rule #{rule.id} by "
+                            f"{rule.created_by}): {rule.reason}"
+                        )
+                        f.revoked_at = datetime.now(UTC)
+                        auto_count_t2 += 1
+                        break
+            auto_count = auto_count_t1 + auto_count_t2
 
             session.add_all(db_findings)
             artifact.status = "processed"
             await session.commit()
 
             log.info(
-                "Stored %d findings for artifact %d (auto-revoked %d via dedup_hash match)",
-                len(db_findings), db_artifact_id, auto_count,
+                "Stored %d findings for artifact %d (auto-revoked %d: %d by dedup_hash, %d by rule)",
+                len(db_findings), db_artifact_id, auto_count, auto_count_t1, auto_count_t2,
             )
             return len(db_findings)
 
