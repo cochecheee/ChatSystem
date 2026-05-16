@@ -16,11 +16,27 @@ function authHeaders(): Record<string, string> {
   return _token ? { Authorization: `Bearer ${_token}` } : {};
 }
 
+// V3.3 — global 401 handler. App registers a callback at mount time; any
+// fetch that sees 401 invokes it so the LoginModal can pop up without each
+// page wiring its own auth-error path.
+type AuthChallengeHandler = () => void;
+let _onAuthChallenge: AuthChallengeHandler | null = null;
+export function setAuthChallengeHandler(fn: AuthChallengeHandler | null) {
+  _onAuthChallenge = fn;
+}
+
+function handle401(status: number) {
+  if (status === 401 && _onAuthChallenge) _onAuthChallenge();
+}
+
 async function get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   const res = await fetch(url.toString(), { headers: authHeaders() });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    handle401(res.status);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -35,7 +51,10 @@ async function getWithTotal<T>(
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   const res = await fetch(url.toString(), { headers: authHeaders() });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    handle401(res.status);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   const data = (await res.json()) as T;
   const totalHeader = res.headers.get('X-Total-Count');
   const total = totalHeader ? parseInt(totalHeader, 10) : Array.isArray(data) ? data.length : 0;
@@ -49,6 +68,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
+    handle401(res.status);
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error((detail as { detail?: string }).detail ?? `${res.status} ${res.statusText}`);
   }
@@ -144,6 +164,39 @@ export const api = {
           applied: boolean;
         }[];
       }>(`/findings/triage${q.toString() ? '?' + q.toString() : ''}`);
+    },
+    aiSummary: (params: {
+      project_id?: number;
+      run_id?: number;
+      force_refresh?: boolean;
+    }) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null) q.set(k, String(v));
+      }
+      return get<{
+        project_id: number | null;
+        run_id: number | null;
+        generated_at: string;
+        cached: boolean;
+        cache_ttl_remaining: number;
+        model: string;
+        overview_md: string;
+        top_risks: {
+          severity: 'critical' | 'high' | 'medium';
+          rule_id: string;
+          file_path: string;
+          one_line_reason: string;
+          finding_id: number;
+        }[];
+        recommendations_md: string;
+        pipeline_health: {
+          runs_total: number;
+          runs_passed: number;
+          pass_rate_pct: number;
+          trend: 'improving' | 'stable' | 'degrading';
+        };
+      }>(`/findings/ai-summary${q.toString() ? '?' + q.toString() : ''}`);
     },
     gateCount: (params: { project_id?: number; run_id?: number }) => {
       const q = new URLSearchParams();

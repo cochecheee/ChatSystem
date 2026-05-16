@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import { Donut } from '../components/Charts';
+import { OverviewAiSummary } from '../components/OverviewAiSummary';
 import { Icon } from '../components/Icon';
 import type { PageId } from '../components/Shell';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
@@ -177,6 +178,11 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
           </button>
         </div>
       </div>
+
+      <OverviewAiSummary
+        projectId={project_id}
+        onOpenFinding={onOpenVuln}
+      />
 
       <div className="kpi-grid">
         {[

@@ -640,6 +640,43 @@ async def list_findings(
     return await repo.list_with_filters(skip=skip, limit=limit, **filter_kwargs)
 
 
+@router.get("/findings/ai-summary")
+async def findings_ai_summary(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    force_refresh: bool = False,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
+) -> dict:
+    """V3.3 Part B — Gemini-generated risk briefing for the Overview card.
+
+    Returns a structured response (overview / top_risks / recommendations /
+    pipeline_health) so the FE can render a multi-section card instead of
+    a paragraph blob. Cached in-memory by (project_id, run_id) for 10
+    minutes; pass `force_refresh=true` to bust the cache.
+
+    Authorization: same as other reads (V3.3 A.1/A.3). If project_id is
+    given, caller must have membership when RBAC is on.
+    """
+    from ..services.llm.summary import SummaryService
+
+    scope_ids = allowed_project_ids(user)
+    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project {project_id} not in your memberships",
+        )
+
+    svc = SummaryService()
+    result = await svc.generate(
+        session,
+        project_id=project_id,
+        run_id=run_id,
+        force_refresh=force_refresh,
+    )
+    return result.model_dump()
+
+
 @router.post("/findings/triage")
 async def triage_findings(
     project_id: int | None = None,

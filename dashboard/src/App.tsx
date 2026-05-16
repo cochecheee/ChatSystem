@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from './api/client';
+import { api, setAuthChallengeHandler } from './api/client';
 import { POLL_INTERVAL_MS } from './lib/constants';
 import { type PageId, Sidebar, Topbar } from './components/Shell';
 import { AuthProvider } from './features/auth/AuthContext';
@@ -28,6 +28,13 @@ function AppInner() {
   // Re-fetch projects whenever auth identity changes so RBAC-filtered lists
   // appear/disappear immediately on login/logout.
   useEffect(() => { void refreshProjects(); }, [user?.username, refreshProjects]);
+
+  // V3.3 — any fetch that sees a 401 will open the login modal. Stays
+  // registered for the app's lifetime; LoginModal closes itself on success.
+  useEffect(() => {
+    setAuthChallengeHandler(() => setLoginOpen(true));
+    return () => setAuthChallengeHandler(null);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
