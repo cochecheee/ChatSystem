@@ -45,7 +45,30 @@ _UPPERCASE_TO_SEVERITY: dict[str, str] = {
     "LOW": "low",
     "UNKNOWN": "info",
     "INFO": "info",
+    # Semgrep `properties.severity` variants
+    "ERROR": "high",
+    "WARNING": "medium",
+    "INFORMATIONAL": "info",
+    # CodeQL `properties["problem.severity"]` variants
+    "RECOMMENDATION": "low",
 }
+
+
+def _security_severity_to_label(score: float) -> str:
+    """Map CVSS-style numeric score (0–10) to severity bucket.
+
+    Mirrors GitHub Advanced Security thresholds:
+    https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/about-code-scanning-alerts#about-alert-severity-and-security-severity-levels
+    """
+    if score >= 9.0:
+        return "critical"
+    if score >= 7.0:
+        return "high"
+    if score >= 4.0:
+        return "medium"
+    if score > 0:
+        return "low"
+    return "info"
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +196,8 @@ class SarifNormalizer(BaseNormalizer):
     ) -> FindingCreate:
         rule_id = result.get("ruleId") or result.get("rule", {}).get("id") or "unknown-rule"
         level = (result.get("level") or "none")
-        severity = _SARIF_LEVEL_TO_SEVERITY.get(level, "info")
+        rule_def = rules_index.get(rule_id) or {}
+        severity = self._extract_severity(result, rule_def, level)
 
         msg_obj = result.get("message") or {}
         message = msg_obj.get("text") if isinstance(msg_obj, dict) else ""
@@ -182,7 +206,6 @@ class SarifNormalizer(BaseNormalizer):
             message = msg_obj.get("markdown", "") if isinstance(msg_obj, dict) else ""
 
         # Fall back to rule short description when result message is empty
-        rule_def = rules_index.get(rule_id) or {}
         if not message:
             short = rule_def.get("shortDescription") or {}
             if isinstance(short, dict):
@@ -208,6 +231,43 @@ class SarifNormalizer(BaseNormalizer):
                 "dedup_hash": dedup,
             },
         )
+
+    @staticmethod
+    def _extract_severity(
+        result: dict[str, Any],
+        rule_def: dict[str, Any],
+        level: str,
+    ) -> str:
+        """Resolve severity using rule properties before falling back to SARIF `level`.
+
+        CodeQL and Semgrep emit `level=error` for most security rules regardless
+        of actual risk; the real severity lives in rule `properties`. Order:
+          1. `security-severity` numeric (CVSS-style, GitHub-aligned thresholds)
+          2. `problem.severity` (CodeQL: error|warning|recommendation)
+          3. `properties.severity` (Semgrep: ERROR|WARNING|INFO, or CRITICAL/HIGH/...)
+          4. SARIF `level` (error|warning|note|none)
+        """
+        # Result-level properties win over rule-level (some emitters override per finding)
+        for src in (result.get("properties") or {}, rule_def.get("properties") or {}):
+            if not isinstance(src, dict):
+                continue
+            raw_score = src.get("security-severity")
+            if raw_score is not None:
+                try:
+                    return _security_severity_to_label(float(raw_score))
+                except (TypeError, ValueError):
+                    pass
+            problem_sev = src.get("problem.severity")
+            if isinstance(problem_sev, str) and problem_sev.strip():
+                mapped = _UPPERCASE_TO_SEVERITY.get(problem_sev.strip().upper())
+                if mapped:
+                    return mapped
+            prop_sev = src.get("severity")
+            if isinstance(prop_sev, str) and prop_sev.strip():
+                mapped = _UPPERCASE_TO_SEVERITY.get(prop_sev.strip().upper())
+                if mapped:
+                    return mapped
+        return _SARIF_LEVEL_TO_SEVERITY.get(level, "info")
 
     @staticmethod
     def _extract_location(result: dict[str, Any]) -> tuple[str, int | None]:

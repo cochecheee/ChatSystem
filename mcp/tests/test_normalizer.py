@@ -492,6 +492,70 @@ SARIF_SEMGREP_RELATED_LOC = json.dumps({
     }]
 })
 
+# ---------------------------------------------------------------------------
+# SarifNormalizer — severity from rule properties (CodeQL/Semgrep accuracy)
+# ---------------------------------------------------------------------------
+
+def _sarif_with_rule_props(rule_id: str, level: str, props: dict) -> str:
+    return json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "CodeQL",
+                "rules": [{"id": rule_id, "properties": props}],
+            }},
+            "results": [{
+                "ruleId": rule_id,
+                "level": level,
+                "message": {"text": "msg"},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": "f.java"},
+                    "region": {"startLine": 1},
+                }}],
+            }],
+        }],
+    })
+
+
+def test_sarif_severity_uses_security_severity_critical():
+    sarif = _sarif_with_rule_props("java/sqli", "error", {"security-severity": "9.8"})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert findings[0].severity == "critical"
+
+
+def test_sarif_severity_uses_security_severity_medium():
+    # CVSS 5.0 → medium, even though SARIF level says "error" (which would map to "high")
+    sarif = _sarif_with_rule_props("java/info-leak", "error", {"security-severity": "5.0"})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert findings[0].severity == "medium"
+
+
+def test_sarif_severity_uses_problem_severity_recommendation():
+    sarif = _sarif_with_rule_props("java/style", "warning", {"problem.severity": "recommendation"})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert findings[0].severity == "low"
+
+
+def test_sarif_severity_uses_semgrep_properties_severity():
+    sarif = _sarif_with_rule_props("py/eval", "warning", {"severity": "ERROR"})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert findings[0].severity == "high"
+
+
+def test_sarif_severity_falls_back_to_level_when_no_props():
+    # No properties → uses SARIF level
+    sarif = _sarif_with_rule_props("py/x", "note", {})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    assert findings[0].severity == "low"
+
+
+def test_sarif_severity_invalid_security_severity_falls_through():
+    sarif = _sarif_with_rule_props("py/x", "error", {"security-severity": "not-a-number"})
+    findings = SarifNormalizer().normalize(sarif, artifact_id=1)
+    # Falls back to level=error → high
+    assert findings[0].severity == "high"
+
+
 def test_sarif_semgrep_related_locations():
     findings = SarifNormalizer().normalize(SARIF_SEMGREP_RELATED_LOC, artifact_id=1)
     assert len(findings) == 1
