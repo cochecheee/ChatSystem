@@ -113,6 +113,8 @@ class SecurityProcessor:
             github_run_id, len(security_artifacts), len(all_artifacts),
         )
 
+        processed_count = 0
+        failed_count = 0
         for gh_artifact in security_artifacts:
             gh_artifact_id = str(gh_artifact["id"])
             async with self.session_factory() as session:
@@ -144,8 +146,55 @@ class SecurityProcessor:
                     session.add(db_artifact)
                     await session.commit()
                     await session.refresh(db_artifact)
+                else:
+                    # BUG-5 fix — artifact row exists but isn't 'processed'
+                    # (status='pending' or 'failed' from a crashed prior run).
+                    # Re-running _run on it would APPEND findings on top of the
+                    # half-written set, producing duplicates. Wipe its findings
+                    # first so the next pass is a clean re-ingest.
+                    from ..models.entities import Finding as FindingModel
+                    from sqlalchemy import delete as _sql_delete
+                    await session.execute(
+                        _sql_delete(FindingModel).where(
+                            FindingModel.artifact_id == db_artifact.id,
+                        )
+                    )
+                    await session.commit()
+                    log.info(
+                        "Cleaning stale findings for artifact %s (db_id=%d, status=%s) before retry",
+                        gh_artifact_id, db_artifact.id, db_artifact.status,
+                    )
 
-            await self.process_artifact(db_artifact.id, gh_artifact["id"], gh=gh)
+            # BUG-4 fix — isolate per-artifact failures. One broken zip or a
+            # normalizer crash on a single SARIF file must not stop the rest
+            # of the run. Log + count, then continue.
+            try:
+                await self.process_artifact(db_artifact.id, gh_artifact["id"], gh=gh)
+                processed_count += 1
+            except Exception as exc:
+                failed_count += 1
+                log.error(
+                    "process_run %d: artifact %s crashed — %s. Continuing with rest of run.",
+                    github_run_id, gh_artifact_id, exc,
+                )
+
+        # BUG-1 fix — webhook path also bumps last_processed_run_id so the UI
+        # and /projects API reflect the most recent ingest. Previously only
+        # the poller did this, so webhook-driven runs left the field at None.
+        # Only advance forward (never rewrite older run as latest).
+        if processed_count > 0:
+            async with self.session_factory() as session:
+                db_proj = await session.get(ProjectModel, project_id)
+                if db_proj is not None:
+                    current = db_proj.last_processed_run_id or 0
+                    if github_run_id > current:
+                        db_proj.last_processed_run_id = github_run_id
+                        await session.commit()
+
+        log.info(
+            "process_run %d done — %d processed, %d failed (out of %d security artifacts)",
+            github_run_id, processed_count, failed_count, len(security_artifacts),
+        )
 
     # ------------------------------------------------------------------
     # Internal pipeline

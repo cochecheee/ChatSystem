@@ -563,8 +563,8 @@ async def webhook_pipeline_complete(
         )
 
     processor = SecurityProcessor(session_factory=AsyncSessionLocal)
-    # B2 (future): truyền project để processor.process_run dùng
-    # per-project GitHub client. Hiện B2 chưa wire — vẫn dùng env client.
+    # processor.process_run resolves the project row itself and builds a
+    # per-project GitHubClient when credentials are set (V2.8+).
     background_tasks.add_task(processor.process_run, project.id, body.run_id)
 
     return {"status": "accepted", "run_id": body.run_id, "project_id": project.id}

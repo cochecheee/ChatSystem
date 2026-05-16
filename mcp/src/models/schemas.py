@@ -21,6 +21,7 @@ class FindingCreate(BaseModel):
 class FindingOut(BaseModel):
     id: int
     artifact_id: int
+    project_id: int | None = None  # V3.2 — provenance for the UI
     tool: str
     rule_id: str
     severity: str

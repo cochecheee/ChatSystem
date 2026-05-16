@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { POLL_INTERVAL_MS } from '../lib/constants';
-import { AreaTrend, Donut, Heatmap, Sparkline } from '../components/Charts';
+import { Donut } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import type { PageId } from '../components/Shell';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
@@ -15,15 +15,11 @@ interface Props {
   onOpenVuln?: (id: number) => void;
 }
 
-const TREND_28D = [12, 14, 11, 16, 18, 22, 19, 17, 21, 26, 24, 22, 25, 28, 31, 27, 24, 22, 19, 23, 26, 24, 21, 18, 16, 19, 22, 25];
-const FIXED_28D = [8, 10, 7, 11, 14, 12, 15, 13, 11, 17, 18, 14, 16, 12, 19, 21, 18, 15, 12, 14, 16, 17, 19, 14, 12, 16, 18, 21];
-
-const SPARKS = {
-  new:  [3, 5, 4, 7, 6, 9, 11, 8, 10, 13, 12, 14],
-  crit: [4, 5, 4, 6, 5, 7, 6, 5, 7, 6, 7, 7],
-  fix:  [2, 4, 3, 5, 7, 6, 9, 8, 11, 10, 13, 15],
-  pipe: [40, 42, 38, 45, 48, 44, 52, 50, 55, 53, 58, 60],
-};
+// V3.2 BUG-2 — KPI cards used to render hard-coded sparkline arrays which
+// looked like real history to a defense viewer. Drop them: cards now show
+// numbers only. The trend panel (Findings trend) is removed entirely below
+// because /stats has no per-day series; we'd need a new endpoint to bring
+// it back honestly.
 
 function statusClass(s: string) {
   if (s === 'success') return 'status-passed';
@@ -184,41 +180,20 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
 
       <div className="kpi-grid">
         {[
-          { label: 'Findings (latest scan)', value: loadingFindings ? '…' : total, delta: `${critHigh} critical/high`, cls: critHigh > 0 ? 'kpi-delta-up' : 'muted', spark: SPARKS.new },
-          { label: 'Critical & High', value: critHigh, delta: critHigh > 0 ? 'Needs attention' : 'All clear', cls: critHigh > 0 ? 'kpi-delta-up' : 'kpi-delta-down', spark: SPARKS.crit },
-          { label: 'AI analyzed', value: aiAnalyzed, delta: total > 0 ? `${aiAnalyzedPct}% of ${total}` : '—', cls: 'muted', spark: SPARKS.fix },
-          { label: 'Pipeline runs', value: runs.length, delta: `${passRate}% pass rate`, cls: passRate >= 80 ? 'kpi-delta-down' : 'kpi-delta-up', spark: SPARKS.pipe },
+          { label: 'Findings (latest scan)', value: loadingFindings ? '…' : total, delta: `${critHigh} critical/high`, cls: critHigh > 0 ? 'kpi-delta-up' : 'muted' },
+          { label: 'Critical & High', value: critHigh, delta: critHigh > 0 ? 'Needs attention' : 'All clear', cls: critHigh > 0 ? 'kpi-delta-up' : 'kpi-delta-down' },
+          { label: 'AI analyzed', value: aiAnalyzed, delta: total > 0 ? `${aiAnalyzedPct}% of ${total}` : '—', cls: 'muted' },
+          { label: 'Pipeline runs', value: runs.length, delta: `${passRate}% pass rate`, cls: passRate >= 80 ? 'kpi-delta-down' : 'kpi-delta-up' },
         ].map((k, i) => (
           <div className="kpi" key={i}>
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value">{k.value}</div>
             <div className="kpi-foot"><span className={k.cls}>{k.delta}</span></div>
-            <div className="spark"><Sparkline values={k.spark} /></div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <div className="h3">Findings trend</div>
-              <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>Daily, last 28 days (estimated)</div>
-            </div>
-            <div style={{ display: 'flex', gap: 12, fontSize: 11.5 }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 10, height: 2, background: 'var(--accent)', display: 'inline-block' }} /> Introduced
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--fg-3)' }}>
-                <span style={{ width: 10, borderTop: '1.5px dashed var(--fg-4)', display: 'inline-block' }} /> Resolved
-              </span>
-            </div>
-          </div>
-          <div style={{ padding: 12 }}>
-            <AreaTrend values={TREND_28D} values2={FIXED_28D} height={220} />
-          </div>
-        </div>
-
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 20 }}>
         <div className="card">
           <div className="card-header"><div className="h3">By severity</div></div>
           <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -241,20 +216,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
-        <div className="card">
-          <div className="card-header">
-            <div className="h3">Pipeline activity</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Last 4 days · hourly</div>
-          </div>
-          <div style={{ padding: 18 }}>
-            <Heatmap rows={4} cols={24} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 11, color: 'var(--fg-3)' }}>
-              <span>{runs.length} runs · {passRate}% pass</span>
-            </div>
-          </div>
-        </div>
-
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 20 }}>
         <div className="card">
           <div className="card-header">
             <div className="h3">Top rules triggered</div>

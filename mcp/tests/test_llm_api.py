@@ -18,9 +18,19 @@ SAMPLE_RESULT = AnalysisResult(
 )
 
 
+async def _auth_headers(client) -> dict[str, str]:
+    """Helper — V3.2 BUG-3 made /findings/{id}/explain require authentication."""
+    r = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "tester", "role": "admin"},
+    )
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
 @pytest.mark.asyncio
 async def test_explain_finding_404_unknown(client):
-    resp = await client.post("/findings/999999/explain")
+    h = await _auth_headers(client)
+    resp = await client.post("/findings/999999/explain", headers=h)
     assert resp.status_code == 404
 
 
@@ -66,7 +76,8 @@ async def test_explain_finding_returns_analysis(client, project):
             await session.refresh(finding)
             finding_id = finding.id
 
-        resp = await client.post(f"/findings/{finding_id}/explain")
+        h = await _auth_headers(client)
+        resp = await client.post(f"/findings/{finding_id}/explain", headers=h)
         assert resp.status_code == 200
         data = resp.json()
         assert data["severity"] == "HIGH"
@@ -112,7 +123,8 @@ async def test_explain_finding_returns_cached_if_already_analyzed(client, projec
     mock_service = AsyncMock(spec=LLMAnalysisService)
     app.dependency_overrides[get_llm_service] = lambda: mock_service
     try:
-        resp = await client.post(f"/findings/{finding_id}/explain")
+        h = await _auth_headers(client)
+        resp = await client.post(f"/findings/{finding_id}/explain", headers=h)
         assert resp.status_code == 200
         mock_service.analyze_finding.assert_not_called()
     finally:

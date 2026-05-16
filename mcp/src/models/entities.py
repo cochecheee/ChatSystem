@@ -111,6 +111,18 @@ class Finding(Base):
 
     artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="findings")
 
+    @property
+    def project_id(self) -> int | None:
+        """Pydantic FindingOut reads this for V3.2 SMELL-6 — surface the
+        finding's owning project without forcing every caller to do a
+        Finding -> Artifact -> Project join in their head. Returns None if
+        the artifact relationship isn't loaded (lazy access in async code
+        would otherwise raise MissingGreenlet)."""
+        try:
+            return self.artifact.project_id if self.artifact else None
+        except Exception:
+            return None
+
 
 class AppConfig(Base):
     """Key-value store cho dashboard runtime config.

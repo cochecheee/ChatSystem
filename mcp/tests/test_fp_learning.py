@@ -547,6 +547,171 @@ async def test_triage_batches_at_size(db):
     assert result["batches"] == 2
 
 
+# ---------------------------------------------------------------------------
+# V3.2 quality fixes — process_run resilience + last_processed_run_id
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_process_run_updates_last_processed_run_id(db):
+    """BUG-1 — process_run must bump project.last_processed_run_id (was poller-only)."""
+    from unittest.mock import AsyncMock
+    from src.models.entities import Project
+    async with db() as session:
+        p = Project(
+            name="P", github_url="https://github.com/test/p",
+            github_owner="test", github_repo="p", github_token="x",
+        )
+        session.add(p)
+        await session.commit()
+        await session.refresh(p)
+        pid = p.id
+
+    mock_gh = AsyncMock()
+    mock_gh.list_artifacts.return_value = [{"id": 555, "name": "sast-reports-1"}]
+    mock_gh.fetch_artifact.return_value = [
+        {"filename": "results.sarif", "content": json.dumps(SAMPLE_SARIF)}
+    ]
+    proc = SecurityProcessor(session_factory=db, github_client=mock_gh)
+    # Force env-bound branch (process_run only takes per-project path when
+    # project obj is passed in directly OR loaded via session.get — we want
+    # the latter so this exercises the webhook code path).
+
+    # Patch GitHubClient.for_project to return our mock so the per-project
+    # branch also uses the stub instead of hitting the real API.
+    from src.services import processor as proc_module
+    orig_for_project = proc_module.GitHubClient.for_project
+    proc_module.GitHubClient.for_project = staticmethod(lambda _p: mock_gh)
+    try:
+        await proc.process_run(pid, github_run_id=12345)
+    finally:
+        proc_module.GitHubClient.for_project = orig_for_project
+
+    async with db() as session:
+        fresh = await session.get(Project, pid)
+        assert fresh.last_processed_run_id == 12345
+
+
+@pytest.mark.asyncio
+async def test_process_run_isolates_per_artifact_failure(db):
+    """BUG-4 — one bad artifact must not stop the rest of the run."""
+    from unittest.mock import AsyncMock
+    from src.models.entities import Project
+    async with db() as session:
+        p = Project(
+            name="P", github_url="https://github.com/test/p",
+            github_owner="test", github_repo="p", github_token="x",
+        )
+        session.add(p)
+        await session.commit()
+        await session.refresh(p)
+        pid = p.id
+
+    mock_gh = AsyncMock()
+    mock_gh.list_artifacts.return_value = [
+        {"id": 100, "name": "sast-reports-bad"},
+        {"id": 200, "name": "sast-reports-good"},
+    ]
+
+    async def fetch_side_effect(gh_id):
+        if gh_id == 100:
+            raise RuntimeError("zip corrupt")
+        return [{"filename": "results.sarif", "content": json.dumps(SAMPLE_SARIF)}]
+    mock_gh.fetch_artifact.side_effect = fetch_side_effect
+
+    proc = SecurityProcessor(session_factory=db, github_client=mock_gh)
+    from src.services import processor as proc_module
+    orig_for_project = proc_module.GitHubClient.for_project
+    proc_module.GitHubClient.for_project = staticmethod(lambda _p: mock_gh)
+    try:
+        # Should NOT raise — exception on artifact 100 isolated
+        await proc.process_run(pid, github_run_id=99)
+    finally:
+        proc_module.GitHubClient.for_project = orig_for_project
+
+    async with db() as session:
+        # 1 finding from artifact 200 still made it in
+        findings = (await session.execute(select(Finding))).scalars().all()
+        assert len(findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_process_run_no_duplicates_on_reingest(db):
+    """BUG-5 — re-firing webhook on a 'pending' artifact must NOT append duplicate findings."""
+    from unittest.mock import AsyncMock
+    from src.models.entities import Artifact, Project
+    async with db() as session:
+        p = Project(
+            name="P", github_url="https://github.com/test/p",
+            github_owner="test", github_repo="p", github_token="x",
+        )
+        session.add(p)
+        await session.commit()
+        await session.refresh(p)
+        pid = p.id
+        # Seed a half-processed artifact with 1 existing finding (left over
+        # from a prior crashed run). Status = 'pending', not 'processed'.
+        art = Artifact(
+            github_artifact_id="777",
+            project_id=pid,
+            github_run_id=42,
+            status="pending",
+        )
+        session.add(art)
+        await session.commit()
+        await session.refresh(art)
+        session.add(Finding(
+            artifact_id=art.id, tool="semgrep", rule_id="stale",
+            severity="high", message="leftover", file_path="x.py",
+            status="pending_review", dedup_hash="stale-hash",
+        ))
+        await session.commit()
+
+    mock_gh = AsyncMock()
+    mock_gh.list_artifacts.return_value = [{"id": 777, "name": "sast-reports-1"}]
+    mock_gh.fetch_artifact.return_value = [
+        {"filename": "results.sarif", "content": json.dumps(SAMPLE_SARIF)}
+    ]
+
+    proc = SecurityProcessor(session_factory=db, github_client=mock_gh)
+    from src.services import processor as proc_module
+    orig_for_project = proc_module.GitHubClient.for_project
+    proc_module.GitHubClient.for_project = staticmethod(lambda _p: mock_gh)
+    try:
+        await proc.process_run(pid, github_run_id=42)
+    finally:
+        proc_module.GitHubClient.for_project = orig_for_project
+
+    async with db() as session:
+        findings = (await session.execute(select(Finding))).scalars().all()
+        # Old 'stale' wiped, only the 1 fresh finding from SAMPLE_SARIF remains
+        assert len(findings) == 1
+        assert findings[0].rule_id != "stale"
+
+
+@pytest.mark.asyncio
+async def test_finding_response_includes_project_id(client, db_session):
+    """V3.2 SMELL-6 — FindingOut surfaces project_id via Artifact relationship."""
+    p = Project(name="P", github_url="https://github.com/test/proj-id")
+    db_session.add(p)
+    await db_session.flush()
+    a = Artifact(github_artifact_id="x", project_id=p.id, status="processed")
+    db_session.add(a)
+    await db_session.flush()
+    db_session.add(Finding(
+        artifact_id=a.id, tool="t", rule_id="r", severity="high",
+        message="m", file_path="x.py", status="pending_review",
+        dedup_hash="prov-test",
+    ))
+    await db_session.commit()
+
+    listed = (await client.get(f"/findings?project_id={p.id}")).json()
+    assert len(listed) == 1
+    assert listed[0]["project_id"] == p.id
+
+    one = (await client.get(f"/findings/{listed[0]['id']}")).json()
+    assert one["project_id"] == p.id
+
+
 @pytest.mark.asyncio
 async def test_suppression_severity_max_caps(db):
     """severity_max=medium means high/critical findings are NOT auto-revoked."""

@@ -9,6 +9,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.auth import User, enforce_finding_project_access, get_current_user
 from ..core.db import get_session
 from ..models.entities import Finding
 from ..models.schemas import AnalysisResult
@@ -31,11 +32,21 @@ async def explain_finding(
     finding_id: int,
     session: AsyncSession = Depends(get_session),
     service: LLMAnalysisService = Depends(get_llm_service),
+    current: User = Depends(get_current_user),
 ) -> AnalysisResult:
-    """Gọi Gemini AI phân tích finding và trả về giải thích tiếng Việt + remediation diff."""
+    """Gọi Gemini AI phân tích finding và trả về giải thích tiếng Việt + remediation diff.
+
+    V3.2 — Requires authentication. When RBAC_PER_PROJECT is on, the caller
+    must have at least `developer` membership on the finding's project
+    (admins always bypass).
+    """
     finding = await session.get(Finding, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
+
+    await enforce_finding_project_access(
+        finding.id, current, session, min_role="developer",
+    )
 
     if finding.status == "ai_analyzed" and finding.ai_analysis:
         return AnalysisResult(**finding.ai_analysis)

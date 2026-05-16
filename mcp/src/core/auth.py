@@ -118,3 +118,54 @@ def require_project_access(min_role: str = "viewer"):
         return current
 
     return _dep
+
+
+async def enforce_finding_project_access(
+    finding_id: int,
+    user: User,
+    session: AsyncSession,
+    *,
+    min_role: str = "developer",
+) -> None:
+    """V3.0 RBAC for finding-scoped actions (approve/revoke/explain).
+
+    The `require_project_access` dep can only resolve project_id from path/query
+    params, but findings are addressed by finding_id and we have to traverse
+    Finding -> Artifact -> Project to find the project. This helper does that
+    lookup + role check inline so each finding-action endpoint can call it.
+
+    Kill-switch: settings.RBAC_PER_PROJECT=false → no-op.
+    Global admin always bypasses.
+    """
+    if not settings.RBAC_PER_PROJECT:
+        return
+    if user.role == "admin":
+        return
+
+    from ..models.entities import Artifact, Finding
+    from ..repositories import ProjectMemberRepository, role_satisfies
+
+    finding = await session.get(Finding, finding_id)
+    if finding is None:
+        return  # caller will 404 separately; we just don't gate non-existent rows
+    artifact = await session.get(Artifact, finding.artifact_id)
+    if artifact is None:
+        return
+    project_id = artifact.project_id
+
+    actual_role: str | None
+    if user.memberships is not None:
+        actual_role = user.memberships.get(project_id)
+    else:
+        actual_role = await ProjectMemberRepository(session).get_role(
+            project_id, user.username,
+        )
+
+    if actual_role is None or not role_satisfies(actual_role, min_role):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"User '{user.username}' lacks '{min_role}' on project {project_id} "
+                f"(finding {finding_id} belongs to that project)"
+            ),
+        )

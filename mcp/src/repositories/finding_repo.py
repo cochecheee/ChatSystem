@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy import delete, func as sql_func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models.entities import Artifact, Finding
 
@@ -28,7 +29,13 @@ class FindingRepository:
         self.session = session
 
     async def get(self, finding_id: int) -> Finding | None:
-        return await self.session.get(Finding, finding_id)
+        # Eager-load Artifact so callers can read project_id without async re-fetch.
+        result = await self.session.execute(
+            select(Finding)
+            .options(selectinload(Finding.artifact))
+            .where(Finding.id == finding_id)
+        )
+        return result.scalar_one_or_none()
 
     async def list_with_filters(
         self,
@@ -45,7 +52,9 @@ class FindingRepository:
         limit: int = 50,
     ) -> list[Finding]:
         """List findings với filter mở rộng + pagination."""
-        query = select(Finding).join(Artifact)
+        # V3.2 SMELL-6: eager-load Artifact so FindingOut.project_id resolves
+        # without triggering an async lazy load during serialization.
+        query = select(Finding).join(Artifact).options(selectinload(Finding.artifact))
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
         if run_id is not None:

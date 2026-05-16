@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.auth import User
+from ..core.auth import User, enforce_finding_project_access
 from ..core.config import settings
 from ..models.entities import Artifact, CommandFeedback, Finding
 from ..models.schemas import CommandRequest, CommandResponse
@@ -131,6 +131,10 @@ class CommandService:
         db: AsyncSession,
     ) -> CommandResponse:
         finding = await self._get_finding(request.finding_id, db)
+        # V3.2 BUG-3 — per-project RBAC for approve action
+        await enforce_finding_project_access(
+            finding.id, user, db, min_role="security_lead",
+        )
 
         if finding.status == "APPROVED":
             raise HTTPException(status_code=409, detail="Finding này đã được phê duyệt rồi.")
@@ -173,6 +177,10 @@ class CommandService:
         db: AsyncSession,
     ) -> CommandResponse:
         finding = await self._get_finding(request.finding_id, db)
+        # V3.2 BUG-3 — per-project RBAC for revoke action
+        await enforce_finding_project_access(
+            finding.id, user, db, min_role="security_lead",
+        )
 
         if finding.status == "REVOKED":
             raise HTTPException(status_code=409, detail="Finding này đã bị thu hồi rồi.")
