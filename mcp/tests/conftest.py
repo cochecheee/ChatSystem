@@ -11,6 +11,11 @@ os.environ["APP_ENV"] = "testing"
 os.environ["MULTI_TENANT_ENABLED"] = "false"
 os.environ["RBAC_PER_PROJECT"] = "false"
 os.environ["FERNET_KEY"] = ""        # tests assume plaintext at-rest
+# V3.6 — disable Alembic upgrade in tests. Base.metadata.create_all() in
+# init_db() builds the full current schema from models; running Alembic
+# in addition would error because the test in-memory DB has no
+# alembic_version row and migrations expect to ALTER existing tables.
+os.environ["SKIP_ALEMBIC"] = "1"
 # V3.3 — keep reads open in tests by default so existing test suites don't
 # need to bolt on auth headers. Tests that exercise the V3.3 gate flip this
 # setting locally via patch().

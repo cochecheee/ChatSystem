@@ -27,10 +27,21 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     github_url: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC))
+    # V3.6 — soft delete. archived_at IS NOT NULL hides project from default
+    # listings but preserves findings/runs for audit. Reactivate via API.
+    archived_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
     # GitHub workflow run IDs are 64-bit (~25B as of 2026). On Postgres,
     # SQLAlchemy Integer = INT4 (max 2.1B) → "integer out of range" on insert.
     # SQLite hid this because it stores integers dynamically up to 64-bit.
     last_processed_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # V3.6 — per-project gate policy. CI gate (/findings/gate-count) reads
+    # these thresholds and decides pass/fail. Default = 0 critical / 5 high
+    # matches the sast-action defaults so behavior is identical until an
+    # owner edits them. Lifting threshold = team accepts more risk; an audit
+    # log row is written on every change.
+    gate_critical_threshold: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    gate_high_threshold: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
 
     # Multi-tenant config (Day 2). One chat-system instance can serve N
     # repos — each row carries the GitHub creds + AI key + polling and
@@ -83,12 +94,21 @@ class Artifact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     github_artifact_id: Mapped[str] = mapped_column(String(255), nullable=False)
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
+    # V3.6 — first-class PipelineRun. Existing rows keep `github_run_id` as a
+    # denormalized cache (still indexed for fast lookup), but new code paths
+    # SHOULD prefer `run_id` (FK) so they pull metadata transparently. The
+    # migration backfills run_id from (project_id, github_run_id) groups.
     github_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    run_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("pipeline_runs.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     status: Mapped[str] = mapped_column(String(20), default=ArtifactStatus.pending.value, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DT_TZ, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     project: Mapped["Project"] = relationship("Project", back_populates="artifacts")
+    run: Mapped["PipelineRun | None"] = relationship("PipelineRun", back_populates="artifacts")
     findings: Mapped[list["Finding"]] = relationship("Finding", back_populates="artifact")
 
 
@@ -257,6 +277,135 @@ class SuppressionRule(Base):
         DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
     )
     expires_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
+
+
+class PipelineRun(Base):
+    """V3.6 — A workflow run is a first-class entity.
+
+    One GitHub Actions workflow run = one row. Captured at webhook time with
+    full metadata (branch, sha, actor, conclusion, timing). Artifacts FK in
+    via `run_id`. Findings inherit the run via Finding -> Artifact -> Run.
+
+    Why first-class instead of a denormalized `github_run_id` column:
+      - Pipelines page can show real history offline (no live GitHub API)
+      - Run-over-run diff: which findings were introduced/fixed
+      - Trend charts: pass rate / severity over time
+      - Per-run AI summary cache key
+      - Audit: who triggered this run, when, what conclusion
+
+    Unique key is (project_id, github_run_id) so the same GitHub run id can
+    coexist across projects (one repo per project but defense in depth).
+    """
+
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=False, index=True,
+    )
+    # 64-bit because GitHub run IDs already exceed INT4 max (~2.1B). See the
+    # Artifact.github_run_id comment for the same constraint history.
+    github_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    github_run_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workflow_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    head_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    actor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # GitHub workflow event — "push" | "pull_request" | "workflow_dispatch" | ...
+    event: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # GitHub status — "queued" | "in_progress" | "completed"
+    status: Mapped[str] = mapped_column(String(50), default="completed", nullable=False)
+    # GitHub conclusion — "success" | "failure" | "cancelled" | "timed_out" | "skipped" | None
+    conclusion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
+    github_run_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC), nullable=False,
+    )
+
+    artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="run")
+
+    # Composite unique to dedup webhook retries / multi-tenant overlaps.
+    from sqlalchemy import UniqueConstraint
+    __table_args__ = (
+        UniqueConstraint("project_id", "github_run_id", name="uq_pipeline_runs_project_github"),
+    )
+
+
+class WebhookDelivery(Base):
+    """V3.6 — append-only log of incoming webhook deliveries for dedup + audit.
+
+    GitHub Actions issues `X-GitHub-Delivery: <uuid>` on every webhook (or
+    the sast-action composite synthesizes one). When the same delivery
+    arrives twice (network glitch, GitHub retry, replay attack), we look it
+    up here BEFORE running process_run — if already seen, return 200 OK and
+    skip the work. Without this, every retry causes a second ingest cycle
+    that explodes the findings count via re-normalization.
+
+    The body_sha256 column lets us also detect tampering: if the same
+    delivery id arrives with a different body hash, log + reject.
+    """
+
+    __tablename__ = "webhook_deliveries"
+
+    # Use the delivery UUID as PK so duplicate inserts fail fast.
+    delivery_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=True, index=True,
+    )
+    github_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    )
+    body_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # "accepted" | "duplicate" | "rejected_signature" | "rejected_unknown_project"
+    outcome: Mapped[str] = mapped_column(String(40), default="accepted", nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AuditLog(Base):
+    """V3.6 — append-only audit trail.
+
+    Distinct from finding.{approved_by, revoked_by} fields because:
+      - those fields disappear when the finding row is deleted
+      - they capture only the LAST action; a re-approve / un-revoke wipes
+        the previous decision
+
+    Every privileged action writes a row here: project create/archive,
+    member add/remove, gate threshold change, finding approve/revoke,
+    suppression rule create, webhook token rotate. Read-only history view
+    in the UI's Settings tab.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # "approve" | "revoke" | "create_project" | "archive_project" |
+    # "add_member" | "remove_member" | "rotate_webhook_token" |
+    # "set_gate_threshold" | "create_suppression" | "delete_suppression"
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # Optional scoping fields. project_id always set for project-scoped
+    # actions; target_kind/target_id identify the row touched (e.g.
+    # target_kind="finding", target_id=42).
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    target_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Free-form JSON for before/after snapshots or extra context. Examples:
+    #   {"justification": "..."}                    -- approve/revoke
+    #   {"old": 0, "new": 2}                        -- gate threshold change
+    #   {"username": "alice", "role": "owner"}      -- member add
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False, index=True,
+    )
 
 
 class Alert(Base):

@@ -46,6 +46,17 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_schema)
 
+    # V3.6 — also run pending Alembic migrations. Idempotent: alembic stamps
+    # the DB after each upgrade, so on subsequent boots this returns
+    # immediately. Disabled in tests (SKIP_ALEMBIC=1) since the test suite
+    # uses in-memory SQLite that's recreated per-test and Base.metadata.
+    # create_all() above already covers the schema.
+    if os.environ.get("SKIP_ALEMBIC") != "1":
+        try:
+            await _run_alembic_upgrade()
+        except Exception:  # noqa: BLE001
+            log.exception("Alembic upgrade failed — continuing without migration")
+
 
 def _pg_column_data_type(sync_conn, table: str, column: str) -> str | None:
     """Return the canonical Postgres `data_type` for a column, or None if
@@ -128,6 +139,40 @@ def _migrate_schema(sync_conn) -> None:
         # project rotates one in.
         ("webhook_token", "VARCHAR(500) NOT NULL DEFAULT ''"),
     ])
+
+
+async def _run_alembic_upgrade() -> None:
+    """Apply pending Alembic migrations programmatically.
+
+    Run inside `init_db()` so a fresh container `docker run` brings the
+    schema up to date before serving requests. The Alembic config file
+    lives at `mcp/alembic.ini`; env.py wires it to the same DATABASE_URL.
+
+    For new DBs where `create_all()` already produced the current schema,
+    `alembic upgrade head` is a no-op (the version table is created and
+    stamped). On older DBs with pre-V3.6 schema, it adds new tables /
+    columns and backfills pipeline_runs.
+    """
+    import asyncio
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    repo_root = Path(__file__).resolve().parents[2]
+    ini_path = repo_root / "alembic.ini"
+    if not ini_path.exists():
+        log.warning("alembic.ini not found at %s — skipping", ini_path)
+        return
+
+    def _run() -> None:
+        cfg = Config(str(ini_path))
+        command.upgrade(cfg, "head")
+
+    # Alembic command.upgrade is sync — push to a worker thread so the
+    # event loop stays responsive while migrations apply.
+    await asyncio.to_thread(_run)
+    log.info("Alembic upgrade head completed")
 
 
 async def get_session() -> AsyncSession:
