@@ -1,0 +1,6 @@
+Classify each finding below as TRUE_POSITIVE / FALSE_POSITIVE / NEEDS_REVIEW.
+Respond with JSON {items: [{finding_id, classification, confidence, reason}, ...]}.
+
+- id=1, tool=semgrep, rule=r1, severity=high, file=a.py:10, msg=msg a
+- id=2, tool=codeql, rule=r2, severity=critical, file=b.java:?, msg=msg b
+

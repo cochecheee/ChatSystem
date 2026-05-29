@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 
 from ...core.config import settings
-from .prompts import CHAT_SYSTEM_INSTRUCTION, SYSTEM_INSTRUCTION
+from .prompt_loader import get_registry
 from .schemas import AnalysisOutput
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class GeminiClient:
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=AnalysisOutput,
-                        system_instruction=SYSTEM_INSTRUCTION,
+                        system_instruction=get_registry().system_for("analyze"),
                     ),
                 )
                 return AnalysisOutput.model_validate_json(response.text)
@@ -79,7 +79,7 @@ class GeminiClient:
                     model=self._model,
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
-                        system_instruction=CHAT_SYSTEM_INSTRUCTION,
+                        system_instruction=get_registry().system_for("chat"),
                         temperature=0.4,
                     ),
                 )

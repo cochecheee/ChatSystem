@@ -1,47 +1,40 @@
-CHAT_SYSTEM_INSTRUCTION = """
-Bạn là Sentinel AI — trợ lý bảo mật trong hệ thống MCP Gateway.
-Trả lời ngắn gọn, dùng tiếng Việt, văn phong thân thiện.
+"""Backward-compat shim. Prompts live in `mcp/prompts/v1/` since 2026-05-28.
 
-Bạn có thể giúp người dùng:
-- Hiểu một finding cụ thể (gợi ý họ dùng /explain [id])
-- Phê duyệt false-positive (/approve [id]) hoặc thu hồi (/revoke [id])
-- Kích hoạt quét (/scan), re-run workflow (/rerun [run_id])
-- Xuất báo cáo HTML (/report)
+Old imports still resolve to the same strings via the registry, so:
 
-Khi câu hỏi liên quan đến một finding cụ thể nhưng người dùng chưa nêu ID,
-hãy gợi ý họ vào trang Vulnerabilities để chọn finding rồi quay lại.
+    from src.services.llm.prompts import SYSTEM_INSTRUCTION, build_prompt
 
-Không bịa CVE/CVSS. Nếu không chắc, nói rõ "không có thông tin".
-""".strip()
+keeps working. New code should call `get_registry().render(...)` or
+`get_registry().system_for(...)` directly — see prompt_loader.py.
 
-SYSTEM_INSTRUCTION = """
-Bạn là Chuyên gia Bảo mật Ứng dụng cao cấp với hơn 10 năm kinh nghiệm phân tích lỗ hổng bảo mật phần mềm.
-Nhiệm vụ: Phân tích kết quả từ công cụ SAST và đề xuất cách khắc phục chi tiết.
-Ngôn ngữ phản hồi: Tiếng Việt (bắt buộc cho tất cả các trường explanation_vi, impact_vi).
-Quy tắc:
-1. Giải thích lỗ hổng dựa trên logic mã nguồn được cung cấp, không phỏng đoán chung chung.
-2. Đề xuất mã sửa lỗi dưới dạng Unified Diff — chỉ thay đổi những gì cần thiết.
-3. Không đề xuất xóa toàn bộ logic nghiệp vụ để "an toàn hơn".
-4. Đánh giá confidence: HIGH nếu có đủ context code, LOW nếu thiếu context.
-5. Không tiết lộ thông tin nhạy cảm trong phản hồi.
-""".strip()
+When all callers are migrated, delete this module.
+"""
+from __future__ import annotations
 
-USER_PROMPT_TEMPLATE = """
-### Thông tin lỗ hổng từ SAST
-- Công cụ: {tool_name}
-- Rule ID: {rule_id}
-- Mô tả: {message}
-- File: {file_path}, dòng {line_number}
-- CWE: {cwe_id}
-- CVSS Score: {cvss_score}
+from .prompt_loader import get_registry
 
-### Mã nguồn ngữ cảnh
-```
-{code_context}
-```
 
-Hãy phân tích lỗ hổng trên và trả về kết quả theo JSON schema đã định nghĩa.
-""".strip()
+def _system(prompt_id: str) -> str:
+    return get_registry().system_for(prompt_id).rstrip()
+
+
+# Module-level attribute access wires backward-compat names to the registry.
+# Lazy: a single import doesn't pay the cost unless one of the old names is read.
+def __getattr__(name: str) -> str:
+    if name == "SYSTEM_INSTRUCTION":
+        return _system("analyze")
+    if name == "CHAT_SYSTEM_INSTRUCTION":
+        return _system("chat")
+    if name == "USER_PROMPT_TEMPLATE":
+        # Legacy: a Python str.format template. New code passes vars to render().
+        # We can't faithfully reconstruct {field} syntax from the Jinja file
+        # without losing alignment, so callers reading this directly must move
+        # to get_registry().render("analyze", **vars).user.
+        raise AttributeError(
+            "USER_PROMPT_TEMPLATE removed — use "
+            "get_registry().render('analyze', **vars).user instead"
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_prompt(
@@ -54,13 +47,19 @@ def build_prompt(
     cvss_score: float | None,
     code_context: str,
 ) -> str:
-    return USER_PROMPT_TEMPLATE.format(
+    """Legacy entry point — kept so old imports don't break.
+
+    New code should call:
+        get_registry().render("analyze", tool_name=..., rule_id=..., ...).user
+    """
+    return get_registry().render(
+        "analyze",
         tool_name=tool_name,
         rule_id=rule_id,
         message=message,
         file_path=file_path,
-        line_number=line_number or "N/A",
-        cwe_id=cwe_id or "N/A",
-        cvss_score=cvss_score or "N/A",
-        code_context=code_context or "(không có context)",
-    )
+        line_number=line_number,
+        cwe_id=cwe_id,
+        cvss_score=cvss_score,
+        code_context=code_context,
+    ).user or ""

@@ -1,0 +1,11 @@
+Project: ALOUTE
+
+ACTIVE counts (used for all narrative numbers):
+  total active = 184 (12 đã revoke từ tổng 196)
+  critical = 8, high = 23, medium = 50
+  AI-analyzed = 100
+
+Top active findings (id, severity, rule, file, message):
+- id=1, critical, CVE-2022-1471, snakeyaml, "Yaml deserialization RCE"
+- id=2, high, java/ssrf, Foo.java, "SSRF via user URL"
+

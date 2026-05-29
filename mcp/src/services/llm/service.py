@@ -11,7 +11,7 @@ from ...models.schemas import AnalysisResult
 from ..github_client import GitHubClient
 from ...core.guardrails import InjectionGuardrail, ScrubbingService
 from .client import GeminiClient
-from .prompts import build_prompt
+from .prompt_loader import get_registry
 from .schemas import AnalysisOutput
 
 log = logging.getLogger(__name__)
@@ -132,7 +132,8 @@ class LLMAnalysisService:
             )
             raise ValueError("Finding content rejected by injection guardrail")
 
-        prompt = build_prompt(
+        rendered = get_registry().render(
+            "analyze",
             tool_name=finding.tool,
             rule_id=finding.rule_id,
             message=self._guardrail.sanitize(finding.message or ""),
@@ -142,6 +143,7 @@ class LLMAnalysisService:
             cvss_score=finding.cvss_score,
             code_context=self._guardrail.sanitize(code_context),
         )
+        prompt = rendered.user or ""
 
         output: AnalysisOutput = await gemini.analyze(prompt)
 

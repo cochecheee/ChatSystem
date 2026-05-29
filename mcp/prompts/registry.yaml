@@ -1,0 +1,50 @@
+# Prompt registry — manifest of every system + user prompt the MCP backend
+# sends to Gemini. One YAML root, one entry per prompt id. The runtime loader
+# (src/services/llm/prompt_loader.py) reads system files as plain markdown
+# (with optional YAML frontmatter that overrides these defaults) and user
+# files as Jinja2 templates.
+#
+# Adding a prompt:
+#   1. Drop the system file under prompts/v1/<id>.system.md
+#   2. Drop the user template under prompts/v1/<id>.user.j2 (optional;
+#      omit when the LLM is called with bare context, e.g. analyze chat).
+#   3. Register it here with the same id.
+#   4. Run pytest -k prompts — snapshot tests guard accidental drift.
+#
+# Versioning: bump folder to v2/ when prompts change semantically. Keep v1/
+# around for the deprecation window so older deployed clients can still
+# render against the prompts they trained against.
+
+version: v1
+
+prompts:
+  analyze:
+    description: Single-finding vulnerability explanation + remediation diff (Vietnamese).
+    system: analyze.system.md
+    user: analyze.user.j2
+    response_schema: AnalysisOutput     # src/services/llm/schemas.py
+    temperature: null                   # let Gemini default
+    notes: Used by /findings/{id}/explain and /api/chat/command /explain.
+
+  chat:
+    description: Free-form Sentinel chat assistant for the dashboard chat tab.
+    system: chat.system.md
+    user: null                          # caller passes prompt directly
+    response_schema: null               # plain text
+    temperature: 0.4
+
+  triage:
+    description: Batch FP triage — classify many findings in one call.
+    system: triage.system.md
+    user: triage.user.j2
+    response_schema: TriageBatch        # src/services/llm/triage.py
+    temperature: null
+    notes: BATCH_SIZE 20 findings/call. Confidence threshold applied by service.
+
+  summary:
+    description: Overview risk briefing card (overview + top risks + recommendations).
+    system: summary.system.md
+    user: summary.user.j2
+    response_schema: AiSummaryOutput    # src/services/llm/summary.py
+    temperature: null
+    notes: Cached 10 min per (project_id, run_id).

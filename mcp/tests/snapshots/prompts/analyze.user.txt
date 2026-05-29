@@ -1,0 +1,14 @@
+### Thông tin lỗ hổng từ SAST
+- Công cụ: semgrep
+- Rule ID: java/path-injection
+- Mô tả: Path traversal via user input
+- File: src/main/java/Foo.java, dòng 42
+- CWE: CWE-22
+- CVSS Score: 7.5
+
+### Mã nguồn ngữ cảnh
+```
+42 | File f = new File(req.getParameter("x"));
+```
+
+Hãy phân tích lỗ hổng trên và trả về kết quả theo JSON schema đã định nghĩa.

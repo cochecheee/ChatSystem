@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.entities import Artifact, Finding, Project
 from ...repositories import FindingRepository
 from .client import GeminiClient
+from .prompt_loader import get_registry
 from .service import LLMAnalysisService
 
 log = logging.getLogger(__name__)
@@ -96,32 +97,6 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-SUMMARY_SYSTEM_INSTRUCTION = """\
-You are a senior application security analyst writing a 30-second briefing
-for a tech lead. Output JSON matching the schema.
-
-Rules:
-- Vietnamese language for all narrative fields.
-- overview_md: 2-3 sentences. MUST cite exact numbers from the stats input.
-  Use the ACTIVE numbers (total active, active critical, active high) as
-  the primary signal — these reflect what still needs work. Mention the
-  total/revoked split only if revoked count is nontrivial (e.g., > 5),
-  framed as triage progress ("đã revoke X FP"). Use **bold** around key
-  numbers.
-- top_risks: pick 3-5 from the input list. The input has already been
-  deduplicated by vulnerability family — pick the DIVERSE highest-impact
-  ones, NOT 5 variants of the same CVE/library/file. one_line_reason in
-  Vietnamese, <=20 words, MUST cite the actual vulnerability mechanism
-  (e.g., "SSRF qua user-supplied URL", "snakeyaml DoS chưa fix"), NOT
-  just "security issue".
-- recommendations_md: numbered list 1-3 items, start each with a verb
-  ("Fix", "Upgrade", "Triage", "Review"), tie to specific finding counts
-  from the input. Format as markdown "1. Fix...\n2. ...".
-- DO NOT generate pipeline_health — that's computed by the backend.
-
-Be terse. No filler. No marketing tone."""
-
-
 async def _call_gemini_summary(client: GeminiClient, prompt: str) -> AiSummaryOutput:
     """One Gemini call returning structured AiSummaryOutput."""
     from google.genai import types
@@ -133,7 +108,7 @@ async def _call_gemini_summary(client: GeminiClient, prompt: str) -> AiSummaryOu
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=AiSummaryOutput,
-            system_instruction=SUMMARY_SYSTEM_INSTRUCTION,
+            system_instruction=get_registry().system_for("summary"),
         ),
     )
     return AiSummaryOutput.model_validate_json(response.text)
@@ -303,27 +278,13 @@ class SummaryService:
         }
 
     def _build_prompt(self, project_name: str, inputs: dict) -> str:
-        s = inputs["stats"]
-        top = inputs["top_findings"]
-        # V3.4 BUG-2 — emphasize ACTIVE counts; mention revoked only when
-        # the kill rate is nontrivial so Gemini can show the triage progress.
-        revoked_clause = (
-            f" ({s['revoked']} đã revoke từ tổng {s['total']})"
-            if s.get("revoked", 0) > 0 else ""
+        rendered = get_registry().render(
+            "summary",
+            project_name=project_name,
+            stats=inputs["stats"],
+            top_findings=inputs["top_findings"],
         )
-        return (
-            f"Project: {project_name}\n\n"
-            f"ACTIVE counts (used for all narrative numbers):\n"
-            f"  total active = {s['active']}{revoked_clause}\n"
-            f"  critical = {s['critical']}, high = {s['high']}, medium = {s['medium']}\n"
-            f"  AI-analyzed = {s['ai_analyzed']}\n\n"
-            f"Top active findings (id, severity, rule, file, message):\n"
-            + "\n".join(
-                f"- id={f['id']}, {f['severity']}, {f['rule_id']}, {f['file_path']}, "
-                f"\"{f['message']}\""
-                for f in top
-            )
-        )
+        return rendered.user or ""
 
     async def generate(
         self,

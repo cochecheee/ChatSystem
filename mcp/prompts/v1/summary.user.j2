@@ -1,0 +1,11 @@
+Project: {{ project_name }}
+
+ACTIVE counts (used for all narrative numbers):
+  total active = {{ stats.active }}{% if stats.revoked > 0 %} ({{ stats.revoked }} đã revoke từ tổng {{ stats.total }}){% endif %}
+  critical = {{ stats.critical }}, high = {{ stats.high }}, medium = {{ stats.medium }}
+  AI-analyzed = {{ stats.ai_analyzed }}
+
+Top active findings (id, severity, rule, file, message):
+{% for f in top_findings -%}
+- id={{ f.id }}, {{ f.severity }}, {{ f.rule_id }}, {{ f.file_path }}, "{{ f.message }}"
+{% endfor %}

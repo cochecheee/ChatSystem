@@ -17,22 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.entities import Finding
 from .client import GeminiClient
+from .prompt_loader import get_registry
 from .service import LLMAnalysisService
 
 log = logging.getLogger(__name__)
-
-
-TRIAGE_SYSTEM_INSTRUCTION = """\
-You are a senior application-security engineer triaging SAST/SCA findings.
-For each finding below, classify it as one of:
-- TRUE_POSITIVE   — a real vulnerability that must be fixed
-- FALSE_POSITIVE  — tool noise, can be safely suppressed
-- NEEDS_REVIEW    — cannot decide from this context alone
-
-Be conservative: prefer NEEDS_REVIEW over a confident FALSE_POSITIVE when
-the finding's exploitability depends on data flow you can't see. Confidence
-1.0 means "100% sure", 0.5 means "coin flip". Return reason as one short
-Vietnamese sentence."""
 
 
 class TriageItem(BaseModel):
@@ -46,31 +34,19 @@ class TriageBatch(BaseModel):
     items: list[TriageItem]
 
 
-def _finding_to_prompt_line(f: Finding) -> str:
-    return (
-        f"- id={f.id}, tool={f.tool}, rule={f.rule_id}, "
-        f"severity={f.severity}, file={f.file_path}:{f.line_number or '?'}, "
-        f"msg={(f.message or '')[:300]}"
-    )
-
-
 async def _run_triage_call(client: GeminiClient, findings: list[Finding]) -> TriageBatch:
     """One Gemini call for up to BATCH_SIZE findings — returns structured output."""
     from google.genai import types
 
-    prompt = (
-        "Classify each finding below as TRUE_POSITIVE / FALSE_POSITIVE / NEEDS_REVIEW.\n"
-        "Respond with JSON {items: [{finding_id, classification, confidence, reason}, ...]}.\n\n"
-        + "\n".join(_finding_to_prompt_line(f) for f in findings)
-    )
+    rendered = get_registry().render("triage", findings=findings)
     response = await asyncio.to_thread(
         client._client.models.generate_content,
         model=client._model,
-        contents=prompt,
+        contents=rendered.user,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=TriageBatch,
-            system_instruction=TRIAGE_SYSTEM_INSTRUCTION,
+            system_instruction=rendered.system,
         ),
     )
     return TriageBatch.model_validate_json(response.text)

@@ -1,0 +1,14 @@
+### Thông tin lỗ hổng từ SAST
+- Công cụ: {{ tool_name }}
+- Rule ID: {{ rule_id }}
+- Mô tả: {{ message }}
+- File: {{ file_path }}, dòng {{ line_number or "N/A" }}
+- CWE: {{ cwe_id or "N/A" }}
+- CVSS Score: {{ cvss_score or "N/A" }}
+
+### Mã nguồn ngữ cảnh
+```
+{{ code_context or "(không có context)" }}
+```
+
+Hãy phân tích lỗ hổng trên và trả về kết quả theo JSON schema đã định nghĩa.
