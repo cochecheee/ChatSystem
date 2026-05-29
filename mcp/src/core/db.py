@@ -10,12 +10,28 @@ log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
-    pass
+    # MySQL CREATE TABLE dùng utf8mb4 + utf8mb4_unicode_ci (XAMPP MariaDB
+    # 10.x compatible). Postgres/SQLite ignore các option `mysql_*` này.
+    __table_args__ = {
+        "mysql_charset": "utf8mb4",
+        "mysql_collate": "utf8mb4_unicode_ci",
+    }
+
+
+def _engine_connect_args(url: str) -> dict:
+    """MySQL không có TIMESTAMP WITH TIME ZONE — set session tz UTC để
+    `DateTime(timezone=True)` columns lưu UTC nhất quán, không phụ thuộc
+    server `time_zone` global. Postgres/SQLite không cần (đã native).
+    """
+    if url.startswith(("mysql+", "mysql:")):
+        return {"init_command": "SET time_zone='+00:00'"}
+    return {}
 
 
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.APP_ENV == "development",
+    connect_args=_engine_connect_args(settings.DATABASE_URL),
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

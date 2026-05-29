@@ -5,12 +5,14 @@ uvicorn[standard]
 # Database
 sqlalchemy>=2.0.0
 aiosqlite>=0.20.0
-# Postgres async driver — used in production (Render free Postgres).
-# Local dev keeps sqlite via DATABASE_URL=sqlite+aiosqlite:///./mcp.db
+# Postgres async driver — used on Render production.
 asyncpg>=0.30.0
 # V3.6 — schema migrations. init_db() auto-runs `alembic upgrade head`
 # on startup; tests skip this via SKIP_ALEMBIC=1 env.
 alembic>=1.18.0
+# MySQL async driver — used khi DATABASE_URL=mysql+asyncmy://...
+# Local dev qua XAMPP (port 8888) hoặc managed MySQL.
+asyncmy>=0.2.9
 
 # Validation
 pydantic>=2.0.0

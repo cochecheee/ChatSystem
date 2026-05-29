@@ -73,12 +73,11 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="after")
     @classmethod
     def _normalize_database_url(cls, v: str) -> str:
-        """Rewrite Render's `postgres://` connectionString to the SQLAlchemy
-        async dialect `postgresql+asyncpg://`. SQLAlchemy 2.x dropped
-        implicit `postgres://` support, and Render still emits the legacy
-        form via fromDatabase.connectionString.
+        """Rewrite vendor connection strings sang SQLAlchemy async dialect.
 
-        Also tolerate `postgresql://` (no driver) by adding +asyncpg.
+        - `postgres://`  → `postgresql+asyncpg://`  (Render legacy form)
+        - `postgresql://` (no driver) → `postgresql+asyncpg://`
+        - `mysql://`     → `mysql+asyncmy://`       (XAMPP / managed MySQL)
         """
         if not v:
             return v
@@ -86,6 +85,8 @@ class Settings(BaseSettings):
             return "postgresql+asyncpg://" + v[len("postgres://"):]
         if v.startswith("postgresql://") and "+asyncpg" not in v:
             return "postgresql+asyncpg://" + v[len("postgresql://"):]
+        if v.startswith("mysql://") and "+asyncmy" not in v and "+aiomysql" not in v:
+            return "mysql+asyncmy://" + v[len("mysql://"):]
         return v
 
 
