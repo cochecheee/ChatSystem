@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
 from ..core.db import AsyncSessionLocal, get_session
-from ..models.entities import Artifact, Finding, Project
+from ..models.entities import Artifact, Finding, Project, WebhookDelivery
 from ..models.schemas import (
     FindingOut,
     GatePolicyUpdate,
@@ -713,63 +713,123 @@ async def process_artifact(
 
 @router.post("/webhook/pipeline-complete", status_code=202)
 async def webhook_pipeline_complete(
-    body: WebhookRunPayload,
+    request: Request,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict:
-    """Receive notification from CI pipeline after a workflow run completes.
+    """Receive notification from CI after a workflow run completes.
 
-    CI gửi: POST /webhook/pipeline-complete
-    Header: Authorization: Bearer <token>
-    Body:   run-metadata.json (có run_id, run_number, repository, ...)
+    Auth precedence (V3.6):
+      1. HMAC `X-Hub-Signature-256: sha256=<hex>` against the body using
+         `Project.webhook_token` as secret. Match wins — routes to the
+         owning project regardless of body.repository.
+      2. Legacy Bearer per-project token (V3.5). Sast-action runners that
+         haven't migrated to HMAC mode keep working.
+      3. Legacy global `CI_WEBHOOK_TOKEN` (V3.x). Routes by body.repository
+         or env GITHUB_OWNER/REPO fallback.
 
-    Auth + routing (V3.5):
-      1. Per-project token (preferred): the Bearer token is matched against
-         `Project.webhook_token`. Match wins — that project owns this run,
-         `body.repository` is ignored for routing. Closes the V3.4-era hole
-         where CI for repo A could POST findings into project B by spoofing
-         the `repository` field.
-      2. Legacy global token: if no project owns the token, fall back to
-         `settings.CI_WEBHOOK_TOKEN`. Routing then uses `body.repository`
-         (multi-tenant flag) or `settings.GITHUB_OWNER/REPO` (single-tenant).
-      3. Both empty + auth token empty: dev mode — accept and use env repo.
+    Replay protection (V3.6): every accepted delivery is recorded in
+    `webhook_deliveries` keyed by `X-GitHub-Delivery` header (UUID).
+    Same delivery_id seen twice returns 200 with `outcome=duplicate`
+    and skips the work.
     """
     import logging
+    import uuid as _uuid
+    from ..core.webhook_security import (
+        record_delivery, verify_signature_against_any_project,
+    )
+    from ..models.schemas import WebhookRunPayload as _Payload
+
     log = logging.getLogger(__name__)
 
-    webhook_token = credentials.credentials if credentials else None
+    raw_body = await request.body()
+    try:
+        body = _Payload.model_validate_json(raw_body) if raw_body else _Payload(run_id=0)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid body: {exc}")
+
+    # --- Replay dedup ---
+    delivery_id = (
+        request.headers.get("x-github-delivery")
+        or request.headers.get("x-mcp-delivery")
+        or str(_uuid.uuid4())  # synthesize when caller didn't send one
+    )
+    from sqlalchemy import select
+    existing = await session.execute(
+        select(WebhookDelivery).where(WebhookDelivery.delivery_id == delivery_id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        log.info("Webhook delivery %s is duplicate — skipping", delivery_id)
+        return {
+            "status": "accepted", "outcome": "duplicate",
+            "run_id": body.run_id, "delivery_id": delivery_id,
+        }
+
     project_repo = ProjectRepository(session)
     project = None
+    auth_mode: str | None = None
 
-    # --- Auth path 1: per-project token (V3.5) ---
-    if webhook_token:
-        project = await project_repo.find_by_webhook_token(webhook_token)
-        if project is not None:
+    # --- Auth path 1: HMAC (V3.6 preferred) ---
+    sig_header = (
+        request.headers.get("x-hub-signature-256")
+        or request.headers.get("x-mcp-signature-256")
+    )
+    if sig_header:
+        sig_result = await verify_signature_against_any_project(
+            session, raw_body, sig_header,
+        )
+        if sig_result.outcome == "valid":
+            project = await project_repo.get(sig_result.matched_project_id)
+            auth_mode = "hmac"
             log.info(
-                "Webhook authenticated via per-project token (project_id=%d)",
-                project.id,
+                "Webhook authenticated via HMAC (project_id=%d, delivery=%s)",
+                project.id, delivery_id,
             )
+        elif sig_result.outcome == "invalid":
+            await record_delivery(
+                session, delivery_id=delivery_id, project_id=None,
+                github_run_id=body.run_id, body=raw_body,
+                outcome="rejected_signature",
+                detail="HMAC mismatch",
+            )
+            await session.commit()
+            raise HTTPException(status_code=403, detail="Invalid HMAC signature")
 
-    # --- Auth path 2: legacy global token ---
+    # --- Auth path 2: legacy bearer (V3.5 per-project token) ---
     if project is None:
+        webhook_token = credentials.credentials if credentials else None
+        if webhook_token:
+            project = await project_repo.find_by_webhook_token(webhook_token)
+            if project is not None:
+                auth_mode = "bearer_per_project"
+                log.info(
+                    "Webhook authenticated via per-project Bearer "
+                    "(project_id=%d, delivery=%s)", project.id, delivery_id,
+                )
+
+    # --- Auth path 3: legacy global ---
+    if project is None:
+        webhook_token = credentials.credentials if credentials else None
         if settings.CI_WEBHOOK_TOKEN:
             if webhook_token != settings.CI_WEBHOOK_TOKEN:
-                raise HTTPException(
-                    status_code=403, detail="Invalid or missing webhook token",
+                await record_delivery(
+                    session, delivery_id=delivery_id, project_id=None,
+                    github_run_id=body.run_id, body=raw_body,
+                    outcome="rejected_signature",
+                    detail="No valid auth (HMAC/bearer/global)",
                 )
-            # Legacy auth succeeded — fall through to repository-based routing
-            log.info("Webhook authenticated via legacy global CI_WEBHOOK_TOKEN")
+                await session.commit()
+                raise HTTPException(
+                    status_code=403, detail="Invalid or missing webhook auth",
+                )
+            auth_mode = "bearer_global"
+            log.info("Webhook authenticated via legacy global token "
+                     "(delivery=%s)", delivery_id)
 
-        # Legacy routing: by repository field or env fallback
         if settings.MULTI_TENANT_ENABLED and body.repository:
             github_url = f"https://github.com/{body.repository}"
             project = await project_repo.get_by_github_url(github_url)
-            if project is None:
-                log.warning(
-                    "Webhook repository=%r không tìm được project — fallback env",
-                    body.repository,
-                )
 
         if project is None:
             fallback_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
@@ -778,12 +838,25 @@ async def webhook_pipeline_complete(
                 github_url=fallback_url,
             )
 
+    # --- Record delivery (accepted) + process ---
+    await record_delivery(
+        session, delivery_id=delivery_id, project_id=project.id,
+        github_run_id=body.run_id, body=raw_body, outcome="accepted",
+        detail=f"auth={auth_mode}",
+    )
+    await session.commit()
+
     processor = SecurityProcessor(session_factory=AsyncSessionLocal)
-    # processor.process_run resolves the project row itself and builds a
-    # per-project GitHubClient when credentials are set (V2.8+).
     background_tasks.add_task(processor.process_run, project.id, body.run_id)
 
-    return {"status": "accepted", "run_id": body.run_id, "project_id": project.id}
+    return {
+        "status": "accepted",
+        "outcome": "accepted",
+        "run_id": body.run_id,
+        "project_id": project.id,
+        "delivery_id": delivery_id,
+        "auth_mode": auth_mode,
+    }
 
 
 # ---------------------------------------------------------------------------
