@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api/client';
 import type { Project } from '../types';
 
@@ -26,26 +26,35 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeProjectId, setActiveProjectIdState] = useState<number | null>(readStored());
   const [loading, setLoading] = useState(true);
 
-  const refresh = async () => {
+  // V3.5 bug fix — `refresh` MUST be reference-stable, or any consumer that
+  // includes it in a useEffect dep array (e.g. App.tsx re-fetches on auth
+  // change) triggers an infinite loop:
+  //   render -> new refresh ref -> dep changes -> effect fires ->
+  //   refresh() -> setProjects -> re-render -> new refresh ref -> ...
+  // Observed in production logs as /projects hitting ~75 req/s (~4500/min).
+  // Functional setActiveProjectIdState lets us check the current id without
+  // re-creating the callback when it changes.
+  const refresh = useCallback(async () => {
     try {
       const list = await api.projects.list();
       setProjects(list);
-      // Drop active if it no longer exists in the fresh list (deleted elsewhere).
-      if (activeProjectId !== null && !list.find(p => p.id === activeProjectId)) {
-        setActiveProjectIdState(null);
-        localStorage.removeItem(STORAGE_KEY);
-      }
+      setActiveProjectIdState((cur) => {
+        if (cur !== null && !list.find(p => p.id === cur)) {
+          localStorage.removeItem(STORAGE_KEY);
+          return null;
+        }
+        return cur;
+      });
     } catch {
       // Surface via empty state; auth errors are non-fatal here.
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]);
 
   const setActiveProjectId = (id: number | null) => {
     setActiveProjectIdState(id);
