@@ -3,29 +3,48 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.auth import require_read_access
+from ..core.auth import User, allowed_project_ids, require_read_access
 from ..core.db import get_session
 from ..services.stats_service import StatsService
 
 router = APIRouter(
     prefix="/stats", tags=["stats"],
     # V3.3 — every stats endpoint goes through the read kill-switch.
-    dependencies=[Depends(require_read_access)],
 )
+
+
+def _check_project_scope(user: User | None, project_id: int | None) -> None:
+    """V3.5 RBAC audit: when RBAC is on and the caller asks for a specific
+    project, they must have a membership on it. Without this, a developer
+    with access only to project A could read project B's KPIs via
+    /stats/overview?project_id=B.
+    """
+    scope = allowed_project_ids(user)
+    if scope is None:
+        return  # admin or RBAC off → no restriction
+    if project_id is not None and project_id not in scope:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project {project_id} not in your memberships",
+        )
 
 
 @router.get("/overview", summary="Aggregated KPI cho Overview page")
 async def stats_overview(
     project_id: int | None = None,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
 ) -> dict[str, Any]:
-    """Trả về counts theo severity/status/tool + AI percent + total. Auth=none.
+    """Counts theo severity/status/tool + AI percent + total.
 
-    `?project_id=` (V2.9): lọc theo project. Bỏ qua → aggregate toàn hệ thống.
+    `?project_id=`: lọc theo project — caller phải có membership trên đó.
+    Bỏ qua → aggregate global (frontend tự gắn ProjectSelector để khỏi
+    lộ data — cross-project global numbers chỉ ý nghĩa cho admin).
     """
+    _check_project_scope(user, project_id)
     return await StatsService(session).overview(project_id=project_id)
 
 
@@ -33,14 +52,10 @@ async def stats_overview(
 async def stats_latest_scan(
     project_id: int | None = None,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
 ) -> dict[str, Any]:
-    """Aggregated KPI cho 'scan mới nhất' (run_id mới nhất có findings trong DB).
-
-    Khác với /stats/overview (toàn bộ findings cumulative) — endpoint này scope
-    về 1 run duy nhất, dùng cho Dashboard Overview.
-
-    `?project_id=` (V2.9): chỉ xét scan của project đó.
-    """
+    """Stats của scan mới nhất. Caller phải có membership trên project_id."""
+    _check_project_scope(user, project_id)
     return await StatsService(session).latest_scan(project_id=project_id)
 
 
@@ -48,8 +63,13 @@ async def stats_latest_scan(
 async def stats_runs(
     days: int = 30,
     session: AsyncSession = Depends(get_session),
+    _: User | None = Depends(require_read_access),
 ) -> dict[str, Any]:
     """Pass rate + breakdown by day cho window N ngày gần nhất.
-    Gọi GitHub Actions trực tiếp (không persist).
+
+    Hits GitHub Actions API directly using the env-bound token, so result
+    is the same for all callers — no per-project filtering needed. We
+    still gate the endpoint with require_read_access so anonymous callers
+    are rejected when ANONYMOUS_READ_ENABLED is off.
     """
     return await StatsService(session).runs(days=days)

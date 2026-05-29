@@ -52,6 +52,14 @@ class Project(Base):
     # Postgres INTEGER column, which raises 'invalid input syntax'.
     active: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
+    # V3.5 — Per-project webhook token. Replaces the global CI_WEBHOOK_TOKEN
+    # env when set: incoming `Authorization: Bearer <token>` is matched
+    # against this column to pick the owning project, so a CI from repo A
+    # can't push findings to project B by spoofing `body.repository`. When
+    # empty, the global token (settings.CI_WEBHOOK_TOKEN) is honored as
+    # legacy fallback. Encrypted via Fernet when FERNET_KEY is set.
+    webhook_token: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+
     artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="project")
 
     # Pydantic ProjectOut reads these via from_attributes — keeps secrets
@@ -63,6 +71,10 @@ class Project(Base):
     @property
     def has_gemini_api_key(self) -> bool:
         return bool(self.gemini_api_key)
+
+    @property
+    def has_webhook_token(self) -> bool:
+        return bool(self.webhook_token)
 
 
 class Artifact(Base):

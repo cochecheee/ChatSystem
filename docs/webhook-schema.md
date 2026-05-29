@@ -161,3 +161,46 @@ Hiện tại 1 instance chat-system phục vụ 1 project (lấy `GITHUB_OWNER/R
 
 - Webhook accept thêm field `project_id` (hoặc lookup theo `repository` field trong body).
 - `Project` đã có sẵn cột credentials per-row (Day 2 scaffolding) — chỉ cần kích hoạt loop ở poller + route webhook đúng project.
+
+---
+
+## V3.5 — Per-project webhook token (Phase 3)
+
+Trước V3.5, `CI_WEBHOOK_TOKEN` là 1 secret global cho cả instance — CI repo A có thể spoof `body.repository = owner/repo-of-B` để push findings vào project B nếu cùng biết global token. V3.5 đóng lỗ đó:
+
+### Mới — cách auth + routing
+
+1. **Mỗi project có 1 token riêng** lưu trong cột `projects.webhook_token` (Fernet-encrypted khi `FERNET_KEY` set).
+2. Owner / admin sinh token qua **`POST /projects/{id}/webhook/rotate`** (response trả plaintext **1 lần duy nhất**).
+3. CI dùng token đó trong `Authorization: Bearer ...`. Server match thẳng vào `Project.webhook_token` → biết project nào → bỏ qua `body.repository`.
+4. Token cũ bị xoá ngay khi rotate.
+
+### Backward compat
+
+Nếu chưa có project nào rotate token, server vẫn fallback `settings.CI_WEBHOOK_TOKEN` (legacy) + route by `body.repository` như cũ. Deploy lên không cần migration ngay.
+
+### UI flow
+
+`GET /projects/{id}/integration` trả:
+- `has_project_token: bool` — đã rotate chưa
+- `token_visible: bool` — caller có quyền xem token plaintext không (owner/admin only)
+- `webhook_token: str | null` — token thật (chỉ khi token_visible)
+- YAML + curl snippet sẵn
+
+Dashboard Settings có nút "Rotate webhook token" cho owner — bấm xong copy token vào GitHub repo secrets.
+
+---
+
+## V3.5 — RBAC audit (Phase 4)
+
+Closes 4 gaps where read endpoints didn't honor per-project membership:
+
+| Endpoint | Trước | Sau |
+|---|---|---|
+| `GET /stats/overview?project_id=X` | Trả KPI bất kể caller có quyền | 403 khi RBAC on + X ngoài memberships |
+| `GET /stats/latest-scan?project_id=X` | Same | Same |
+| `GET /monitor/uptime` + `/alerts` | Mở cho mọi caller (kể cả anonymous) | `require_read_access` + scope theo memberships |
+| `GET /api/chat/report?project_id=X` | Chỉ check global role | + Membership trên X |
+| `GET /findings/{id}` | Chỉ check kill-switch | + Finding→Artifact→Project chain check |
+
+Test coverage: `tests/test_rbac_audit_v35.py` (8 case).

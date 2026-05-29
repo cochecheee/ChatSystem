@@ -72,6 +72,19 @@ async def download_report(
 ) -> Response:
     if current_user.role not in COMMAND_ROLES["report"]:
         raise HTTPException(status_code=403, detail="Không đủ quyền truy cập báo cáo.")
+
+    # V3.5 RBAC audit — previously this endpoint trusted role-only, so a
+    # developer with access to project A could download report for project
+    # B by passing ?project_id=B. Now we enforce per-project membership
+    # before generating the HTML.
+    from ..core.auth import allowed_project_ids
+    scope = allowed_project_ids(current_user)
+    if scope is not None and project_id is not None and project_id not in scope:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project {project_id} not in your memberships",
+        )
+
     html_content = await report_service.generate_html(
         db,
         project_id=project_id,

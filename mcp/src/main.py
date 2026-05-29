@@ -12,6 +12,7 @@ from .api.analysis import router as analysis_router
 from .api.artifacts import router as artifacts_router
 from .api.chat import router as chat_router
 from .api.config import router as config_router
+from .api.findings import router as findings_router
 from .api.monitor import router as monitor_router
 from .api.stats import router as stats_router
 from .core.config import settings
@@ -115,6 +116,7 @@ app.add_middleware(
 )
 
 app.include_router(artifacts_router, tags=["core"])
+app.include_router(findings_router, tags=["findings"])
 app.include_router(analysis_router, tags=["ai"])
 app.include_router(chat_router)
 app.include_router(config_router)

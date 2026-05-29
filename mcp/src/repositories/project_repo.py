@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.secrets import decrypt_field, encrypt_field
 from ..models.entities import Project
 
-_ENCRYPTED_FIELDS = ("github_token", "gemini_api_key")
+_ENCRYPTED_FIELDS = ("github_token", "gemini_api_key", "webhook_token")
 
 
 def _decrypt_project(p: Project | None) -> Project | None:
@@ -104,3 +104,30 @@ class ProjectRepository:
     async def delete(self, project: Project) -> None:
         await self.session.delete(project)
         await self.session.commit()
+
+    async def find_by_webhook_token(self, raw_token: str) -> Project | None:
+        """Resolve the incoming webhook `Authorization: Bearer <token>` to
+        an owning Project. Returns None when no row matches.
+
+        Implementation: O(n) scan across active projects with a webhook_token
+        set. At thesis scale (<100 projects) this is fine and removes the
+        need for a separate sha256 index column. When projects exceed ~1000,
+        introduce a `webhook_token_hash` column with an index and switch to
+        an indexed lookup instead.
+
+        Constant-time string compare (`secrets.compare_digest`) per row so
+        an attacker can't time-attack to learn token prefixes.
+        """
+        import secrets as _secrets
+
+        if not raw_token:
+            return None
+        # Pull every project that has a token configured — decrypt happens
+        # via list_all() so we compare against plaintext.
+        for p in await self.list_all():
+            stored = (p.webhook_token or "")
+            if not stored:
+                continue
+            if _secrets.compare_digest(stored, raw_token):
+                return p
+        return None

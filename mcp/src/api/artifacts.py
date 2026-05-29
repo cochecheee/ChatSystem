@@ -329,21 +329,39 @@ async def project_integration_snippet(
     project_id: int,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_optional),
 ) -> dict:
-    """Trả config snippet cần thiết để tích hợp 1 project mới với chat-system.
+    """Snippet để tích hợp 1 project với chat-system.
 
-    UI/CLI dùng endpoint này để hiển thị "Cách tích hợp project này":
-    - URL webhook
-    - Tên secret cần đặt trong GitHub Actions
-    - YAML step copy-paste
-    - curl command để test thủ công
+    Trả webhook URL + GitHub Actions YAML step + curl test. Khi caller là
+    `owner` của project (hoặc global admin), token plaintext được nhúng
+    vào snippet để copy-paste thẳng vào CI secrets. Caller không có quyền
+    chỉ thấy placeholder `<MCP_WEBHOOK_TOKEN>` và phải nhờ owner cấp token.
 
-    KHÔNG trả token thật — UI chỉ render placeholder; admin operator
-    set secret bằng tay ở repo target.
+    Khi project chưa có per-project token, snippet rớt về placeholder
+    có ghi chú dùng `CI_WEBHOOK_TOKEN` legacy — UI sẽ nhắc owner bấm
+    "Rotate webhook token" để sinh mới.
     """
     project = await ProjectRepository(session).get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Owner / admin gets the plaintext token; everyone else gets the placeholder.
+    can_reveal = False
+    if current is not None:
+        if current.role == "admin":
+            can_reveal = True
+        else:
+            role = None
+            # JWT carries a membership snapshot (V3.0) — trust it first.
+            if current.memberships is not None:
+                role = current.memberships.get(project_id)
+            if role is None:
+                from ..repositories import ProjectMemberRepository
+                role = await ProjectMemberRepository(session).get_role(
+                    project_id, current.username,
+                )
+            can_reveal = role == "owner"
 
     # Build base URL từ request — phù hợp cả local dev (localhost:8000)
     # lẫn deploy qua tunnel/proxy (Host header).
@@ -354,6 +372,13 @@ async def project_integration_snippet(
 
     secret_token_name = "MCP_WEBHOOK_TOKEN"
     secret_url_name = "MCP_GATEWAY_URL"
+
+    # The placeholder substituted into the YAML snippet. Owners see the real
+    # token only via the `webhook_token` JSON field (separate from snippet)
+    # so they can copy it into the target-repo secrets store. The snippet
+    # itself always references `${{ secrets.MCP_WEBHOOK_TOKEN }}` — never
+    # inlines the token. This avoids accidentally pasting a secret into
+    # a public PR description.
 
     yaml_step = (
         "- name: Notify chat-system\n"
@@ -382,17 +407,71 @@ async def project_integration_snippet(
         "project_name": project.name,
         "github_url": project.github_url,
         "webhook_url": webhook_url,
-        "auth_required": bool(settings.CI_WEBHOOK_TOKEN),
+        "auth_required": bool(settings.CI_WEBHOOK_TOKEN) or bool(project.webhook_token),
+        "has_project_token": bool(project.webhook_token),
+        "webhook_token": project.webhook_token if (can_reveal and project.webhook_token) else None,
+        "token_visible": can_reveal,
         "secrets_to_set_in_target_repo": [
             {"name": secret_url_name, "value_hint": webhook_url},
             {
                 "name": secret_token_name,
-                "value_hint": "<the same MCP_WEBHOOK_TOKEN in chat-system .env>",
+                "value_hint": (
+                    "Use the project's webhook_token (see above) if set; otherwise "
+                    "the global CI_WEBHOOK_TOKEN from chat-system .env."
+                ),
             },
         ],
         "github_actions_yaml_step": yaml_step,
         "manual_test_curl": curl_test,
         "docs": "/docs/webhook-schema.md",
+    }
+
+
+@router.post("/projects/{project_id}/webhook/rotate")
+async def rotate_webhook_token(
+    project_id: int,
+    session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_required),
+) -> dict:
+    """Generate a fresh per-project webhook token. Only `owner` or `admin`.
+
+    Returns the new plaintext token ONCE in the response so the caller can
+    copy it into the CI secrets store. After this call the token is only
+    visible to owners via `/projects/{id}/integration` (because that
+    endpoint re-fetches it from DB).
+
+    Rotating invalidates the previous token immediately — any CI still
+    using the old value starts getting 403 on the next webhook call.
+    """
+    import secrets as _secrets
+
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # owner / admin gate
+    if current.role != "admin":
+        role = None
+        if current.memberships is not None:
+            role = current.memberships.get(project_id)
+        if role is None:
+            from ..repositories import ProjectMemberRepository
+            role = await ProjectMemberRepository(session).get_role(
+                project_id, current.username,
+            )
+        if role != "owner":
+            raise HTTPException(
+                status_code=403,
+                detail="Only project owner (or global admin) can rotate the webhook token",
+            )
+
+    # 32 bytes URL-safe → ~43 char token. Enough entropy to defeat guessing.
+    new_token = _secrets.token_urlsafe(32)
+    await ProjectRepository(session).update(project, {"webhook_token": new_token})
+    return {
+        "project_id": project_id,
+        "webhook_token": new_token,
+        "message": "Save this token now — it will be hidden from API responses after this call.",
     }
 
 
@@ -534,44 +613,62 @@ async def webhook_pipeline_complete(
     """Receive notification from CI pipeline after a workflow run completes.
 
     CI gửi: POST /webhook/pipeline-complete
-    Header: Authorization: Bearer <MCP_WEBHOOK_TOKEN>
+    Header: Authorization: Bearer <token>
     Body:   run-metadata.json (có run_id, run_number, repository, ...)
 
-    Routing (V2.8):
-      MULTI_TENANT_ENABLED=true + body.repository có giá trị → lookup
-        Project theo github_url. Match → dùng project đó.
-      Không match hoặc flag off → fallback settings.GITHUB_OWNER/REPO
-        (legacy behavior). Log warning để debug.
-
-    CI_WEBHOOK_TOKEN trống → auth disabled (dev mode).
+    Auth + routing (V3.5):
+      1. Per-project token (preferred): the Bearer token is matched against
+         `Project.webhook_token`. Match wins — that project owns this run,
+         `body.repository` is ignored for routing. Closes the V3.4-era hole
+         where CI for repo A could POST findings into project B by spoofing
+         the `repository` field.
+      2. Legacy global token: if no project owns the token, fall back to
+         `settings.CI_WEBHOOK_TOKEN`. Routing then uses `body.repository`
+         (multi-tenant flag) or `settings.GITHUB_OWNER/REPO` (single-tenant).
+      3. Both empty + auth token empty: dev mode — accept and use env repo.
     """
     import logging
     log = logging.getLogger(__name__)
 
     webhook_token = credentials.credentials if credentials else None
-    if settings.CI_WEBHOOK_TOKEN and webhook_token != settings.CI_WEBHOOK_TOKEN:
-        raise HTTPException(status_code=403, detail="Invalid or missing webhook token")
-
     project_repo = ProjectRepository(session)
     project = None
 
-    # Multi-tenant path: lookup by repository field from payload
-    if settings.MULTI_TENANT_ENABLED and body.repository:
-        github_url = f"https://github.com/{body.repository}"
-        project = await project_repo.get_by_github_url(github_url)
-        if project is None:
-            log.warning(
-                "Webhook repository=%r không tìm được project — fallback env",
-                body.repository,
+    # --- Auth path 1: per-project token (V3.5) ---
+    if webhook_token:
+        project = await project_repo.find_by_webhook_token(webhook_token)
+        if project is not None:
+            log.info(
+                "Webhook authenticated via per-project token (project_id=%d)",
+                project.id,
             )
 
-    # Fallback / legacy: use env-configured single-tenant project
+    # --- Auth path 2: legacy global token ---
     if project is None:
-        fallback_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
-        project = await project_repo.get_or_create_by_github_url(
-            name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
-            github_url=fallback_url,
-        )
+        if settings.CI_WEBHOOK_TOKEN:
+            if webhook_token != settings.CI_WEBHOOK_TOKEN:
+                raise HTTPException(
+                    status_code=403, detail="Invalid or missing webhook token",
+                )
+            # Legacy auth succeeded — fall through to repository-based routing
+            log.info("Webhook authenticated via legacy global CI_WEBHOOK_TOKEN")
+
+        # Legacy routing: by repository field or env fallback
+        if settings.MULTI_TENANT_ENABLED and body.repository:
+            github_url = f"https://github.com/{body.repository}"
+            project = await project_repo.get_by_github_url(github_url)
+            if project is None:
+                log.warning(
+                    "Webhook repository=%r không tìm được project — fallback env",
+                    body.repository,
+                )
+
+        if project is None:
+            fallback_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
+            project = await project_repo.get_or_create_by_github_url(
+                name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
+                github_url=fallback_url,
+            )
 
     processor = SecurityProcessor(session_factory=AsyncSessionLocal)
     # processor.process_run resolves the project row itself and builds a
@@ -582,207 +679,10 @@ async def webhook_pipeline_complete(
 
 
 # ---------------------------------------------------------------------------
-# Findings
+# Findings endpoints — extracted to api/findings.py in Phase 1.
+# Kept imports above (FindingOut, FindingRepository) because reprocess +
+# run-findings below still touch finding rows. See main.py for the mount.
 # ---------------------------------------------------------------------------
-
-@router.get("/findings", response_model=list[FindingOut])
-async def list_findings(
-    response: Response,
-    project_id: int | None = None,
-    severity: str | None = None,
-    tool: str | None = None,
-    status: str | None = None,
-    category: str | None = None,
-    q: str | None = None,
-    run_id: int | None = None,
-    exclude_revoked: bool = False,
-    skip: int = 0,
-    limit: int = 50,
-    session: AsyncSession = Depends(get_session),
-    user: User | None = Depends(require_read_access),
-) -> list[Finding]:
-    """List findings với filter mở rộng.
-
-    Query params:
-    - project_id: lọc theo project
-    - severity: critical|high|medium|low|info
-    - tool: semgrep|codeql|spotbugs|eslint|trivy|dependency-check|...
-    - status: pending_review|ai_analyzed|APPROVED|REVOKED
-    - category: sast | deps  (deps = trivy + dependency-check; sast = các tool còn lại)
-    - q: search trong message / file_path / rule_id (LIKE %q%, case-insensitive)
-    - skip / limit: pagination
-
-    Response headers:
-    - X-Total-Count: tổng số findings match filter (trước khi apply skip/limit)
-    """
-    repo = FindingRepository(session)
-    # V3.3 — when RBAC on + non-admin, scope to user's memberships only.
-    scope_ids = allowed_project_ids(user)
-    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
-    filter_kwargs = dict(
-        project_id=project_id,
-        project_ids=scope_ids if project_id is None else None,
-        severity=severity,
-        tool=tool,
-        status=status,
-        category=category,
-        q=q,
-        run_id=run_id,
-        exclude_revoked=exclude_revoked,
-    )
-    total = await repo.count_with_filters(**filter_kwargs)
-    response.headers["X-Total-Count"] = str(total)
-    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
-    return await repo.list_with_filters(skip=skip, limit=limit, **filter_kwargs)
-
-
-@router.get("/findings/ai-summary")
-async def findings_ai_summary(
-    project_id: int | None = None,
-    run_id: int | None = None,
-    force_refresh: bool = False,
-    session: AsyncSession = Depends(get_session),
-    user: User | None = Depends(require_read_access),
-) -> dict:
-    """V3.3 Part B — Gemini-generated risk briefing for the Overview card.
-
-    Returns a structured response (overview / top_risks / recommendations /
-    pipeline_health) so the FE can render a multi-section card instead of
-    a paragraph blob. Cached in-memory by (project_id, run_id) for 10
-    minutes; pass `force_refresh=true` to bust the cache.
-
-    Authorization: same as other reads (V3.3 A.1/A.3). If project_id is
-    given, caller must have membership when RBAC is on.
-    """
-    from ..services.llm.summary import SummaryService
-
-    scope_ids = allowed_project_ids(user)
-    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
-
-    svc = SummaryService()
-    result = await svc.generate(
-        session,
-        project_id=project_id,
-        run_id=run_id,
-        force_refresh=force_refresh,
-    )
-    return result.model_dump()
-
-
-@router.post("/findings/triage")
-async def triage_findings(
-    project_id: int | None = None,
-    run_id: int | None = None,
-    confidence_threshold: float = 0.8,
-    dry_run: bool = False,
-    limit: int = 50,
-    session: AsyncSession = Depends(get_session),
-    current: User = Depends(get_current_user_required),
-) -> dict:
-    """V3.1 Tier 3 — batch AI triage. Sends pending findings (max `limit`) to
-    Gemini for FP/TP classification; REVOKES findings classified FALSE_POSITIVE
-    with confidence ≥ threshold unless `dry_run=true` (preview only).
-
-    Scope by project_id and/or run_id. Requires security_lead+ on the project
-    (or global admin) — AI-driven mass revoke is a privileged operation.
-    """
-    from ..repositories import ProjectMemberRepository, role_satisfies
-    from ..services.llm.triage import TriageService
-
-    if project_id is not None and current.role != "admin":
-        member_role = await ProjectMemberRepository(session).get_role(
-            project_id, current.username,
-        )
-        if member_role is None or not role_satisfies(member_role, "security_lead"):
-            raise HTTPException(
-                status_code=403,
-                detail="security_lead role required for AI triage",
-            )
-
-    repo = FindingRepository(session)
-    findings = await repo.list_with_filters(
-        project_id=project_id,
-        run_id=run_id,
-        status="pending_review",
-        skip=0,
-        limit=limit,
-    )
-
-    if not findings:
-        return {"total": 0, "auto_revoked": 0, "items": [], "dry_run": dry_run}
-
-    svc = TriageService()
-    return await svc.triage_findings(
-        session, findings,
-        confidence_threshold=confidence_threshold,
-        dry_run=dry_run,
-        invoked_by=f"ai-triage (by {current.username})",
-    )
-
-
-@router.get("/findings/gate-count")
-async def findings_gate_count(
-    project_id: int | None = None,
-    run_id: int | None = None,
-    session: AsyncSession = Depends(get_session),
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-) -> dict:
-    """Severity counts excluding REVOKED — for the V3.1 Tier 4 Security Gate.
-
-    A pipeline step in sast-action calls this with the current run's id and
-    decides pass/fail based on the active (non-suppressed) finding counts.
-    The point: once a developer has triaged false positives, the next run
-    can pass without anyone touching code.
-
-    V3.3 auth: accepts EITHER
-      • a valid JWT (dashboard caller), OR
-      • CI_WEBHOOK_TOKEN as a bearer (CI runner — same secret used for
-        /webhook/pipeline-complete so callers don't manage two tokens), OR
-      • anonymous when ANONYMOUS_READ_ENABLED=true (legacy bypass).
-    """
-    if not settings.ANONYMOUS_READ_ENABLED:
-        token = credentials.credentials if credentials else None
-        # CI fast path — token matches the webhook shared secret.
-        if token and settings.CI_WEBHOOK_TOKEN and token == settings.CI_WEBHOOK_TOKEN:
-            pass
-        else:
-            # Otherwise, demand a real JWT.
-            await get_current_user(credentials)
-    repo = FindingRepository(session)
-    common = dict(project_id=project_id, run_id=run_id, exclude_revoked=True)
-    critical = await repo.count_with_filters(severity="critical", **common)
-    high = await repo.count_with_filters(severity="high", **common)
-    medium = await repo.count_with_filters(severity="medium", **common)
-    low = await repo.count_with_filters(severity="low", **common)
-    return {
-        "project_id": project_id,
-        "run_id": run_id,
-        "exclude_revoked": True,
-        "critical": critical,
-        "high": high,
-        "medium": medium,
-        "low": low,
-    }
-
-
-@router.get("/findings/{finding_id}", response_model=FindingOut)
-async def get_finding(
-    finding_id: int,
-    session: AsyncSession = Depends(get_session),
-    _: User | None = Depends(require_read_access),
-) -> Finding:
-    finding = await FindingRepository(session).get(finding_id)
-    if finding is None:
-        raise HTTPException(status_code=404, detail="Finding not found")
-    return finding
 
 
 @router.post("/github/runs/{run_id}/reprocess", status_code=202)
@@ -821,13 +721,4 @@ async def reprocess_run(
     return {"status": "accepted", "run_id": run_id, "deleted_artifacts": len(artifacts)}
 
 
-@router.get(
-    "/github/runs/{run_id}/findings", response_model=list[FindingOut],
-    dependencies=[Depends(require_read_access)],
-)
-async def get_run_findings(
-    run_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> list[Finding]:
-    """Return all findings from a specific GitHub Actions workflow run."""
-    return await FindingRepository(session).list_for_run(run_id)
+# /github/runs/{run_id}/findings moved to api/findings.py

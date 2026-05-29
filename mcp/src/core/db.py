@@ -122,6 +122,13 @@ def _migrate_schema(sync_conn) -> None:
         ("github_run_id", "INTEGER"),
     ])
 
+    add_columns("projects", [
+        # V3.5 — per-project webhook token. Default "" so the existing
+        # global CI_WEBHOOK_TOKEN fallback keeps working until each
+        # project rotates one in.
+        ("webhook_token", "VARCHAR(500) NOT NULL DEFAULT ''"),
+    ])
+
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:

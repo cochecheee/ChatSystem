@@ -84,10 +84,14 @@ class ProjectOut(BaseModel):
     last_processed_run_id: int | None
     github_owner: str = ""
     github_repo: str = ""
-    # NOTE: github_token + gemini_api_key NOT exposed — secrets stay
-    # server-side. UI surfaces "configured" booleans instead.
+    # NOTE: github_token + gemini_api_key + webhook_token NOT exposed —
+    # secrets stay server-side. UI surfaces "configured" booleans instead.
+    # The plaintext webhook token is shown ONLY via the
+    # /projects/{id}/webhook/rotate response (one-time reveal) and the
+    # /projects/{id}/integration owner-only endpoint.
     has_github_token: bool = False
     has_gemini_api_key: bool = False
+    has_webhook_token: bool = False
     gemini_model: str = ""
     artifact_profile: str = "github-actions-default"
     polling_workflow_name: str = "CI Workflow"
