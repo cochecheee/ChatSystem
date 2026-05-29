@@ -169,10 +169,17 @@ Swagger UI: `http://localhost:8000/docs`
 ```bash
 cd dashboard
 npm install
-npm run dev
+npm run dev              # UI chạy local, gọi MCP local trên :8000
+# hoặc
+npm run dev:prod-api     # UI chạy local nhưng gọi Render MCP (xem prod data)
 ```
 
 Dashboard chạy tại `http://localhost:5173`.
+
+> **Khác biệt UI local vs UI deploy thường do data source, không phải code.**
+> Local UI mặc định trỏ tới MCP local (DB rỗng / dev data). Deploy UI gọi Render MCP
+> (Postgres production với data thật). Dùng `npm run dev:prod-api` nếu muốn nhìn
+> đúng số liệu như deploy mà vẫn dev frontend.
 
 ---
 

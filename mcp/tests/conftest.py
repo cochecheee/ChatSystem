@@ -1,9 +1,16 @@
 import os
 import uuid
 
-# Must be set before any project imports so pydantic-settings picks up the test DB
+# Must be set before any project imports so pydantic-settings picks up the
+# test config (it reads os.environ first, then .env). We need to force the
+# multi-tenant / RBAC / Fernet flags OFF here because the developer .env
+# now turns them ON to mirror Render — and existing tests assume them off.
+# Tests that exercise the V3.0/V3.5 RBAC gates flip these locally via patch().
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["APP_ENV"] = "testing"
+os.environ["MULTI_TENANT_ENABLED"] = "false"
+os.environ["RBAC_PER_PROJECT"] = "false"
+os.environ["FERNET_KEY"] = ""        # tests assume plaintext at-rest
 # V3.3 — keep reads open in tests by default so existing test suites don't
 # need to bolt on auth headers. Tests that exercise the V3.3 gate flip this
 # setting locally via patch().

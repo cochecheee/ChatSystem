@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:prod-api": "cross-env VITE_API_URL=https://mcp-l958.onrender.com vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
