@@ -309,6 +309,26 @@ async def sync(url: str, apply: bool) -> None:
         # 4) artifacts — synthesize one row per (project_id, artifact_id)
         #    we see in findings. Preserves the FK so finding rows still
         #    join. github_artifact_id is a placeholder "sync-{id}".
+        #
+        # github_run_id: ALL artifacts of one project share the same
+        # synthetic run so /stats/latest-scan + /github/runs/{id}/findings
+        # return the project's full finding set in one query. Otherwise,
+        # each artifact looks like a separate run and "latest scan" picks
+        # arbitrary one (the set iteration order is non-deterministic).
+        #
+        # Prefer the project's real last_processed_run_id when set; fall
+        # back to a deterministic per-project placeholder otherwise.
+        # Placeholder constraints:
+        #   - non-null (so latest-scan + run-finding queries work)
+        #   - clearly distinct from real GitHub run IDs (~10^10 today)
+        #   - stable across re-runs (idempotent)
+        #   - within JavaScript's Number.MAX_SAFE_INTEGER (2^53-1 = 9.007e15)
+        #     because the FE deserializes JSON numbers as IEEE-754 doubles
+        #     and silently truncates anything bigger. We hit this with a
+        #     9e18 base — IDs rounded to 9e18 + 0 and /github/runs/{id}
+        #     returned empty. 8e12 + project_id is ~200x bigger than
+        #     real run IDs and ~1000x smaller than the JS safe-int ceiling.
+        SYNTHETIC_RUN_BASE = 8_000_000_000_000
         artifact_keys = {
             (f["project_id"], f["artifact_id"])
             for f in all_findings
@@ -316,16 +336,38 @@ async def sync(url: str, apply: bool) -> None:
         }
         last_run_by_project = {p["id"]: p.get("last_processed_run_id") for p in projects}
         for proj_id, art_id in artifact_keys:
+            run_id = last_run_by_project.get(proj_id)
+            if run_id is None:
+                run_id = SYNTHETIC_RUN_BASE + proj_id
             session.add(Artifact(
                 id=art_id,
                 github_artifact_id=f"sync-{art_id}",
                 project_id=proj_id,
-                github_run_id=last_run_by_project.get(proj_id),
+                github_run_id=run_id,
                 status="processed",
                 created_at=datetime.now(UTC),
             ))
         await session.commit()
         print(f"  inserted {len(artifact_keys)} synthetic artifact row(s)")
+
+        # 4b) project.last_processed_run_id — make sure every project has
+        #     a non-null pointer so /stats/latest-scan returns a run id.
+        from sqlalchemy import select, func
+        for p in projects:
+            if last_run_by_project.get(p["id"]) is not None:
+                continue
+            db_proj = await session.get(Project, p["id"])
+            if db_proj is None:
+                continue
+            res = await session.execute(
+                select(func.max(Artifact.github_run_id)).where(
+                    Artifact.project_id == p["id"],
+                )
+            )
+            max_run = res.scalar_one_or_none()
+            if max_run is not None:
+                db_proj.last_processed_run_id = max_run
+        await session.commit()
 
         # 5) findings — preserve id + artifact_id.
         #
