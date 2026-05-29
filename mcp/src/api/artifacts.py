@@ -10,6 +10,7 @@ from ..core.db import AsyncSessionLocal, get_session
 from ..models.entities import Artifact, Finding, Project
 from ..models.schemas import (
     FindingOut,
+    GatePolicyUpdate,
     ProcessRequest,
     ProcessResponse,
     ProjectCreate,
@@ -468,11 +469,115 @@ async def rotate_webhook_token(
     # 32 bytes URL-safe → ~43 char token. Enough entropy to defeat guessing.
     new_token = _secrets.token_urlsafe(32)
     await ProjectRepository(session).update(project, {"webhook_token": new_token})
+    # V3.6 — audit row for rotation
+    from ..repositories.audit_log_repo import write_audit
+    await write_audit(
+        session, actor=current.username, action="rotate_webhook_token",
+        project_id=project_id, target_kind="project", target_id=project_id,
+    )
     return {
         "project_id": project_id,
         "webhook_token": new_token,
         "message": "Save this token now — it will be hidden from API responses after this call.",
     }
+
+
+@router.patch("/projects/{project_id}/gate-policy")
+async def update_gate_policy(
+    project_id: int,
+    body: "GatePolicyUpdate",
+    session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_required),
+) -> dict:
+    """V3.6 — set per-project gate thresholds.
+
+    Owner / global admin only. Audit row written with `{"old": {...},
+    "new": {...}}` so policy history can be replayed.
+    """
+    from ..repositories.audit_log_repo import write_audit
+
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if current.role != "admin":
+        role = None
+        if current.memberships is not None:
+            role = current.memberships.get(project_id)
+        if role is None:
+            from ..repositories import ProjectMemberRepository
+            role = await ProjectMemberRepository(session).get_role(
+                project_id, current.username,
+            )
+        if role != "owner":
+            raise HTTPException(
+                status_code=403,
+                detail="Only project owner (or global admin) can change gate policy",
+            )
+
+    old = {
+        "critical_threshold": project.gate_critical_threshold,
+        "high_threshold": project.gate_high_threshold,
+    }
+    updates: dict = {}
+    if body.critical_threshold is not None:
+        updates["gate_critical_threshold"] = body.critical_threshold
+    if body.high_threshold is not None:
+        updates["gate_high_threshold"] = body.high_threshold
+
+    if not updates:
+        return {
+            "project_id": project_id,
+            "critical_threshold": project.gate_critical_threshold,
+            "high_threshold": project.gate_high_threshold,
+            "changed": False,
+        }
+
+    await ProjectRepository(session).update(project, updates)
+    new = {
+        "critical_threshold": project.gate_critical_threshold,
+        "high_threshold": project.gate_high_threshold,
+    }
+    await write_audit(
+        session, actor=current.username, action="set_gate_threshold",
+        project_id=project_id, target_kind="project", target_id=project_id,
+        payload={"old": old, "new": new},
+    )
+    await session.commit()
+    return {"project_id": project_id, **new, "changed": True}
+
+
+@router.post("/projects/{project_id}/archive", status_code=200)
+async def archive_project(
+    project_id: int,
+    session: AsyncSession = Depends(get_session),
+    current: "User" = Depends(get_current_user_required),
+) -> dict:
+    """V3.6 — soft delete. Sets archived_at; project hidden from default lists
+    but findings/runs preserved. Owner / admin only. Reverse via /unarchive.
+    """
+    from datetime import datetime as _dt, UTC as _UTC
+    from ..repositories.audit_log_repo import write_audit
+
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if current.role != "admin":
+        role = current.memberships.get(project_id) if current.memberships else None
+        if role is None:
+            from ..repositories import ProjectMemberRepository
+            role = await ProjectMemberRepository(session).get_role(project_id, current.username)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only owner/admin may archive")
+    if project.archived_at is None:
+        await ProjectRepository(session).update(project, {"archived_at": _dt.now(_UTC)})
+        await write_audit(
+            session, actor=current.username, action="archive_project",
+            project_id=project_id, target_kind="project", target_id=project_id,
+        )
+        await session.commit()
+    return {"project_id": project_id, "archived_at": project.archived_at.isoformat()
+            if project.archived_at else None}
 
 
 @router.delete("/projects/{project_id}", status_code=204)
@@ -482,7 +587,10 @@ async def delete_project(
 ) -> Response:
     """Xoá project + cascade delete artifacts/findings.
 
-    Returns 204 No Content. Returns 404 nếu project không tồn tại.
+    Hard delete — kept for admin-only / cleanup scripts (no auth gate here
+    because legacy test suite + cleanup tooling rely on the unauthenticated
+    contract). Prefer POST /projects/{id}/archive (V3.6 soft delete) for
+    normal "remove this project" flows.
     """
     project_repo = ProjectRepository(session)
     artifact_repo = ArtifactRepository(session)

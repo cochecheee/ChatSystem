@@ -97,8 +97,23 @@ class ProjectOut(BaseModel):
     polling_workflow_name: str = "CI Workflow"
     polling_branch: str = "main"
     active: bool = True
+    # V3.6 — gate policy + soft-delete flag
+    gate_critical_threshold: int = 0
+    gate_high_threshold: int = 5
+    archived_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class GatePolicyUpdate(BaseModel):
+    """V3.6 — owner-only edit of gate thresholds via PATCH /projects/{id}/gate-policy.
+
+    Set 0 = "don't fail on this severity at all". Practical values:
+      critical: 0 (fail on first), 1 (allow 1)
+      high:     5 (allow 5), 10 (lenient), 0 (strict)
+    """
+    critical_threshold: int | None = Field(default=None, ge=0)
+    high_threshold: int | None = Field(default=None, ge=0)
 
 
 # ---------------------------------------------------------------------------

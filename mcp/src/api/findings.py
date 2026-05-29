@@ -188,29 +188,70 @@ async def findings_gate_count(
     session: AsyncSession = Depends(get_session),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict:
-    """Severity counts excluding REVOKED — for the V3.1 Tier 4 Security Gate.
+    """V3.6 — Security Gate decision endpoint.
 
-    A pipeline step in sast-action calls this with the current run's id and
-    decides pass/fail based on the active (non-suppressed) counts. The point:
-    once a developer has triaged false positives, the next run can pass
-    without anyone touching code.
+    The CI gate (sast-action's `security-gate` composite) calls this with
+    the current project_id + run_id to get a pass/fail verdict. Two modes:
 
-    Auth: accepts EITHER a valid JWT (dashboard) OR CI_WEBHOOK_TOKEN as a
-    bearer (CI runner — same secret used for /webhook/pipeline-complete so
-    callers don't manage two tokens) OR anonymous when ANONYMOUS_READ_ENABLED.
+      - **With project_id** (recommended): server reads the project's
+        gate_critical_threshold + gate_high_threshold from DB and decides
+        pass/fail. Returns counts + thresholds + `pass: bool`. Lets owners
+        adjust policy via dashboard without editing CI YAML.
+      - **Without project_id** (legacy): server returns counts only.
+        Caller still applies workflow-input thresholds (V3.1 behavior).
+
+    Auth (V3.6):
+      • JWT (dashboard caller)
+      • Per-project webhook token via `Authorization: Bearer <token>`
+        — matches Project.webhook_token (preferred over global)
+      • Legacy global CI_WEBHOOK_TOKEN (kept for back-compat)
+      • Anonymous when ANONYMOUS_READ_ENABLED=true (legacy bypass)
     """
+    from ..repositories import ProjectRepository
+
+    # --- Auth ---
     if not settings.ANONYMOUS_READ_ENABLED:
         token = credentials.credentials if credentials else None
+        authed = False
         if token and settings.CI_WEBHOOK_TOKEN and token == settings.CI_WEBHOOK_TOKEN:
-            pass
-        else:
+            authed = True   # legacy global webhook token
+        elif token:
+            # V3.5 per-project webhook tokens — anyone holding one of these
+            # can ask the gate question (CI runner doesn't have a JWT). Still
+            # constant-time compared inside the repo helper.
+            proj = await ProjectRepository(session).find_by_webhook_token(token)
+            if proj is not None:
+                authed = True
+        if not authed:
             await get_current_user(credentials)
+
     repo = FindingRepository(session)
     common = dict(project_id=project_id, run_id=run_id, exclude_revoked=True)
     critical = await repo.count_with_filters(severity="critical", **common)
     high = await repo.count_with_filters(severity="high", **common)
     medium = await repo.count_with_filters(severity="medium", **common)
     low = await repo.count_with_filters(severity="low", **common)
+
+    # V3.6 — server-side policy decision when project_id is known.
+    pass_verdict: bool | None = None
+    policy: dict | None = None
+    blocking: list[str] = []
+    if project_id is not None:
+        proj = await ProjectRepository(session).get(project_id)
+        if proj is not None:
+            crit_thr = proj.gate_critical_threshold
+            high_thr = proj.gate_high_threshold
+            policy = {"critical_threshold": crit_thr, "high_threshold": high_thr}
+            if crit_thr > 0 and critical >= crit_thr:
+                blocking.append(
+                    f"critical findings {critical} >= threshold {crit_thr}"
+                )
+            if high_thr > 0 and high >= high_thr:
+                blocking.append(
+                    f"high findings {high} >= threshold {high_thr}"
+                )
+            pass_verdict = len(blocking) == 0
+
     return {
         "project_id": project_id,
         "run_id": run_id,
@@ -219,6 +260,10 @@ async def findings_gate_count(
         "high": high,
         "medium": medium,
         "low": low,
+        # V3.6 additions — None when project_id missing (back-compat shape).
+        "policy": policy,
+        "pass": pass_verdict,
+        "blocking_reasons": blocking,
     }
 
 
