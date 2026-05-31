@@ -38,6 +38,13 @@ COPY --from=builder /opt/venv /opt/venv
 COPY src/ ./src/
 COPY config/ ./config/
 COPY scripts/ ./scripts/
+# V3.6 — Alembic migration runner. Without these, init_db()'s
+# _run_alembic_upgrade() logs "alembic.ini not found — skipping" and the
+# schema never gets V3.6 columns (archived_at, gate_*_threshold) or the
+# new tables (pipeline_runs / audit_log / webhook_deliveries) migrated on
+# top of existing data. Required for production Postgres.
+COPY alembic.ini ./alembic.ini
+COPY migrations/ ./migrations/
 
 # Persist SQLite + per-instance config under /data so a volume keeps it.
 RUN mkdir -p /data && chown -R app:app /app /data
