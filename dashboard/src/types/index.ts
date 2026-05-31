@@ -1,6 +1,7 @@
 export interface Finding {
   id: number;
   artifact_id: number;
+  project_id: number | null;   // V3.2 Pydantic computed via Artifact relationship
   tool: string;
   rule_id: string;
   severity: string;

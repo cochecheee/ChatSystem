@@ -5,6 +5,7 @@ import { POLL_INTERVAL_MS } from '../lib/constants';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import { AiTriageModal } from '../components/AiTriageModal';
+import { RevokeDialog } from '../components/modals/RevokeDialog';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { useOverviewStats } from '../features/findings/useStats';
 import type { AnalysisResult, Finding, Project } from '../types';
@@ -272,14 +273,63 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
   );
 }
 
-function FindingDetail({ finding, showAI, onToggleAI }: {
+function FindingDetail({ finding, showAI, onToggleAI, onRevoked }: {
   finding: Finding;
   showAI: boolean;
   onToggleAI: () => void;
+  onRevoked: () => void;
 }) {
   const owasp = finding.raw_data?.owasp_category as string | undefined;
   const cweName = finding.raw_data?.cwe_name as string | undefined;
   const depScan = isDepScan(finding.tool);
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  // V3.6 FP-B — after a successful revoke, offer to create a Tier 2
+  // suppression rule so future scans matching the same (rule_id, file)
+  // pattern are auto-revoked at ingest time. Different from Tier 1 (which
+  // only inherits via exact dedup_hash) — Tier 2 catches edits that shift
+  // line numbers or wording.
+  const [suppressOpen, setSuppressOpen] = useState(false);
+  const [suppressLoading, setSuppressLoading] = useState(false);
+  const [suppressMsg, setSuppressMsg] = useState<string | null>(null);
+  const [lastJustification, setLastJustification] = useState('');
+
+  // V3.6 FP-A — "Đánh dấu không phải lỗi" wraps the /revoke ChatOps command.
+  // BE enforces security_lead+ role + min 20-char justification. On success
+  // parent re-fetches list so the row badge flips to "Revoked".
+  const handleRevoke = async (justification: string) => {
+    await api.chat.command({
+      command: '/revoke',
+      finding_id: finding.id,
+      justification,
+    });
+    setLastJustification(justification);
+    onRevoked();
+    setSuppressOpen(true);  // FP-B prompt
+  };
+
+  const handleSuppress = async () => {
+    if (!finding.project_id) {
+      setSuppressMsg('Không xác định được project — bỏ qua.');
+      return;
+    }
+    setSuppressLoading(true);
+    try {
+      await api.projects.addSuppression(finding.project_id, {
+        rule_id: finding.rule_id,
+        file_glob: finding.file_path || null,
+        tool: finding.tool,
+        reason: `Suppression từ FP marker (finding #${finding.id}): ${lastJustification}`.slice(0, 500),
+        expires_in_days: 90,
+      });
+      setSuppressMsg('Đã tạo rule. Các lần quét sau sẽ tự bỏ qua finding cùng pattern.');
+      setTimeout(() => { setSuppressOpen(false); setSuppressMsg(null); }, 2500);
+    } catch (e) {
+      setSuppressMsg(`Lỗi: ${(e as Error).message}`);
+      setSuppressLoading(false);
+    }
+  };
+
+  const alreadyRevoked = finding.status === 'REVOKED';
 
   const SEV_FG: Record<string, string> = {
     critical: 'var(--sev-crit-fg)', high: 'var(--sev-high-fg)',
@@ -318,11 +368,90 @@ function FindingDetail({ finding, showAI, onToggleAI }: {
               </div>
               <h2 className="h2" style={{ lineHeight: 1.4 }}>{finding.message}</h2>
             </div>
-            <button className="btn sm" style={{ flexShrink: 0, marginLeft: 12 }} onClick={onToggleAI}>
-              <Icon name="sparkle" size={12} /> {showAI ? 'Hide AI' : 'Ask AI'}
-            </button>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 12 }}>
+              {!alreadyRevoked && (
+                <button
+                  className="btn sm"
+                  onClick={() => setRevokeOpen(true)}
+                  title="Đánh dấu finding này không phải lỗi thật. Các lần quét sau sẽ tự bỏ qua theo dedup_hash."
+                >
+                  <Icon name="shield" size={12} /> Đánh dấu không phải lỗi
+                </button>
+              )}
+              <button className="btn sm" onClick={onToggleAI}>
+                <Icon name="sparkle" size={12} /> {showAI ? 'Hide AI' : 'Ask AI'}
+              </button>
+            </div>
           </div>
         </div>
+
+        <RevokeDialog
+          open={revokeOpen}
+          findingId={finding.id}
+          onClose={() => setRevokeOpen(false)}
+          onConfirm={handleRevoke}
+        />
+
+        {/* V3.6 FP-B — post-revoke suppression shortcut */}
+        {suppressOpen && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1001,
+              background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onClick={(e) => { if (e.target === e.currentTarget) setSuppressOpen(false); }}
+          >
+            <div style={{
+              background: 'var(--bg-elev)', border: '1px solid var(--line)',
+              borderRadius: 10, padding: '24px 28px', width: 480, maxWidth: '90vw',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            }}>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>
+                Tạo rule chặn future scans?
+              </div>
+              <div className="muted" style={{ fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>
+                Đã đánh dấu finding #{finding.id} là không phải lỗi. Tạo thêm
+                <strong> suppression rule </strong>để mọi finding cùng pattern
+                ở các lần quét tiếp theo tự động bỏ qua (Tier 2 — pattern-based,
+                khác với Tier 1 chỉ match dedup_hash chính xác).
+              </div>
+              <div style={{
+                background: 'var(--surface-2)', border: '1px solid var(--line)',
+                borderRadius: 6, padding: '10px 12px', marginBottom: 14, fontSize: 12,
+              }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
+                  <span style={{ color: 'var(--fg-3)' }}>Rule:</span>
+                  <span className="mono" style={{ wordBreak: 'break-all' }}>{finding.rule_id}</span>
+                  <span style={{ color: 'var(--fg-3)' }}>File pattern:</span>
+                  <span className="mono" style={{ wordBreak: 'break-all' }}>{finding.file_path}</span>
+                  <span style={{ color: 'var(--fg-3)' }}>Tool:</span>
+                  <span className="mono">{finding.tool}</span>
+                  <span style={{ color: 'var(--fg-3)' }}>Hết hạn:</span>
+                  <span>90 ngày (tự động)</span>
+                </div>
+              </div>
+              {suppressMsg && (
+                <div style={{
+                  fontSize: 12, padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+                  background: suppressMsg.startsWith('Lỗi') ? 'rgba(229,57,53,0.15)' : 'rgba(67,160,71,0.15)',
+                  color: suppressMsg.startsWith('Lỗi') ? 'var(--sev-crit-fg)' : 'var(--sev-low-fg)',
+                }}>{suppressMsg}</div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  className="btn"
+                  onClick={() => setSuppressOpen(false)}
+                  disabled={suppressLoading}
+                >Bỏ qua</button>
+                <button
+                  className="btn primary"
+                  onClick={handleSuppress}
+                  disabled={suppressLoading || !finding.project_id}
+                >{suppressLoading ? 'Đang tạo…' : 'Tạo rule'}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div style={{ padding: '20px 28px 40px', flex: 1 }}>
           {/* CVE update card — replaces metadata clutter for dep-scan findings */}
@@ -697,6 +826,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
               finding={selected}
               showAI={showAI}
               onToggleAI={() => setShowAI(s => !s)}
+              onRevoked={() => setRefetchTick(t => t + 1)}
             />
           ) : (
             <div className="empty" style={{ marginTop: 80 }}>
