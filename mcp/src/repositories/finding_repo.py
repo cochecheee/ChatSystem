@@ -1,12 +1,12 @@
 """Finding repository — tất cả DB query liên quan tới Finding."""
 from __future__ import annotations
 
-from sqlalchemy import delete, func as sql_func, or_, select
+from sqlalchemy import delete, or_, select
+from sqlalchemy import func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models.entities import Artifact, Finding
-
 
 # Tools được coi là dependency-scan thay vì SAST. Dùng cho filter ?category=
 DEPS_TOOLS: set[str] = {

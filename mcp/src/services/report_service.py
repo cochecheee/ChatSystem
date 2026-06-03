@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import html
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

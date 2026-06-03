@@ -15,8 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.services.llm.prompt_loader import PromptRegistry, get_registry
-
+from src.services.llm.prompt_loader import get_registry
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots" / "prompts"
 UPDATE = os.environ.get("UPDATE_PROMPT_SNAPSHOTS") == "1"

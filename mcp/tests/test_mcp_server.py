@@ -130,8 +130,8 @@ async def test_get_finding_not_found(client):
 
 @pytest.mark.asyncio
 async def test_approve_persists_audit(client, seeded_finding):
-    from src.mcp_server import mcp
     from src.core.db import AsyncSessionLocal
+    from src.mcp_server import mcp
     from src.repositories import FindingRepository
 
     result = await mcp.call_tool(

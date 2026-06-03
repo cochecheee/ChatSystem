@@ -31,9 +31,9 @@ from alembic import context
 # Make `src.*` importable when running `alembic` from mcp/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.core.config import settings  # noqa: E402
-from src.core.db import Base  # noqa: E402
-from src.models import entities as _entities  # noqa: F401, E402  — register tables on Base.metadata
+from src.core.config import settings
+from src.core.db import Base
+from src.models import entities as _entities
 
 config = context.config
 

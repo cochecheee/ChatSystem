@@ -9,7 +9,6 @@ import pytest
 
 from src.models.entities import Artifact, Finding, Project
 
-
 READ_ENDPOINTS_NO_PATH = [
     "/projects",
     "/findings",

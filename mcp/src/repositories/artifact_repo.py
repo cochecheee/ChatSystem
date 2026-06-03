@@ -32,7 +32,9 @@ class ArtifactRepository:
         Một run có thể có nhiều artifacts; trả về run_id của artifact mới nhất
         mà có ít nhất 1 finding trong DB. Dùng cho Overview "scan mới nhất".
         """
-        from sqlalchemy import desc, func as sql_func
+        from sqlalchemy import desc
+        from sqlalchemy import func as sql_func
+
         from ..models.entities import Finding
         query = (
             select(Artifact.github_run_id, sql_func.max(Artifact.created_at).label("latest"))

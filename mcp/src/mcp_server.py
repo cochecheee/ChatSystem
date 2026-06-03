@@ -23,14 +23,13 @@ import logging
 from datetime import UTC, datetime
 
 from fastmcp import FastMCP
-from sqlalchemy import select
 
 from .core.auth import User
 from .core.config import settings
 from .core.db import AsyncSessionLocal
-from .models.entities import Artifact, Finding, Project
+from .models.entities import Finding
 from .models.schemas import CommandRequest
-from .repositories import FindingRepository, ProjectRepository
+from .repositories import FindingRepository
 from .services.command_service import CommandService
 from .services.github_client import GitHubClient
 from .services.llm.service import LLMAnalysisService
@@ -176,7 +175,7 @@ async def approve_finding(finding_id: int, justification: str) -> dict:
                 _user("security_lead"),
                 session,
             )
-        except Exception as exc:  # noqa: BLE001 — surface HTTPException details to MCP client
+        except Exception as exc:
             return {"status": "error", "detail": str(exc)}
         return resp.model_dump()
 
@@ -198,7 +197,7 @@ async def revoke_finding(finding_id: int, justification: str) -> dict:
                 _user("security_lead"),
                 session,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return {"status": "error", "detail": str(exc)}
         return resp.model_dump()
 
@@ -209,7 +208,7 @@ async def list_pipelines(limit: int = 20) -> dict:
     limit = max(1, min(50, int(limit)))
     try:
         runs = await GitHubClient().list_workflow_runs(workflow_name="", branch="", status="")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"error": "github_unreachable", "detail": str(exc)}
     out = []
     for r in runs[:limit]:
@@ -249,7 +248,7 @@ async def trigger_scan(workflow_filename: str = "security.yml") -> dict:
             "repo": f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
             "dispatched_at": datetime.now(UTC).isoformat(),
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"status": "error", "detail": str(exc)}
 
 

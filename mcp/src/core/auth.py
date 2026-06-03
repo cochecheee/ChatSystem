@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -110,6 +110,7 @@ def require_project_access(min_role: str = "viewer"):
     success so the caller can read .username for audit logs.
     """
     from fastapi import Request
+
     from ..repositories import ProjectMemberRepository, role_satisfies
 
     async def _dep(

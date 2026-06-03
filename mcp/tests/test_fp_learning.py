@@ -5,9 +5,7 @@ new ingest should automatically inherit the REVOKED status with a clear
 audit trail. This is the foundational learning loop: dev revokes once,
 system suppresses forever (until they re-approve or the hash changes).
 """
-import io
 import json
-import zipfile
 from unittest.mock import AsyncMock
 
 import pytest
@@ -102,7 +100,7 @@ async def test_second_run_inherits_revoked_status(db):
         f1.status = "REVOKED"
         f1.revoked_by = "alice"
         f1.revoke_justification = "Intended use of exec — not a vulnerability"
-        from datetime import datetime, UTC
+        from datetime import UTC, datetime
         f1.revoked_at = datetime.now(UTC)
         await session.commit()
         original_hash = f1.dedup_hash
@@ -141,7 +139,7 @@ async def test_revoke_does_not_cross_projects(db):
         f.status = "REVOKED"
         f.revoked_by = "alice"
         f.revoke_justification = "FP on project 1"
-        from datetime import datetime, UTC
+        from datetime import UTC, datetime
         f.revoked_at = datetime.now(UTC)
         await session.commit()
 
@@ -259,8 +257,8 @@ async def test_findings_run_id_filter(client, db_session):
     ])
     await db_session.commit()
 
-    run100 = (await client.get(f"/findings?run_id=100")).json()
-    run200 = (await client.get(f"/findings?run_id=200")).json()
+    run100 = (await client.get("/findings?run_id=100")).json()
+    run200 = (await client.get("/findings?run_id=200")).json()
     assert len(run100) == 1 and run100[0]["rule_id"] == "r1"
     assert len(run200) == 1 and run200[0]["rule_id"] == "r2"
 
@@ -372,7 +370,8 @@ async def test_suppression_rule_glob_mismatch(db):
 @pytest.mark.asyncio
 async def test_expired_suppression_inactive(db):
     """A rule past its expires_at must not match."""
-    from datetime import datetime, UTC, timedelta
+    from datetime import UTC, datetime, timedelta
+
     from src.models.entities import SuppressionRule
     project_id, artifact_id = await _create_project_and_artifact(db, "art-expired")
     async with db() as session:
@@ -400,7 +399,7 @@ async def test_expired_suppression_inactive(db):
 async def test_triage_service_auto_revokes_high_confidence_fp(db):
     """Stubbed LLM classifies one of two findings as FALSE_POSITIVE @ 0.95 →
     only that one is auto-revoked; the other (TRUE_POSITIVE) stays pending."""
-    from src.services.llm.triage import TriageService, TriageBatch, TriageItem
+    from src.services.llm.triage import TriageBatch, TriageItem, TriageService
 
     project_id, artifact_id = await _create_project_and_artifact(db, "art-triage")
 
@@ -452,7 +451,7 @@ async def test_triage_service_auto_revokes_high_confidence_fp(db):
 @pytest.mark.asyncio
 async def test_triage_dry_run_does_not_revoke(db):
     """dry_run=true: classify but don't write."""
-    from src.services.llm.triage import TriageService, TriageBatch, TriageItem
+    from src.services.llm.triage import TriageBatch, TriageItem, TriageService
 
     project_id, artifact_id = await _create_project_and_artifact(db, "art-dry")
     async with db() as session:
@@ -487,7 +486,7 @@ async def test_triage_dry_run_does_not_revoke(db):
 @pytest.mark.asyncio
 async def test_triage_low_confidence_left_alone(db):
     """Confidence below threshold → no auto-revoke even when FALSE_POSITIVE."""
-    from src.services.llm.triage import TriageService, TriageBatch, TriageItem
+    from src.services.llm.triage import TriageBatch, TriageItem, TriageService
 
     project_id, artifact_id = await _create_project_and_artifact(db, "art-low")
     async with db() as session:
@@ -519,7 +518,7 @@ async def test_triage_low_confidence_left_alone(db):
 @pytest.mark.asyncio
 async def test_triage_batches_at_size(db):
     """When findings > BATCH_SIZE, llm_caller is invoked N=ceil(total/batch) times."""
-    from src.services.llm.triage import TriageService, TriageBatch
+    from src.services.llm.triage import TriageBatch, TriageService
 
     project_id, artifact_id = await _create_project_and_artifact(db, "art-batch")
     async with db() as session:
@@ -555,6 +554,7 @@ async def test_triage_batches_at_size(db):
 async def test_process_run_updates_last_processed_run_id(db):
     """BUG-1 — process_run must bump project.last_processed_run_id (was poller-only)."""
     from unittest.mock import AsyncMock
+
     from src.models.entities import Project
     async with db() as session:
         p = Project(
@@ -595,6 +595,7 @@ async def test_process_run_updates_last_processed_run_id(db):
 async def test_process_run_isolates_per_artifact_failure(db):
     """BUG-4 — one bad artifact must not stop the rest of the run."""
     from unittest.mock import AsyncMock
+
     from src.models.entities import Project
     async with db() as session:
         p = Project(
@@ -638,6 +639,7 @@ async def test_process_run_isolates_per_artifact_failure(db):
 async def test_process_run_no_duplicates_on_reingest(db):
     """BUG-5 — re-firing webhook on a 'pending' artifact must NOT append duplicate findings."""
     from unittest.mock import AsyncMock
+
     from src.models.entities import Artifact, Project
     async with db() as session:
         p = Project(

@@ -30,7 +30,7 @@ def _encrypt_kwargs(kwargs: dict) -> dict:
     """Encrypt sensitive fields trong dict pre-insert/update."""
     out = dict(kwargs)
     for fld in _ENCRYPTED_FIELDS:
-        if fld in out and out[fld]:
+        if out.get(fld):
             out[fld] = encrypt_field(out[fld])
     return out
 

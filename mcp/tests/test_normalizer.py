@@ -1,4 +1,5 @@
 import json
+
 import pytest
 
 from src.services.normalizer import (

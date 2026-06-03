@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -37,7 +37,7 @@ class ArtifactProfile:
         return any(artifact_name.startswith(p) for p in self.prefixes)
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_profile(name: str | None = None) -> ArtifactProfile:
     profile_name = name or os.getenv("ARTIFACT_PROFILE", _DEFAULT_PROFILE)
     path = _PROFILES_DIR / f"{profile_name}.yml"

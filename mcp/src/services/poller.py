@@ -129,12 +129,12 @@ class GitHubPoller:
                             if db_proj is not None:
                                 db_proj.last_processed_run_id = run["id"]
                                 await session.commit()
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         log.error(
                             "Project %d run %d failed: %s",
                             project.id, run["id"], exc,
                         )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("Poll project %d failed", project.id)
 
     async def _poll_single_tenant(self) -> None:

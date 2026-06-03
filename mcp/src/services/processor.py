@@ -7,12 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.db import AsyncSessionLocal
+from ..core.guardrails import ScrubbingService
 from ..core.profiles import ArtifactProfile, load_profile
 from ..models.entities import Artifact, Finding
 from ..models.schemas import compute_dedup_hash
 from .enricher import DataEnricher
 from .github_client import GitHubClient
-from ..core.guardrails import ScrubbingService
 from .normalizer import NormalizerFactory
 
 log = logging.getLogger(__name__)
@@ -152,8 +152,9 @@ class SecurityProcessor:
                     # Re-running _run on it would APPEND findings on top of the
                     # half-written set, producing duplicates. Wipe its findings
                     # first so the next pass is a clean re-ingest.
-                    from ..models.entities import Finding as FindingModel
                     from sqlalchemy import delete as _sql_delete
+
+                    from ..models.entities import Finding as FindingModel
                     await session.execute(
                         _sql_delete(FindingModel).where(
                             FindingModel.artifact_id == db_artifact.id,
@@ -221,7 +222,8 @@ class SecurityProcessor:
             # Tier 1 wins when both match (more specific = exact hash).
             from ..repositories.finding_repo import FindingRepository
             from ..repositories.suppression_repo import (
-                SuppressionRuleRepository, rule_matches,
+                SuppressionRuleRepository,
+                rule_matches,
             )
             repo = FindingRepository(session)
             sup_repo = SuppressionRuleRepository(session)
@@ -298,7 +300,7 @@ class SecurityProcessor:
 
             try:
                 findings = normalizer.normalize(scrubbed, artifact_id=db_artifact_id)
-            except Exception as exc:  # noqa: BLE001 - isolate per-file parse errors
+            except Exception as exc:
                 log.warning("Failed to normalize %s: %s — skipping this file", filename, exc)
                 continue
 

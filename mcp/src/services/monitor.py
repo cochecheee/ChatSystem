@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import desc, select
@@ -57,7 +57,7 @@ async def _check_once(project_id: int, url: str) -> UptimeCheck:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             resp = await client.get(url)
             status = resp.status_code
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         error = str(exc)[:500]
 
     duration_ms = int((time.perf_counter() - started) * 1000)
@@ -179,7 +179,7 @@ async def run_monitor_cycle() -> int:
             check = await _check_once(project_id, url)
             await _maybe_alert(check)
             count += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("Monitor failed for %s", url)
     return count
 
@@ -191,7 +191,7 @@ async def monitor_loop() -> None:
     while True:
         try:
             await run_monitor_cycle()
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("Monitor cycle errored")
         await asyncio.sleep(interval)
 
@@ -223,5 +223,5 @@ async def prune_loop(days: int = 7, interval_seconds: int = 86_400) -> None:
             removed = await prune_old_checks(days=days)
             if removed:
                 log.info("Pruned %d old uptime_checks rows", removed)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("prune_old_checks failed")

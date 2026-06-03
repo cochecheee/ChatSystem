@@ -1,8 +1,6 @@
 """V3.6 — gate policy + soft delete + audit log smoke tests."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from src.core.auth import create_access_token
@@ -42,6 +40,7 @@ async def test_set_gate_threshold_writes_audit(client, project, db_session):
 
     # Audit row should exist
     from sqlalchemy import select
+
     from src.models.entities import AuditLog
     rows = (await db_session.execute(
         select(AuditLog).where(AuditLog.action == "set_gate_threshold")

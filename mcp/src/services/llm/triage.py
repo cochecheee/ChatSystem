@@ -8,9 +8,8 @@ with confidence above a threshold. The point: cut manual triage load from
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession

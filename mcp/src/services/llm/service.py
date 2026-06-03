@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.config import settings
+from ...core.guardrails import InjectionGuardrail, ScrubbingService
 from ...models.entities import Artifact, Finding, Project
 from ...models.schemas import AnalysisResult
 from ..github_client import GitHubClient
-from ...core.guardrails import InjectionGuardrail, ScrubbingService
 from .client import GeminiClient
 from .prompt_loader import get_registry
 from .schemas import AnalysisOutput

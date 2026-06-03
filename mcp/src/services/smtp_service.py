@@ -42,7 +42,7 @@ def send_alert_email(*, subject: str, body_html: str, body_text: str = "") -> bo
             srv.send_message(msg)
         log.info("Sent alert email to %s: %s", settings.EMAIL_TO, subject)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Failed to send alert email — continuing without")
         return False
 

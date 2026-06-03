@@ -1,7 +1,7 @@
 import enum
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String, Text
 
 # Timezone-aware DateTime singleton — passed to every `mapped_column(DT_TZ, ...)`
 # so Postgres column type is TIMESTAMP WITH TIME ZONE. asyncpg refuses to

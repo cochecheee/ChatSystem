@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import fnmatch
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.entities import SuppressionRule
-
 
 # Ordered low → high, mirrors finding.severity values used elsewhere.
 SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}

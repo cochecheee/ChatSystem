@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.entities import ProjectMember
 
-
 # Role lattice — higher index = more permission.
 ROLE_LATTICE = ["viewer", "developer", "security_lead", "owner"]
 

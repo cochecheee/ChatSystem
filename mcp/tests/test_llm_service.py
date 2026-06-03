@@ -243,8 +243,8 @@ async def test_analyze_uses_project_gemini_key_when_set():
 @pytest.mark.asyncio
 async def test_analyze_falls_back_to_env_when_project_has_no_key():
     """Project rỗng gemini_api_key → dùng settings (env)."""
-    from src.services.llm import service as svc_mod
     from src.core.config import settings
+    from src.services.llm import service as svc_mod
 
     captured: list[tuple[str, str]] = []
 

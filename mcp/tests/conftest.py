@@ -21,11 +21,11 @@ os.environ["SKIP_ALEMBIC"] = "1"
 # setting locally via patch().
 os.environ.setdefault("ANONYMOUS_READ_ENABLED", "true")
 
-import pytest_asyncio  # noqa: E402
-from httpx import ASGITransport, AsyncClient  # noqa: E402
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
-from src.core.db import Base, engine, init_db  # noqa: E402
-from src.main import app  # noqa: E402
+from src.core.db import Base, engine, init_db
+from src.main import app
 
 
 @pytest_asyncio.fixture

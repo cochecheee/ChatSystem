@@ -70,7 +70,7 @@ async def init_db() -> None:
     if os.environ.get("SKIP_ALEMBIC") != "1":
         try:
             await _run_alembic_upgrade()
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("Alembic upgrade failed — continuing without migration")
 
 

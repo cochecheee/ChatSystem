@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -12,8 +12,8 @@ from ..core.auth import User, enforce_finding_project_access
 from ..core.config import settings
 from ..models.entities import Artifact, CommandFeedback, Finding
 from ..models.schemas import CommandRequest, CommandResponse
-from ..services.llm.service import LLMAnalysisService
 from ..services.github_client import GitHubClient
+from ..services.llm.service import LLMAnalysisService
 from . import report_service
 
 log = logging.getLogger(__name__)
@@ -245,7 +245,7 @@ class CommandService:
             log.info("/status repo override %s ignored — single-tenant runtime", request.repo)
         try:
             runs = await self._github.list_workflow_runs(workflow_name="", branch="", status="")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise HTTPException(status_code=502, detail=f"GitHub API error: {exc}")
         if not runs:
             return CommandResponse(

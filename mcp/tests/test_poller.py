@@ -161,8 +161,8 @@ async def test_multi_tenant_iterates_active_projects(monkeypatch):
     Mock 2 active projects + 1 inactive. Verify list_active returns 2,
     processor.process_run called for each new run per project.
     """
-    from src.services import poller as poller_mod
     from src.repositories import ProjectRepository
+    from src.services import poller as poller_mod
 
     monkeypatch.setattr(poller_mod.settings, "MULTI_TENANT_ENABLED", True)
 
@@ -240,8 +240,8 @@ async def test_multi_tenant_iterates_active_projects(monkeypatch):
 @pytest.mark.asyncio
 async def test_multi_tenant_empty_active_list(monkeypatch):
     """Không có active project → skip cycle, không crash."""
-    from src.services import poller as poller_mod
     from src.repositories import ProjectRepository
+    from src.services import poller as poller_mod
 
     monkeypatch.setattr(poller_mod.settings, "MULTI_TENANT_ENABLED", True)
     monkeypatch.setattr(ProjectRepository, "list_active", AsyncMock(return_value=[]))
@@ -255,8 +255,8 @@ async def test_multi_tenant_empty_active_list(monkeypatch):
 @pytest.mark.asyncio
 async def test_multi_tenant_one_project_fail_does_not_crash_cycle(monkeypatch):
     """1 project lỗi → log + skip, project khác vẫn process."""
-    from src.services import poller as poller_mod
     from src.repositories import ProjectRepository
+    from src.services import poller as poller_mod
 
     monkeypatch.setattr(poller_mod.settings, "MULTI_TENANT_ENABLED", True)
 

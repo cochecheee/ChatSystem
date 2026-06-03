@@ -80,8 +80,9 @@ async def verify_signature_against_any_project(
     Returns: matched project_id when signature checks; None + outcome
     indicating the failure mode otherwise.
     """
-    from ..repositories.project_repo import _decrypt_project
     from sqlalchemy import select
+
+    from ..repositories.project_repo import _decrypt_project
 
     if not signature_header:
         return SignatureCheckResult(outcome="missing")

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...models.entities import Artifact, Finding, Project
+from ...models.entities import Artifact, Project
 from ...repositories import FindingRepository
 from .client import GeminiClient
 from .prompt_loader import get_registry

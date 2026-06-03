@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.guardrails import InjectionGuardrail, _MAX_CONTENT_LENGTH
+from src.core.guardrails import _MAX_CONTENT_LENGTH, InjectionGuardrail
 
 
 @pytest.fixture

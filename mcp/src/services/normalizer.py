@@ -215,7 +215,7 @@ class SarifNormalizer(BaseNormalizer):
                             result, tool_name, rules_index, artifact_id
                         )
                     )
-                except Exception as exc:  # noqa: BLE001 - skip individual result, keep going
+                except Exception as exc:
                     log.debug("Skipping malformed SARIF result: %s", exc)
                     continue
 

@@ -1,7 +1,7 @@
 import pytest
 
 from src.models.schemas import FindingCreate
-from src.services.enricher import DataEnricher, _OWASP_2021, _SEVERITY_TO_CVSS
+from src.services.enricher import DataEnricher
 
 
 @pytest.fixture

@@ -23,7 +23,7 @@ async def test_delete_project_cascade(client, db_session):
     assert resp.status_code == 204
 
     # Verify cascade
-    resp = await client.get(f"/findings")
+    resp = await client.get("/findings")
     assert all(f.get("artifact_id") != a.id for f in resp.json())
 
     resp = await client.get("/projects")

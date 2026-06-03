@@ -12,7 +12,6 @@ from src.core.db import Base
 from src.models.entities import Artifact, Finding, Project
 from src.services.processor import SecurityProcessor
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

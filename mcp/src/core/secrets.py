@@ -38,7 +38,7 @@ def _get_fernet() -> Fernet | None:
         return None
     try:
         return Fernet(settings.FERNET_KEY.encode())
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Invalid FERNET_KEY — encryption disabled")
         return None
 

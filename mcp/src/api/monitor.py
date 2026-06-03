@@ -1,7 +1,7 @@
 """Monitor API — V2.4. UptimeCheck list + Alert list + manual ping trigger."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select

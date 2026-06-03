@@ -25,8 +25,10 @@ from ..core.auth import (
     User,
     allowed_project_ids,
     get_current_user,
-    get_current_user as get_current_user_required,
     require_read_access,
+)
+from ..core.auth import (
+    get_current_user as get_current_user_required,
 )
 from ..core.config import settings
 from ..core.db import get_session

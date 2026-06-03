@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 import logging
-import os
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import User, create_access_token, get_current_user
 from ..core.db import get_session
-from ..repositories import FindingRepository, ProjectMemberRepository
 from ..models.schemas import (
     CommandRequest,
     CommandResponse,
     TokenRequest,
     TokenResponse,
 )
-from ..services.command_service import CommandService
+from ..repositories import FindingRepository, ProjectMemberRepository
 from ..services import report_service
+from ..services.command_service import CommandService
 from ..services.llm.client import GeminiClient
 
 log = logging.getLogger(__name__)
@@ -193,7 +192,7 @@ async def chat_message(
     try:
         context = await _build_context(db, request.finding_id)
         reply = await _get_gemini().chat(text, context=context)
-    except Exception as exc:  # noqa: BLE001 — Gemini may be unavailable
+    except Exception as exc:
         log.warning("Gemini chat failed: %s", exc)
         if suggested:
             reply = f"Tôi nghĩ bạn muốn chạy lệnh `{suggested}`. Nhấn vào gợi ý bên dưới để thực thi."

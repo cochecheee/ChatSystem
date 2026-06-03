@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -45,6 +45,7 @@ async def test_explain_finding_returns_analysis(client, project):
     try:
         # create artifact + finding first via process endpoint
         from unittest.mock import patch as upatch
+
         from src.services.processor import SecurityProcessor
 
         with upatch.object(SecurityProcessor, "process_artifact", new_callable=AsyncMock, return_value=0):
@@ -56,9 +57,9 @@ async def test_explain_finding_returns_analysis(client, project):
         artifact_id = proc_resp.json()["db_artifact_id"]
 
         # inject a finding directly via DB (easier than full pipeline)
+
         from src.core.db import AsyncSessionLocal
         from src.models.entities import Finding
-        from datetime import datetime, UTC
 
         async with AsyncSessionLocal() as session:
             finding = Finding(
@@ -88,8 +89,8 @@ async def test_explain_finding_returns_analysis(client, project):
 
 @pytest.mark.asyncio
 async def test_explain_finding_returns_cached_if_already_analyzed(client, project):
-    from src.main import app
     from src.core.db import AsyncSessionLocal
+    from src.main import app
     from src.models.entities import Artifact, Finding
 
     cached = SAMPLE_RESULT.model_dump()
