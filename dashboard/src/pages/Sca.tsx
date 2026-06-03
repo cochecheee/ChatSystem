@@ -4,6 +4,7 @@ import type { FindingListParams } from '../api/client';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
+import { flagFalsePositive } from '../features/findings/flagFalsePositive';
 import type { Finding, Project } from '../types';
 
 const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
@@ -184,7 +185,15 @@ function SummaryBar({ groups }: { groups: PackageGroup[] }) {
   );
 }
 
-function PackageDetail({ group }: { group: PackageGroup }) {
+function PackageDetail({
+  group,
+  onFlag,
+  flaggingId,
+}: {
+  group: PackageGroup;
+  onFlag: (f: Finding) => void;
+  flaggingId: number | null;
+}) {
   const cmd = upgradeCmd(group.name, group.recommended, group.manifestPath);
 
   return (
@@ -285,6 +294,19 @@ function PackageDetail({ group }: { group: PackageGroup }) {
                       fix: {fixed}
                     </span>
                   )}
+                  {f.status === 'REVOKED' ? (
+                    <span className="row-status-badge revoked">Rev</span>
+                  ) : (
+                    <button
+                      className="btn ghost sm"
+                      style={{ padding: '1px 6px', fontSize: 10 }}
+                      title="Đánh dấu CVE này là false positive — lần quét sau tự bỏ qua (cần security_lead+)"
+                      disabled={flaggingId === f.id}
+                      onClick={() => onFlag(f)}
+                    >
+                      <Icon name="shield" size={11} /> {flaggingId === f.id ? '…' : 'Flag FP'}
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -322,6 +344,12 @@ export function PageSCA() {
   const [sevFloor, setSevFloor] = useState<SevFloor>('high'); // default: HIGH+CRITICAL only
   const [search, setSearch] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [refetchTick, setRefetchTick] = useState(0);
+
+  // Inline "flag CVE as false positive" — same 1-click revoke + suppression
+  // flow as the Vulnerabilities page. Backend keeps the security_lead+ gate.
+  const [flaggingId, setFlaggingId] = useState<number | null>(null);
+  const [flagNotice, setFlagNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     api.projects
@@ -345,7 +373,24 @@ export function PageSCA() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [projectFilter, ambient.project_id]);
+  }, [projectFilter, ambient.project_id, refetchTick]);
+
+  const handleFlag = async (f: Finding) => {
+    setFlaggingId(f.id);
+    setFlagNotice(null);
+    try {
+      await flagFalsePositive(f);
+      setFlagNotice({
+        kind: 'ok',
+        text: `Đã flag CVE #${f.id} là false positive — lần quét sau sẽ tự bỏ qua.`,
+      });
+      setRefetchTick((t) => t + 1);
+    } catch (e) {
+      setFlagNotice({ kind: 'err', text: `Không flag được #${f.id}: ${(e as Error).message}` });
+    } finally {
+      setFlaggingId(null);
+    }
+  };
 
   const groups = useMemo(() => {
     const floor = SEV_RANK[sevFloor] ?? 3;
@@ -444,6 +489,33 @@ export function PageSCA() {
             ))}
           </div>
 
+          {flagNotice && (
+            <div
+              style={{
+                margin: '6px 12px 0',
+                padding: '6px 10px',
+                borderRadius: 6,
+                fontSize: 11.5,
+                flexShrink: 0,
+                background:
+                  flagNotice.kind === 'err' ? 'rgba(229,57,53,0.15)' : 'rgba(67,160,71,0.15)',
+                color: flagNotice.kind === 'err' ? 'var(--sev-crit-fg)' : 'var(--sev-low-fg)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <span style={{ flex: 1 }}>{flagNotice.text}</span>
+              <button
+                className="btn ghost sm"
+                style={{ padding: '0 4px' }}
+                onClick={() => setFlagNotice(null)}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            </div>
+          )}
+
           {!loading && groups.length > 0 && <SummaryBar groups={groups} />}
 
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
@@ -508,7 +580,7 @@ export function PageSCA() {
           }}
         >
           {selected ? (
-            <PackageDetail group={selected} />
+            <PackageDetail group={selected} onFlag={handleFlag} flaggingId={flaggingId} />
           ) : (
             <div className="empty" style={{ marginTop: 80 }}>
               {loading ? 'Loading…' : 'Chọn một dependency để xem chi tiết'}

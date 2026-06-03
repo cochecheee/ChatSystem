@@ -5,7 +5,9 @@ import { useOverviewStats } from '../features/findings/useStats';
 import { useVulnsFindings } from '../features/findings/useVulnsFindings';
 import { FindingDetail } from '../features/findings/FindingDetail';
 import { DEP_SCAN_TOOLS, SevChip } from '../features/findings/sast';
+import { flagFalsePositive } from '../features/findings/flagFalsePositive';
 import { POLL_INTERVAL_MS } from '../lib/constants';
+import type { Finding } from '../types';
 
 export function PageVulns({ initialId }: { initialId?: number }) {
   // Vulns page = SAST findings only. Dependencies → SCA page.
@@ -38,6 +40,28 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const { stats } = useOverviewStats(POLL_INTERVAL_MS);
   const [showAI, setShowAI] = useState(true);
   const [triageOpen, setTriageOpen] = useState(false);
+
+  // Inline "flag as false positive" — 1-click revoke + Tier 2 suppression so
+  // the next pipeline scan skips it. Backend keeps the security_lead+ gate.
+  const [flaggingId, setFlaggingId] = useState<number | null>(null);
+  const [flagNotice, setFlagNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const handleFlag = async (f: Finding) => {
+    setFlaggingId(f.id);
+    setFlagNotice(null);
+    try {
+      await flagFalsePositive(f);
+      setFlagNotice({
+        kind: 'ok',
+        text: `Đã flag finding #${f.id} là false positive — lần quét sau sẽ tự bỏ qua.`,
+      });
+      refetch();
+    } catch (e) {
+      setFlagNotice({ kind: 'err', text: `Không flag được #${f.id}: ${(e as Error).message}` });
+    } finally {
+      setFlaggingId(null);
+    }
+  };
 
   // Total SAST findings từ server stats (across all severity/status filter).
   let sastTotal = 0;
@@ -255,6 +279,34 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             </div>
           )}
 
+          {/* Flag-as-FP result notice */}
+          {flagNotice && (
+            <div
+              style={{
+                margin: '6px 12px 0',
+                padding: '6px 10px',
+                borderRadius: 6,
+                fontSize: 11.5,
+                flexShrink: 0,
+                background:
+                  flagNotice.kind === 'err' ? 'rgba(229,57,53,0.15)' : 'rgba(67,160,71,0.15)',
+                color: flagNotice.kind === 'err' ? 'var(--sev-crit-fg)' : 'var(--sev-low-fg)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <span style={{ flex: 1 }}>{flagNotice.text}</span>
+              <button
+                className="btn ghost sm"
+                style={{ padding: '0 4px' }}
+                onClick={() => setFlagNotice(null)}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            </div>
+          )}
+
           {/* Finding list */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {loading && <div className="empty">Loading…</div>}
@@ -289,6 +341,20 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                   )}
                   {f.status === 'APPROVED' && <span className="row-status-badge approved">OK</span>}
                   {f.status === 'REVOKED' && <span className="row-status-badge revoked">Rev</span>}
+                  {f.status !== 'REVOKED' && (
+                    <button
+                      className="btn ghost sm"
+                      style={{ marginLeft: 'auto', padding: '1px 6px', fontSize: 10 }}
+                      title="Đánh dấu false positive — lần quét sau tự bỏ qua (cần quyền security_lead+)"
+                      disabled={flaggingId === f.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleFlag(f);
+                      }}
+                    >
+                      <Icon name="shield" size={11} /> {flaggingId === f.id ? '…' : 'Flag FP'}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
