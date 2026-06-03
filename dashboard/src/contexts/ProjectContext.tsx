@@ -38,8 +38,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       const list = await api.projects.list();
       setProjects(list);
+      // Drop active if it no longer exists in the fresh list (deleted elsewhere).
       setActiveProjectIdState((cur) => {
-        if (cur !== null && !list.find(p => p.id === cur)) {
+        if (cur !== null && !list.find((p) => p.id === cur)) {
           localStorage.removeItem(STORAGE_KEY);
           return null;
         }
@@ -63,7 +64,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ProjectContext.Provider value={{ projects, activeProjectId, setActiveProjectId, refresh, loading }}>
+    <ProjectContext.Provider
+      value={{ projects, activeProjectId, setActiveProjectId, refresh, loading }}
+    >
       {children}
     </ProjectContext.Provider>
   );
