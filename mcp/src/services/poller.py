@@ -15,6 +15,14 @@ from .processor import SecurityProcessor
 
 log = logging.getLogger(__name__)
 
+# Which GitHub run conclusions are worth ingesting. We deliberately include
+# "failure": in a security pipeline a failed run is usually the security gate
+# tripping (findings exceeded threshold) — exactly the runs whose artifacts we
+# most need to show. A SAST job can also succeed and upload its report even
+# when an unrelated job (e.g. DAST) fails the overall run. "cancelled" /
+# "skipped" / "timed_out" / None are excluded — no reliable artifacts.
+INGESTIBLE_CONCLUSIONS = ("success", "failure")
+
 
 class GitHubPoller:
     """Background task — poll GitHub cho workflow runs mới.
@@ -104,7 +112,8 @@ class GitHubPoller:
                 new_runs = sorted(
                     [
                         r for r in runs
-                        if r["id"] > last_run_id and r.get("conclusion") == "success"
+                        if r["id"] > last_run_id
+                        and r.get("conclusion") in INGESTIBLE_CONCLUSIONS
                     ],
                     key=lambda r: r["id"],
                 )
@@ -149,7 +158,8 @@ class GitHubPoller:
             new_runs = [
                 r
                 for r in runs
-                if r["id"] > last_run_id and r.get("conclusion") == "success"
+                if r["id"] > last_run_id
+                and r.get("conclusion") in INGESTIBLE_CONCLUSIONS
             ]
 
             if not new_runs:

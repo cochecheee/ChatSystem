@@ -79,7 +79,11 @@ async def test_poll_skips_already_processed_run(db):
 
 
 @pytest.mark.asyncio
-async def test_poll_skips_failed_runs(db):
+async def test_poll_ingests_failed_but_skips_cancelled(db):
+    """A `failure` run is usually the security gate tripping — its SAST
+    artifacts carry the findings we need, so it MUST be ingested. `cancelled`
+    (and skipped/timed_out) runs have no reliable artifacts and stay skipped.
+    """
     mock_github = AsyncMock()
     mock_github.list_workflow_runs.return_value = [
         {"id": 2001, "conclusion": "failure"},
@@ -90,7 +94,10 @@ async def test_poll_skips_failed_runs(db):
     poller = _make_poller(db, mock_github, mock_processor)
     await poller._poll()
 
-    mock_processor.process_run.assert_not_called()
+    # failure ingested, cancelled skipped
+    mock_processor.process_run.assert_called_once()
+    called_run_id = mock_processor.process_run.call_args.args[-1]
+    assert called_run_id == 2001
 
 
 @pytest.mark.asyncio
