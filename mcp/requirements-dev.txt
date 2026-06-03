@@ -1,0 +1,10 @@
+# Dev-only tooling. Install with:
+#   pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+ruff>=0.7.0
+mypy>=1.11.0
+
+# Type stubs
+types-pyyaml
+types-python-jose

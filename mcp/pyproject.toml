@@ -1,0 +1,94 @@
+[project]
+name = "chat-system-mcp"
+version = "0.0.0"
+description = "MCP gateway for the chat-system DevSecOps platform"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # isort
+  "B",        # bugbear
+  "UP",       # pyupgrade
+  "ASYNC",    # async-specific pitfalls
+  "N",        # pep8-naming
+  "SIM",      # simplify
+  "RUF",      # ruff-specific
+]
+ignore = [
+  "E501",   # line-length — let formatter handle it; long prompts/SQL strings stay readable
+  "B008",   # function call in default argument — required by FastAPI Depends() pattern
+  "N818",   # exception name suffix — codebase uses "...Exception"
+
+  # --- Baseline carve-out (adopt ruff on an existing codebase) ---
+  # These rules flag pre-existing patterns across the codebase. Rather than
+  # rewrite ~75 sites in one risky pass, we silence them so CI gates new code,
+  # then re-enable one rule at a time as files get touched. Remove an entry
+  # here when its violations are cleaned up. Tracking: see CONTRIBUTING.md.
+  "E402",     # imports not at top — deliberate lazy imports inside functions/TEST_MODE block
+  "E702",     # multiple statements on one line (semicolon)
+  "E741",     # ambiguous variable name (l/I/O)
+  "B904",     # raise ... from — error chaining not yet threaded through handlers
+  "F841",     # unused local variable
+  "N803",     # argument name not lowercase
+  "N806",     # variable in function not lowercase (e.g. _UTC, DT_TZ aliases)
+  "N814",     # camelCase imported as constant
+  "N817",     # camelCase imported as acronym
+  "RUF002",   # ambiguous unicode in docstring (Vietnamese text)
+  "RUF003",   # ambiguous unicode in comment (Vietnamese text)
+  "RUF006",   # asyncio dangling task — poller/monitor tasks intentionally fire-and-forget
+  "RUF012",   # mutable class default without ClassVar
+  "RUF059",   # unused unpacked variable
+  "SIM102",   # collapsible if
+  "SIM103",   # needless bool return
+  "SIM105",   # use contextlib.suppress
+  "SIM117",   # nested with → single with
+  "SIM118",   # `key in dict.keys()`
+  "ASYNC240", # blocking path method in async fn
+  "UP042",    # enum.Enum + str → enum.StrEnum (3.11+ only; keep explicit for clarity)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["N802", "N803", "N806"]      # snake_case-relaxed for test fixtures
+"migrations/**/*.py" = ["E", "W", "F", "I", "UP"]  # Alembic auto-generated
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+follow_imports = "silent"
+exclude = ["migrations/", "tests/"]
+
+# Strict only for load-bearing modules. Expand as annotations get cleaned up;
+# do not fail CI on day one for the whole tree.
+[[tool.mypy.overrides]]
+module = [
+  "src.core.*",
+  "src.repositories.*",
+  "src.services.llm.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore::DeprecationWarning:passlib.*",
+]

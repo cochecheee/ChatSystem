@@ -17,6 +17,7 @@
 - [ChatOps Commands](#chatops-commands)
 - [Luồng dữ liệu](#luồng-dữ-liệu)
 - [Cấu trúc thư mục](#cấu-trúc-thư-mục)
+- [Đóng góp](#đóng-góp)
 
 ---
 
@@ -169,17 +170,10 @@ Swagger UI: `http://localhost:8000/docs`
 ```bash
 cd dashboard
 npm install
-npm run dev              # UI chạy local, gọi MCP local trên :8000
-# hoặc
-npm run dev:prod-api     # UI chạy local nhưng gọi Render MCP (xem prod data)
+npm run dev
 ```
 
 Dashboard chạy tại `http://localhost:5173`.
-
-> **Khác biệt UI local vs UI deploy thường do data source, không phải code.**
-> Local UI mặc định trỏ tới MCP local (DB rỗng / dev data). Deploy UI gọi Render MCP
-> (Postgres production với data thật). Dùng `npm run dev:prod-api` nếu muốn nhìn
-> đúng số liệu như deploy mà vẫn dev frontend.
 
 ---
 
@@ -411,6 +405,22 @@ chat-system/
 ├── images/                         # Screenshots
 └── README.md
 ```
+
+---
+
+## Đóng góp
+
+Workflow team, branch convention, commit format, code style, PR process — xem [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Quick reference:
+
+- Branch: `ft/`, `fix/`, `refactor/`, `docs/`, `chore/`, `test/` + kebab-case
+- Commit: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope): subject`
+- Backend lint: `cd mcp && ruff check . && ruff format --check .`
+- Frontend lint: `cd dashboard && npm run lint && npm run format:check`
+- Test: `pytest -q` (mcp) hoặc `npm run build` (dashboard) — CI sẽ chạy lại trên PR
+
+Bug / idea mới: mở GitHub Issue với template `Bug report` hoặc `Feature request`.
 
 ---
 
