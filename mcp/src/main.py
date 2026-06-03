@@ -13,7 +13,6 @@ from .api.artifacts import router as artifacts_router
 from .api.chat import router as chat_router
 from .api.config import router as config_router
 from .api.findings import router as findings_router
-from .api.monitor import router as monitor_router
 from .api.projects import router as projects_router
 from .api.stats import router as stats_router
 from .core.config import settings
@@ -81,12 +80,9 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(poller.start())
         log.info("Background poller scheduled")
 
-        # V2.4 — Monitor loop (uptime ping + alert) + daily prune
-        if settings.MONITOR_ENABLED:
-            from .services.monitor import monitor_loop, prune_loop
-            asyncio.create_task(monitor_loop())
-            asyncio.create_task(prune_loop())
-            log.info("Monitor + prune loops scheduled")
+        # V2.4 Monitor (uptime ping + alert) DISABLED — feature hidden from app.
+        # Service/model/config kept dormant; re-enable by restoring the
+        # monitor_loop/prune_loop scheduling here + the router mount below.
 
     yield
 
@@ -122,7 +118,8 @@ app.include_router(findings_router, tags=["findings"])
 app.include_router(analysis_router, tags=["ai"])
 app.include_router(chat_router)
 app.include_router(config_router)
-app.include_router(monitor_router)
+# Monitor (Uptime/DAST-adjacent) router unmounted — feature hidden. Re-add
+# `from .api.monitor import router as monitor_router` + this include to restore.
 app.include_router(stats_router)
 
 

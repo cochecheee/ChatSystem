@@ -79,32 +79,9 @@ async def test_stats_admin_can_query_any_project(client, two_projects):
         assert resp.status_code == 200
 
 
-@pytest.mark.asyncio
-async def test_monitor_uptime_requires_auth(client):
-    """V3.5 — /monitor/uptime previously had no auth dependency."""
-    with patch("src.core.config.settings.ANONYMOUS_READ_ENABLED", False):
-        resp = await client.get("/monitor/uptime")
-        assert resp.status_code == 401, resp.text
-
-
-@pytest.mark.asyncio
-async def test_monitor_alerts_requires_auth(client):
-    with patch("src.core.config.settings.ANONYMOUS_READ_ENABLED", False):
-        resp = await client.get("/monitor/alerts")
-        assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_monitor_uptime_rejects_cross_project_id(client, two_projects):
-    _proj_a, proj_b = two_projects
-    token = _user_token("dev_a", "developer", memberships={1: "developer"})
-    with patch("src.core.config.settings.ANONYMOUS_READ_ENABLED", False), \
-         patch("src.core.config.settings.RBAC_PER_PROJECT", True):
-        resp = await client.get(
-            f"/monitor/uptime?project_id={proj_b['id']}",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 403
+# NOTE: /monitor/* auth tests removed — the Monitor (Uptime) router is
+# unmounted (feature hidden from app). Service/model kept dormant; restore
+# these tests if the router is re-mounted.
 
 
 @pytest.mark.asyncio

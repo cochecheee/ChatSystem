@@ -2,16 +2,7 @@ import { useAuth } from '../features/auth/AuthContext';
 import { Icon } from './Icon';
 import { ProjectSelector } from './ProjectSelector';
 
-export type PageId =
-  | 'overview'
-  | 'pipelines'
-  | 'vulns'
-  | 'sca'
-  | 'runtime'
-  | 'monitor'
-  | 'chat'
-  | 'reports'
-  | 'settings';
+export type PageId = 'overview' | 'pipelines' | 'vulns' | 'sca' | 'chat' | 'reports' | 'settings';
 
 interface NavItem {
   id: PageId;
@@ -27,8 +18,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { id: 'pipelines', label: 'Pipelines', icon: 'pipeline' },
       { id: 'vulns', label: 'Vulnerabilities', icon: 'shield' },
       { id: 'sca', label: 'Dependencies', icon: 'package' },
-      { id: 'runtime', label: 'Runtime (DAST)', icon: 'alert' },
-      { id: 'monitor', label: 'Uptime', icon: 'clock' },
     ],
   },
   {
@@ -49,8 +38,6 @@ const CRUMB: Record<PageId, string[]> = {
   pipelines: ['Workspace', 'Pipelines'],
   vulns: ['Workspace', 'Vulnerabilities'],
   sca: ['Workspace', 'Dependencies · SCA'],
-  runtime: ['Workspace', 'Runtime · DAST'],
-  monitor: ['Workspace', 'Uptime · Health checks'],
   chat: ['Assistant', 'AI Assistant'],
   reports: ['Admin', 'Reports'],
   settings: ['Admin', 'Settings'],

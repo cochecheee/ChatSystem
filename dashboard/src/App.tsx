@@ -10,8 +10,6 @@ import { PageChat } from './pages/Chat';
 import { PageOverview } from './pages/Overview';
 import { PagePipelines } from './pages/Pipelines';
 import { PageReports } from './pages/Reports';
-import { PageMonitor } from './pages/Monitor';
-import { PageRuntime } from './pages/Runtime';
 import { PageSCA } from './pages/Sca';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
@@ -89,12 +87,6 @@ function AppInner() {
       break;
     case 'sca':
       page = <PageSCA />;
-      break;
-    case 'runtime':
-      page = <PageRuntime />;
-      break;
-    case 'monitor':
-      page = <PageMonitor />;
       break;
     case 'chat':
       page = <PageChat />;
