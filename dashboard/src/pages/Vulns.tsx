@@ -327,8 +327,20 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                 <div className="vuln-row-title">{f.message.split('\n')[0]}</div>
                 <div className="vuln-row-meta">
                   <SevChip sev={f.severity} />
-                  <span className="tool-tag">{f.tool}</span>
-                  <span className="mono" style={{ fontSize: 10.5 }}>
+                  <span className="tool-tag" style={{ flexShrink: 0 }}>
+                    {f.tool}
+                  </span>
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 10.5,
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {f.file_path.split('/').pop()}
                     {f.line_number ? `:${f.line_number}` : ''}
                   </span>
@@ -336,7 +348,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                     <Icon
                       name="sparkle"
                       size={11}
-                      style={{ color: 'var(--accent)', marginLeft: 2 }}
+                      style={{ color: 'var(--accent)', flexShrink: 0 }}
                     />
                   )}
                   {f.status === 'APPROVED' && <span className="row-status-badge approved">OK</span>}
@@ -344,7 +356,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                   {f.status !== 'REVOKED' && (
                     <button
                       className="btn ghost sm"
-                      style={{ marginLeft: 'auto', padding: '1px 6px', fontSize: 10 }}
+                      style={{ padding: '2px 5px', flexShrink: 0 }}
                       title="Đánh dấu false positive — lần quét sau tự bỏ qua (cần quyền security_lead+)"
                       disabled={flaggingId === f.id}
                       onClick={(e) => {
@@ -352,7 +364,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                         void handleFlag(f);
                       }}
                     >
-                      <Icon name="shield" size={11} /> {flaggingId === f.id ? '…' : 'Flag FP'}
+                      <Icon name={flaggingId === f.id ? 'refresh' : 'shield'} size={12} />
                     </button>
                   )}
                 </div>
