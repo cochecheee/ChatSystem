@@ -27,7 +27,9 @@ function AppInner() {
 
   // Re-fetch projects whenever auth identity changes so RBAC-filtered lists
   // appear/disappear immediately on login/logout.
-  useEffect(() => { void refreshProjects(); }, [user?.username, refreshProjects]);
+  useEffect(() => {
+    void refreshProjects();
+  }, [user?.username, refreshProjects]);
 
   // V3.3 — any fetch that sees a 401 will open the login modal. Stays
   // registered for the app's lifetime; LoginModal closes itself on success.
@@ -48,13 +50,16 @@ function AppInner() {
     critHighRef.current = 0;
     setNewCritHighCount(0);
     const fetchData = () => {
-      api.stats.overview(activeProjectId !== null ? { project_id: activeProjectId } : undefined).then(s => {
-        const critHigh = s.critical_high;
-        if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
-          setNewCritHighCount(prev => prev + (critHigh - critHighRef.current));
-        }
-        critHighRef.current = critHigh;
-      }).catch(() => {});
+      api.stats
+        .overview(activeProjectId !== null ? { project_id: activeProjectId } : undefined)
+        .then((s) => {
+          const critHigh = s.critical_high;
+          if (critHighRef.current !== 0 && critHigh > critHighRef.current) {
+            setNewCritHighCount((prev) => prev + (critHigh - critHighRef.current));
+          }
+          critHighRef.current = critHigh;
+        })
+        .catch(() => {});
     };
     fetchData();
     const id = setInterval(fetchData, POLL_INTERVAL_MS);
@@ -73,16 +78,35 @@ function AppInner() {
 
   let page;
   switch (active) {
-    case 'overview':   page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />; break;
-    case 'pipelines':  page = <PagePipelines />; break;
-    case 'vulns':      page = <PageVulns initialId={openVulnId} />; break;
-    case 'sca':        page = <PageSCA />; break;
-    case 'runtime':    page = <PageRuntime />; break;
-    case 'monitor':    page = <PageMonitor />; break;
-    case 'chat':       page = <PageChat />; break;
-    case 'reports':    page = <PageReports />; break;
-    case 'settings':   page = <PageSettings />; break;
-    default:           page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />;
+    case 'overview':
+      page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />;
+      break;
+    case 'pipelines':
+      page = <PagePipelines />;
+      break;
+    case 'vulns':
+      page = <PageVulns initialId={openVulnId} />;
+      break;
+    case 'sca':
+      page = <PageSCA />;
+      break;
+    case 'runtime':
+      page = <PageRuntime />;
+      break;
+    case 'monitor':
+      page = <PageMonitor />;
+      break;
+    case 'chat':
+      page = <PageChat />;
+      break;
+    case 'reports':
+      page = <PageReports />;
+      break;
+    case 'settings':
+      page = <PageSettings />;
+      break;
+    default:
+      page = <PageOverview onNav={onNav} onOpenVuln={onOpenVuln} />;
   }
 
   return (
@@ -93,7 +117,7 @@ function AppInner() {
           active={active}
           onNav={onNav}
           theme={theme}
-          onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+          onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
           newCritHighCount={newCritHighCount}
           onClearCritHigh={() => setNewCritHighCount(0)}
           onOpenLogin={() => setLoginOpen(true)}

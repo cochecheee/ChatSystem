@@ -4,40 +4,44 @@
  */
 import type { Finding } from '../../types';
 
-const DEPS_TOOLS = new Set([
-  'dependency-check',
-  'owasp-dependency-check',
-  'trivy',
-  'trivy-deps',
-]);
+const DEPS_TOOLS = new Set(['dependency-check', 'owasp-dependency-check', 'trivy', 'trivy-deps']);
 
 export function isDepScan(tool: string): boolean {
   return DEPS_TOOLS.has(tool);
 }
 
 export function bySeverity(findings: Finding[]): Record<string, number> {
-  return findings.reduce((acc, f) => {
-    acc[f.severity] = (acc[f.severity] ?? 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  return findings.reduce(
+    (acc, f) => {
+      acc[f.severity] = (acc[f.severity] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 }
 
 export function byTool(findings: Finding[]): Record<string, number> {
-  return findings.reduce((acc, f) => {
-    acc[f.tool] = (acc[f.tool] ?? 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  return findings.reduce(
+    (acc, f) => {
+      acc[f.tool] = (acc[f.tool] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 }
 
 export function byStatus(findings: Finding[]): Record<string, number> {
-  return findings.reduce((acc, f) => {
-    acc[f.status] = (acc[f.status] ?? 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  return findings.reduce(
+    (acc, f) => {
+      acc[f.status] = (acc[f.status] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 }
 
 export function aiAnalyzedCount(findings: Finding[]): number {
-  return findings.filter(f => !!f.ai_analysis).length;
+  return findings.filter((f) => !!f.ai_analysis).length;
 }
 
 export function aiAnalyzedPercent(findings: Finding[]): number {

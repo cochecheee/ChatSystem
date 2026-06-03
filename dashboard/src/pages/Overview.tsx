@@ -72,8 +72,10 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
   // Poll latest scan stats every 60s — scoped to active project when set.
   useEffect(() => {
     const fetch = () => {
-      api.stats.latestScan(project_id !== undefined ? { project_id } : undefined)
-        .then(setLatestStats).catch(() => {});
+      api.stats
+        .latestScan(project_id !== undefined ? { project_id } : undefined)
+        .then(setLatestStats)
+        .catch(() => {});
     };
     fetch();
     const id = setInterval(fetch, POLL_INTERVAL_MS);
@@ -87,17 +89,27 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
       return;
     }
     setLoadingFindings(true);
-    api.github.runFindings(latestStats.run_id)
-      .then(f => { setLatestFindings(f); setLoadingFindings(false); })
+    api.github
+      .runFindings(latestStats.run_id)
+      .then((f) => {
+        setLatestFindings(f);
+        setLoadingFindings(false);
+      })
       .catch(() => setLoadingFindings(false));
   }, [latestStats?.run_id]);
 
   usePolling(() => {
-    api.health().then(() => setHealthy(true)).catch(() => setHealthy(false));
+    api
+      .health()
+      .then(() => setHealthy(true))
+      .catch(() => setHealthy(false));
   }, POLL_INTERVAL_MS);
 
   useEffect(() => {
-    api.projects.list().then(setProjects).catch(() => {});
+    api.projects
+      .list()
+      .then(setProjects)
+      .catch(() => {});
   }, []);
 
   const counts = latestStats?.by_severity ?? {};
@@ -106,11 +118,11 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
   const aiAnalyzed = latestStats?.ai_analyzed ?? 0;
   const aiAnalyzedPct = latestStats?.ai_analyzed_pct ?? 0;
   const passRate = runs.length
-    ? Math.round(runs.filter(r => r.conclusion === 'success').length / runs.length * 100)
+    ? Math.round((runs.filter((r) => r.conclusion === 'success').length / runs.length) * 100)
     : 0;
 
   const recentCritHigh = latestFindings
-    .filter(f => f.severity === 'critical' || f.severity === 'high')
+    .filter((f) => f.severity === 'critical' || f.severity === 'high')
     .sort((a, b) => {
       if (a.severity !== b.severity) return a.severity === 'critical' ? -1 : 1;
       return b.id - a.id;
@@ -119,18 +131,21 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
 
   const topRules = Object.entries(
     latestFindings.reduce(
-      (acc, f) => { acc[f.rule_id] = (acc[f.rule_id] || 0) + 1; return acc; },
-      {} as Record<string, number>,
-    ),
+      (acc, f) => {
+        acc[f.rule_id] = (acc[f.rule_id] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    )
   )
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
     .map(([rule, count]) => ({
       rule,
       count,
-      sev: latestFindings.find(f => f.rule_id === rule)?.severity ?? 'info',
+      sev: latestFindings.find((f) => f.rule_id === rule)?.severity ?? 'info',
     }));
-  const maxRuleCount = Math.max(1, ...topRules.map(r => r.count));
+  const maxRuleCount = Math.max(1, ...topRules.map((r) => r.count));
 
   return (
     <div className="content">
@@ -138,11 +153,21 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         <div>
           <h1 className="h1">Security overview</h1>
           <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-              background: healthy === true ? 'var(--sev-low-fg)' : healthy === false ? 'var(--sev-crit-fg)' : 'var(--fg-4)',
-            }} />
-            {projects.length > 0 ? projects.map(p => p.name).join(', ') : 'No projects connected'}
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                flexShrink: 0,
+                background:
+                  healthy === true
+                    ? 'var(--sev-low-fg)'
+                    : healthy === false
+                      ? 'var(--sev-crit-fg)'
+                      : 'var(--fg-4)',
+              }}
+            />
+            {projects.length > 0 ? projects.map((p) => p.name).join(', ') : 'No projects connected'}
             {latestStats?.run_id && (
               <>
                 <span className="muted">·</span>
@@ -152,14 +177,17 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
                     <>
                       <span className="mono">#{latestStats.run_number}</span>
                       {latestStats.head_branch && (
-                        <> on <span className="mono">{latestStats.head_branch}</span></>
+                        <>
+                          {' '}
+                          on <span className="mono">{latestStats.head_branch}</span>
+                        </>
                       )}
                       {latestStats.created_at && <> ({timeAgo(latestStats.created_at)})</>}
                     </>
                   ) : latestStats.scanned_at ? (
                     <>
-                      <span className="mono">run {latestStats.run_id}</span>
-                      {' '}({timeAgo(latestStats.scanned_at)})
+                      <span className="mono">run {latestStats.run_id}</span> (
+                      {timeAgo(latestStats.scanned_at)})
                     </>
                   ) : (
                     <span className="mono">run {latestStats.run_id}</span>
@@ -179,29 +207,50 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         </div>
       </div>
 
-      <OverviewAiSummary
-        projectId={project_id}
-        onOpenFinding={onOpenVuln}
-      />
+      <OverviewAiSummary projectId={project_id} onOpenFinding={onOpenVuln} />
 
       <div className="kpi-grid">
         {[
-          { label: 'Findings (latest scan)', value: loadingFindings ? '…' : total, delta: `${critHigh} critical/high`, cls: critHigh > 0 ? 'kpi-delta-up' : 'muted' },
-          { label: 'Critical & High', value: critHigh, delta: critHigh > 0 ? 'Needs attention' : 'All clear', cls: critHigh > 0 ? 'kpi-delta-up' : 'kpi-delta-down' },
-          { label: 'AI analyzed', value: aiAnalyzed, delta: total > 0 ? `${aiAnalyzedPct}% of ${total}` : '—', cls: 'muted' },
-          { label: 'Pipeline runs', value: runs.length, delta: `${passRate}% pass rate`, cls: passRate >= 80 ? 'kpi-delta-down' : 'kpi-delta-up' },
+          {
+            label: 'Findings (latest scan)',
+            value: loadingFindings ? '…' : total,
+            delta: `${critHigh} critical/high`,
+            cls: critHigh > 0 ? 'kpi-delta-up' : 'muted',
+          },
+          {
+            label: 'Critical & High',
+            value: critHigh,
+            delta: critHigh > 0 ? 'Needs attention' : 'All clear',
+            cls: critHigh > 0 ? 'kpi-delta-up' : 'kpi-delta-down',
+          },
+          {
+            label: 'AI analyzed',
+            value: aiAnalyzed,
+            delta: total > 0 ? `${aiAnalyzedPct}% of ${total}` : '—',
+            cls: 'muted',
+          },
+          {
+            label: 'Pipeline runs',
+            value: runs.length,
+            delta: `${passRate}% pass rate`,
+            cls: passRate >= 80 ? 'kpi-delta-down' : 'kpi-delta-up',
+          },
         ].map((k, i) => (
           <div className="kpi" key={i}>
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value">{k.value}</div>
-            <div className="kpi-foot"><span className={k.cls}>{k.delta}</span></div>
+            <div className="kpi-foot">
+              <span className={k.cls}>{k.delta}</span>
+            </div>
           </div>
         ))}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 20 }}>
         <div className="card">
-          <div className="card-header"><div className="h3">By severity</div></div>
+          <div className="card-header">
+            <div className="h3">By severity</div>
+          </div>
           <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
             <Donut counts={counts} size={130} />
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -210,11 +259,16 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
                 { k: 'high', label: 'High', c: 'var(--sev-high-fg)' },
                 { k: 'medium', label: 'Medium', c: 'var(--sev-med-fg)' },
                 { k: 'low', label: 'Low', c: 'var(--sev-low-fg)' },
-              ].map(s => (
-                <div key={s.k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+              ].map((s) => (
+                <div
+                  key={s.k}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}
+                >
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: s.c }} />
                   <span style={{ flex: 1 }}>{s.label}</span>
-                  <span className="mono" style={{ color: 'var(--fg-3)' }}>{counts[s.k] || 0}</span>
+                  <span className="mono" style={{ color: 'var(--fg-3)' }}>
+                    {counts[s.k] || 0}
+                  </span>
                 </div>
               ))}
             </div>
@@ -226,17 +280,42 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         <div className="card">
           <div className="card-header">
             <div className="h3">Top rules triggered</div>
-            <span className="muted" style={{ fontSize: 11.5 }}>All time</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>
+              All time
+            </span>
           </div>
           <div style={{ padding: 12 }}>
             {topRules.length === 0 && <div className="empty">No findings yet</div>}
-            {topRules.map(r => (
+            {topRules.map((r) => (
               <div key={r.rule} className="bar-row" title={r.rule}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 220px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flex: '0 0 220px',
+                    overflow: 'hidden',
+                  }}
+                >
                   <span className={`sev-dot ${r.sev}`} />
-                  <span className="mono" style={{ fontSize: 11, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{r.rule}</span>
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 11,
+                      textOverflow: 'ellipsis',
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {r.rule}
+                  </span>
                 </div>
-                <div className="bar-track"><div className="bar-fill" style={{ width: `${(r.count / maxRuleCount) * 100}%` }} /></div>
+                <div className="bar-track">
+                  <div
+                    className="bar-fill"
+                    style={{ width: `${(r.count / maxRuleCount) * 100}%` }}
+                  />
+                </div>
                 <div className="bar-value">{r.count}</div>
               </div>
             ))}
@@ -265,18 +344,28 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
               </tr>
             </thead>
             <tbody>
-              {runs.slice(0, 6).map(r => (
+              {runs.slice(0, 6).map((r) => (
                 <tr key={r.id} className="row-clickable" onClick={() => onNav('pipelines')}>
-                  <td><span className={`chip dot ${statusClass(r.conclusion ?? '')}`}>{statusLabel(r)}</span></td>
+                  <td>
+                    <span className={`chip dot ${statusClass(r.conclusion ?? '')}`}>
+                      {statusLabel(r)}
+                    </span>
+                  </td>
                   <td className="mono">#{r.run_number}</td>
                   <td>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <Icon name="branch" size={11} style={{ color: 'var(--fg-3)' }} />
-                      <span className="mono" style={{ fontSize: 11.5 }}>{r.head_branch}</span>
+                      <span className="mono" style={{ fontSize: 11.5 }}>
+                        {r.head_branch}
+                      </span>
                     </span>
                   </td>
-                  <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{r.head_sha?.slice(0, 7)}</td>
-                  <td className="num muted" style={{ fontSize: 11.5 }}>{timeAgo(r.created_at)}</td>
+                  <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                    {r.head_sha?.slice(0, 7)}
+                  </td>
+                  <td className="num muted" style={{ fontSize: 11.5 }}>
+                    {timeAgo(r.created_at)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -288,7 +377,9 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         <div className="card-header">
           <div>
             <div className="h3">Recent critical &amp; high findings</div>
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>Top priority — needs immediate attention</div>
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+              Top priority — needs immediate attention
+            </div>
           </div>
           <button className="btn ghost sm" onClick={() => onNav('vulns')}>
             View all <Icon name="arrow_right" size={12} />
@@ -297,7 +388,9 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         {recentCritHigh.length === 0 ? (
           <div className="empty" style={{ padding: '40px 20px' }}>
             <Icon name="shield" size={24} style={{ color: 'var(--sev-low-fg)', marginBottom: 8 }} />
-            <div style={{ color: 'var(--sev-low-fg)', fontWeight: 500 }}>No critical or high findings</div>
+            <div style={{ color: 'var(--sev-low-fg)', fontWeight: 500 }}>
+              No critical or high findings
+            </div>
           </div>
         ) : (
           <table className="table">
@@ -310,18 +403,77 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
               </tr>
             </thead>
             <tbody>
-              {recentCritHigh.map(f => (
-                <tr key={f.id} className="row-clickable" onClick={() => { onNav('vulns'); onOpenVuln?.(f.id); }}>
-                  <td><span className={`chip dot sev-${f.severity}`}>{f.severity}</span></td>
-                  <td className="mono" style={{ fontSize: 11.5, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.rule_id}>{f.rule_id}</td>
+              {recentCritHigh.map((f) => (
+                <tr
+                  key={f.id}
+                  className="row-clickable"
+                  onClick={() => {
+                    onNav('vulns');
+                    onOpenVuln?.(f.id);
+                  }}
+                >
+                  <td>
+                    <span className={`chip dot sev-${f.severity}`}>{f.severity}</span>
+                  </td>
+                  <td
+                    className="mono"
+                    style={{
+                      fontSize: 11.5,
+                      maxWidth: 260,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={f.rule_id}
+                  >
+                    {f.rule_id}
+                  </td>
                   <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                    {f.file_path.split('/').pop()}{f.line_number ? `:${f.line_number}` : ''}
+                    {f.file_path.split('/').pop()}
+                    {f.line_number ? `:${f.line_number}` : ''}
                   </td>
                   <td>
-                    {f.status === 'APPROVED' && <span className="chip" style={{ background: 'rgba(67,160,71,0.15)', color: 'var(--sev-low-fg)', fontSize: 10 }}>Approved</span>}
-                    {f.status === 'REVOKED'  && <span className="chip" style={{ background: 'rgba(229,57,53,0.15)', color: 'var(--sev-crit-fg)', fontSize: 10 }}>Revoked</span>}
-                    {f.status === 'ai_analyzed' && <span className="chip" style={{ background: 'var(--accent-tint)', color: 'var(--accent-2)', fontSize: 10 }}>AI analyzed</span>}
-                    {f.status === 'pending_review' && <span className="chip" style={{ fontSize: 10 }}>Pending</span>}
+                    {f.status === 'APPROVED' && (
+                      <span
+                        className="chip"
+                        style={{
+                          background: 'rgba(67,160,71,0.15)',
+                          color: 'var(--sev-low-fg)',
+                          fontSize: 10,
+                        }}
+                      >
+                        Approved
+                      </span>
+                    )}
+                    {f.status === 'REVOKED' && (
+                      <span
+                        className="chip"
+                        style={{
+                          background: 'rgba(229,57,53,0.15)',
+                          color: 'var(--sev-crit-fg)',
+                          fontSize: 10,
+                        }}
+                      >
+                        Revoked
+                      </span>
+                    )}
+                    {f.status === 'ai_analyzed' && (
+                      <span
+                        className="chip"
+                        style={{
+                          background: 'var(--accent-tint)',
+                          color: 'var(--accent-2)',
+                          fontSize: 10,
+                        }}
+                      >
+                        AI analyzed
+                      </span>
+                    )}
+                    {f.status === 'pending_review' && (
+                      <span className="chip" style={{ fontSize: 10 }}>
+                        Pending
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

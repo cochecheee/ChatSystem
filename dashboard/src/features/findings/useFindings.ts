@@ -19,16 +19,20 @@ export function useFindings(params: FindingListParams = {}, intervalMs = POLL_IN
   const ambient = useActiveProjectParam();
   const merged: FindingListParams = { ...ambient, ...params };
 
-  usePolling(async () => {
-    try {
-      const f = await api.findings.list(merged);
-      setFindings(f);
-    } catch {
-      // ignore — caller có thể check loading state
-    } finally {
-      setLoading(false);
-    }
-  }, intervalMs, [JSON.stringify(merged)]);
+  usePolling(
+    async () => {
+      try {
+        const f = await api.findings.list(merged);
+        setFindings(f);
+      } catch {
+        // ignore — caller có thể check loading state
+      } finally {
+        setLoading(false);
+      }
+    },
+    intervalMs,
+    [JSON.stringify(merged)]
+  );
 
   return { findings, loading };
 }

@@ -18,9 +18,11 @@ export function MiniMarkdown({ text }: { text: string }) {
     blocks.push(
       <Tag key={`list-${key}`} style={{ paddingLeft: 18, margin: '4px 0' }}>
         {listBuffer.items.map((item, i) => (
-          <li key={i} style={{ marginBottom: 2 }}>{renderInline(item)}</li>
+          <li key={i} style={{ marginBottom: 2 }}>
+            {renderInline(item)}
+          </li>
         ))}
-      </Tag>,
+      </Tag>
     );
     listBuffer = null;
   };
@@ -52,7 +54,7 @@ export function MiniMarkdown({ text }: { text: string }) {
       blocks.push(
         <p key={i} style={{ margin: '2px 0', lineHeight: 1.5 }}>
           {renderInline(line)}
-        </p>,
+        </p>
       );
     }
   });
@@ -71,10 +73,16 @@ function renderInline(s: string): React.ReactNode {
     }
     if (p.startsWith('`') && p.endsWith('`')) {
       return (
-        <code key={i} className="mono" style={{
-          padding: '0 4px', background: 'var(--surface-2)', borderRadius: 3,
-          fontSize: '0.92em',
-        }}>
+        <code
+          key={i}
+          className="mono"
+          style={{
+            padding: '0 4px',
+            background: 'var(--surface-2)',
+            borderRadius: 3,
+            fontSize: '0.92em',
+          }}
+        >
           {p.slice(1, -1)}
         </code>
       );

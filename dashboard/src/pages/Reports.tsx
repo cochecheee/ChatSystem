@@ -25,7 +25,10 @@ export function PageReports() {
   const [downloadError, setDownloadError] = useState('');
 
   useEffect(() => {
-    api.projects.list().then(setProjects).catch(() => {});
+    api.projects
+      .list()
+      .then(setProjects)
+      .catch(() => {});
   }, []);
 
   // Total count match filter (server-side accurate, không phụ thuộc limit)
@@ -38,19 +41,32 @@ export function PageReports() {
     if (projectId !== 'all') params.project_id = projectId as number;
     else if (ambient.project_id !== undefined) params.project_id = ambient.project_id;
     if (sevFilter !== 'all') params.severity = sevFilter;
-    api.findings.listWithTotal(params)
-      .then(({ data, total }) => { setFindings(data); setFilterTotal(total); })
+    api.findings
+      .listWithTotal(params)
+      .then(({ data, total }) => {
+        setFindings(data);
+        setFilterTotal(total);
+      })
       .catch(() => {});
   }, [projectId, sevFilter, ambient.project_id]);
 
   // Counts trên 500 records loaded — đủ cho KPI distribution; total đúng từ server.
   // Khi filterTotal > 500 thì counts là sample chứ không phải full population.
   const counts = findings.reduce(
-    (acc, f) => { acc[f.severity] = (acc[f.severity] || 0) + 1; return acc; },
+    (acc, f) => {
+      acc[f.severity] = (acc[f.severity] || 0) + 1;
+      return acc;
+    },
     {} as Record<string, number>
   );
   const byTool = Object.entries(
-    findings.reduce((acc, f) => { acc[f.tool] = (acc[f.tool] || 0) + 1; return acc; }, {} as Record<string, number>)
+    findings.reduce(
+      (acc, f) => {
+        acc[f.tool] = (acc[f.tool] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    )
   ).sort((a, b) => b[1] - a[1]);
 
   const topFindings = [...findings]
@@ -106,27 +122,45 @@ export function PageReports() {
           {/* Project filter — GET /projects */}
           <select
             style={{
-              padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--line)',
-              borderRadius: 6, color: 'var(--fg)', fontSize: 12, outline: 'none',
+              padding: '6px 10px',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              color: 'var(--fg)',
+              fontSize: 12,
+              outline: 'none',
             }}
             value={projectId}
-            onChange={e => setProjectId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            onChange={(e) =>
+              setProjectId(e.target.value === 'all' ? 'all' : Number(e.target.value))
+            }
           >
             <option value="all">All projects</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
           </select>
           {/* Severity filter — GET /findings?severity= */}
           <select
             style={{
-              padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--line)',
-              borderRadius: 6, color: 'var(--fg)', fontSize: 12, outline: 'none',
+              padding: '6px 10px',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              color: 'var(--fg)',
+              fontSize: 12,
+              outline: 'none',
             }}
             value={sevFilter}
-            onChange={e => setSevFilter(e.target.value)}
+            onChange={(e) => setSevFilter(e.target.value)}
           >
             <option value="all">All severities</option>
-            {['critical', 'high', 'medium', 'low', 'info'].map(s => (
-              <option key={s} value={s}>{s}</option>
+            {['critical', 'high', 'medium', 'low', 'info'].map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
           </select>
           {/* Export HTML — GET /api/chat/report */}
@@ -146,7 +180,7 @@ export function PageReports() {
           { label: 'High', value: counts.high || 0, cls: 'sev-high' },
           { label: 'Medium', value: counts.medium || 0, cls: 'sev-medium' },
           { label: 'Low', value: counts.low || 0, cls: 'sev-low' },
-        ].map(k => (
+        ].map((k) => (
           <div key={k.label} className="kpi">
             <div className="kpi-label">{k.label}</div>
             <div className="kpi-value">{k.value}</div>
@@ -159,7 +193,9 @@ export function PageReports() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <div className="card">
-          <div className="card-header"><div className="h3">Severity breakdown</div></div>
+          <div className="card-header">
+            <div className="h3">Severity breakdown</div>
+          </div>
           <div style={{ padding: 16 }}>
             <SeverityBar counts={counts} height={10} />
             <div style={{ display: 'flex', gap: 12, marginTop: 12, fontSize: 11.5 }}>
@@ -168,7 +204,7 @@ export function PageReports() {
                 { k: 'high', c: 'var(--sev-high-fg)' },
                 { k: 'medium', c: 'var(--sev-med-fg)' },
                 { k: 'low', c: 'var(--sev-low-fg)' },
-              ].map(s => (
+              ].map((s) => (
                 <span key={s.k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: s.c }} />
                   {s.k} ({counts[s.k] || 0})
@@ -179,15 +215,25 @@ export function PageReports() {
         </div>
 
         <div className="card">
-          <div className="card-header"><div className="h3">By tool</div></div>
+          <div className="card-header">
+            <div className="h3">By tool</div>
+          </div>
           <div style={{ padding: 12 }}>
-            {byTool.length === 0 ? <div className="empty">No data</div> : byTool.map(([tool, n]) => (
-              <div key={tool} className="bar-row">
-                <div style={{ flex: '0 0 140px' }}><span className="tool-tag">{tool}</span></div>
-                <div className="bar-track"><div className="bar-fill" style={{ width: `${(n / byTool[0][1]) * 100}%` }} /></div>
-                <div className="bar-value">{n}</div>
-              </div>
-            ))}
+            {byTool.length === 0 ? (
+              <div className="empty">No data</div>
+            ) : (
+              byTool.map(([tool, n]) => (
+                <div key={tool} className="bar-row">
+                  <div style={{ flex: '0 0 140px' }}>
+                    <span className="tool-tag">{tool}</span>
+                  </div>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{ width: `${(n / byTool[0][1]) * 100}%` }} />
+                  </div>
+                  <div className="bar-value">{n}</div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -196,7 +242,9 @@ export function PageReports() {
       <div className="card">
         <div className="card-header">
           <div className="h3">Top findings</div>
-          <span className="muted" style={{ fontSize: 11 }}>sorted by severity · {topFindings.length} shown</span>
+          <span className="muted" style={{ fontSize: 11 }}>
+            sorted by severity · {topFindings.length} shown
+          </span>
         </div>
         {topFindings.length === 0 ? (
           <div className="empty">No findings for selected filters</div>
@@ -213,18 +261,44 @@ export function PageReports() {
               </tr>
             </thead>
             <tbody>
-              {topFindings.map(f => (
+              {topFindings.map((f) => (
                 <tr key={f.id}>
-                  <td><span className={`chip dot sev-${f.severity}`}>{f.severity}</span></td>
-                  <td><span className="tool-tag">{f.tool}</span></td>
-                  <td className="mono" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.rule_id}
-                  </td>
-                  <td className="mono" style={{ fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.file_path.split('/').pop()}{f.line_number ? `:${f.line_number}` : ''}
+                  <td>
+                    <span className={`chip dot sev-${f.severity}`}>{f.severity}</span>
                   </td>
                   <td>
-                    <span className={`chip ${f.status === 'APPROVED' ? 'status-passed' : f.status === 'REVOKED' ? 'status-failed' : ''}`} style={{ fontSize: 10 }}>
+                    <span className="tool-tag">{f.tool}</span>
+                  </td>
+                  <td
+                    className="mono"
+                    style={{
+                      fontSize: 11,
+                      maxWidth: 180,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {f.rule_id}
+                  </td>
+                  <td
+                    className="mono"
+                    style={{
+                      fontSize: 11,
+                      maxWidth: 200,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {f.file_path.split('/').pop()}
+                    {f.line_number ? `:${f.line_number}` : ''}
+                  </td>
+                  <td>
+                    <span
+                      className={`chip ${f.status === 'APPROVED' ? 'status-passed' : f.status === 'REVOKED' ? 'status-failed' : ''}`}
+                      style={{ fontSize: 10 }}
+                    >
                       {f.status}
                     </span>
                   </td>

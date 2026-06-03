@@ -45,11 +45,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const login = useCallback(async (username: string, role: string) => {
-    const res = await api.chat.login(username, role);
-    setAuthToken(res.access_token);
-    await refresh();
-  }, [refresh]);
+  const login = useCallback(
+    async (username: string, role: string) => {
+      const res = await api.chat.login(username, role);
+      setAuthToken(res.access_token);
+      await refresh();
+    },
+    [refresh]
+  );
 
   const logout = useCallback(() => {
     setAuthToken(null);

@@ -35,7 +35,10 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<ResultRow[] | null>(null);
   const [summary, setSummary] = useState<{
-    total: number; auto_revoked: number; classifications?: Record<string, number>; dry_run: boolean;
+    total: number;
+    auto_revoked: number;
+    classifications?: Record<string, number>;
+    dry_run: boolean;
   } | null>(null);
   const [error, setError] = useState('');
 
@@ -67,30 +70,54 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
   };
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 900,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)',
-    }}>
-      <div style={{
-        background: 'var(--bg-elev)', border: '1px solid var(--line)',
-        borderRadius: 10, width: 720, maxHeight: '85vh', overflow: 'auto',
-        padding: '20px 24px', position: 'relative',
-      }}>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 900,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(3px)',
+      }}
+    >
+      <div
+        style={{
+          background: 'var(--bg-elev)',
+          border: '1px solid var(--line)',
+          borderRadius: 10,
+          width: 720,
+          maxHeight: '85vh',
+          overflow: 'auto',
+          padding: '20px 24px',
+          position: 'relative',
+        }}
+      >
         <button
           onClick={onClose}
           style={{
-            position: 'absolute', top: 10, right: 14, background: 'transparent',
-            border: 'none', color: 'var(--fg-3)', fontSize: 20, cursor: 'pointer',
-            padding: 4, lineHeight: 1,
+            position: 'absolute',
+            top: 10,
+            right: 14,
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--fg-3)',
+            fontSize: 20,
+            cursor: 'pointer',
+            padding: 4,
+            lineHeight: 1,
           }}
-        >×</button>
+        >
+          ×
+        </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <Icon name="sparkle" size={16} />
           <div>
             <div style={{ fontWeight: 600, fontSize: 14 }}>AI Triage (V3.1)</div>
             <div className="muted" style={{ fontSize: 11.5 }}>
-              Gemini classify pending findings as TRUE/FALSE positive — auto-revoke high-confidence FP
+              Gemini classify pending findings as TRUE/FALSE positive — auto-revoke high-confidence
+              FP
             </div>
           </div>
         </div>
@@ -99,18 +126,23 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
           <div>
             <label style={labelStyle}>Confidence threshold</label>
             <input
-              type="number" min={0.5} max={1.0} step={0.05}
+              type="number"
+              min={0.5}
+              max={1.0}
+              step={0.05}
               value={confidence}
-              onChange={e => setConfidence(parseFloat(e.target.value) || 0.8)}
+              onChange={(e) => setConfidence(parseFloat(e.target.value) || 0.8)}
               style={inputStyle}
             />
           </div>
           <div>
             <label style={labelStyle}>Findings limit</label>
             <input
-              type="number" min={1} max={500}
+              type="number"
+              min={1}
+              max={500}
               value={limit}
-              onChange={e => setLimit(parseInt(e.target.value) || 50)}
+              onChange={(e) => setLimit(parseInt(e.target.value) || 50)}
               style={inputStyle}
             />
           </div>
@@ -136,13 +168,18 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
         {error && <div style={{ color: 'var(--sev-high-fg)', fontSize: 12 }}>{error}</div>}
 
         {summary && (
-          <div style={{
-            marginTop: 12, padding: '8px 12px', background: 'var(--surface-2)',
-            borderRadius: 6, fontSize: 12,
-          }}>
-            <strong>{summary.dry_run ? 'Preview' : 'Applied'}</strong>:
-            classified <strong>{summary.total}</strong> findings ·
-            auto-revoked <strong>{summary.auto_revoked}</strong>
+          <div
+            style={{
+              marginTop: 12,
+              padding: '8px 12px',
+              background: 'var(--surface-2)',
+              borderRadius: 6,
+              fontSize: 12,
+            }}
+          >
+            <strong>{summary.dry_run ? 'Preview' : 'Applied'}</strong>: classified{' '}
+            <strong>{summary.total}</strong> findings · auto-revoked{' '}
+            <strong>{summary.auto_revoked}</strong>
             {summary.classifications && (
               <span style={{ marginLeft: 10, color: 'var(--fg-3)' }}>
                 {Object.entries(summary.classifications)
@@ -166,7 +203,7 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {results.map(r => (
+                {results.map((r) => (
                   <tr key={r.finding_id} style={{ borderBottom: '1px solid var(--line)' }}>
                     <td style={td}>{r.finding_id}</td>
                     <td style={{ ...td, color: COLOR[r.classification] || 'inherit' }}>
@@ -175,7 +212,11 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
                     <td style={td}>{r.confidence.toFixed(2)}</td>
                     <td style={{ ...td, fontSize: 11 }}>{r.reason}</td>
                     <td style={td}>
-                      {r.applied ? <Icon name="check" size={12} /> : <span className="muted">—</span>}
+                      {r.applied ? (
+                        <Icon name="check" size={12} />
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -189,12 +230,24 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
 }
 
 const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: 11, color: 'var(--fg-3)', marginBottom: 4,
+  display: 'block',
+  fontSize: 11,
+  color: 'var(--fg-3)',
+  marginBottom: 4,
 };
 const inputStyle: React.CSSProperties = {
-  padding: '6px 10px', fontSize: 12, width: 120,
-  background: 'var(--bg-muted)', color: 'var(--fg)',
-  border: '1px solid var(--line)', borderRadius: 4,
+  padding: '6px 10px',
+  fontSize: 12,
+  width: 120,
+  background: 'var(--bg-muted)',
+  color: 'var(--fg)',
+  border: '1px solid var(--line)',
+  borderRadius: 4,
 };
-const th: React.CSSProperties = { textAlign: 'left', padding: '6px 8px', fontWeight: 500, color: 'var(--fg-3)' };
+const th: React.CSSProperties = {
+  textAlign: 'left',
+  padding: '6px 8px',
+  fontWeight: 500,
+  color: 'var(--fg-3)',
+};
 const td: React.CSSProperties = { padding: '6px 8px', verticalAlign: 'top' };

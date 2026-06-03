@@ -21,7 +21,7 @@ export function ProjectMembers({ projectId }: { projectId: number }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
-  const [newRole, setNewRole] = useState<typeof ROLES[number]>('viewer');
+  const [newRole, setNewRole] = useState<(typeof ROLES)[number]>('viewer');
 
   const refresh = async () => {
     setLoading(true);
@@ -77,29 +77,44 @@ export function ProjectMembers({ projectId }: { projectId: number }) {
   }
 
   return (
-    <div style={{
-      width: '100%',
-      padding: '8px 12px',
-      background: 'var(--surface-2)',
-      borderRadius: 6,
-      border: '1px solid var(--line)',
-      marginTop: 8,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-    }}>
+    <div
+      style={{
+        width: '100%',
+        padding: '8px 12px',
+        background: 'var(--surface-2)',
+        borderRadius: 6,
+        border: '1px solid var(--line)',
+        marginTop: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <strong style={{ fontSize: 12 }}>Members ({members.length})</strong>
-        <button className="btn ghost sm" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setOpen(false)}>
+        <button
+          className="btn ghost sm"
+          style={{ padding: '2px 6px', fontSize: 10 }}
+          onClick={() => setOpen(false)}
+        >
           Close
         </button>
       </div>
-      {loading && <div className="muted" style={{ fontSize: 11 }}>Loading…</div>}
+      {loading && (
+        <div className="muted" style={{ fontSize: 11 }}>
+          Loading…
+        </div>
+      )}
       {error && <div style={{ color: 'var(--danger)', fontSize: 11 }}>{error}</div>}
-      {members.map(m => (
-        <div key={m.username} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+      {members.map((m) => (
+        <div
+          key={m.username}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}
+        >
           <span style={{ flex: 1 }}>{m.username}</span>
-          <span className="chip" style={{ fontSize: 10 }}>{m.role}</span>
+          <span className="chip" style={{ fontSize: 10 }}>
+            {m.role}
+          </span>
           <button
             className="btn ghost sm"
             style={{ padding: '2px 6px', fontSize: 10 }}
@@ -114,26 +129,43 @@ export function ProjectMembers({ projectId }: { projectId: number }) {
         <input
           placeholder="username"
           value={newName}
-          onChange={e => setNewName(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') void handleAdd(); }}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void handleAdd();
+          }}
           style={{
-            flex: 1, padding: '4px 8px', fontSize: 11,
-            background: 'var(--bg-2)', color: 'var(--fg-1)',
-            border: '1px solid var(--line)', borderRadius: 4,
+            flex: 1,
+            padding: '4px 8px',
+            fontSize: 11,
+            background: 'var(--bg-2)',
+            color: 'var(--fg-1)',
+            border: '1px solid var(--line)',
+            borderRadius: 4,
           }}
         />
         <select
           value={newRole}
-          onChange={e => setNewRole(e.target.value as typeof ROLES[number])}
+          onChange={(e) => setNewRole(e.target.value as (typeof ROLES)[number])}
           style={{
-            padding: '4px 8px', fontSize: 11,
-            background: 'var(--bg-2)', color: 'var(--fg-1)',
-            border: '1px solid var(--line)', borderRadius: 4,
+            padding: '4px 8px',
+            fontSize: 11,
+            background: 'var(--bg-2)',
+            color: 'var(--fg-1)',
+            border: '1px solid var(--line)',
+            borderRadius: 4,
           }}
         >
-          {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
         </select>
-        <button className="btn primary sm" style={{ padding: '4px 8px', fontSize: 11 }} onClick={handleAdd}>
+        <button
+          className="btn primary sm"
+          style={{ padding: '4px 8px', fontSize: 11 }}
+          onClick={handleAdd}
+        >
           Add
         </button>
       </div>

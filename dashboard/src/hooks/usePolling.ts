@@ -14,7 +14,7 @@ export function usePolling(
   fn: () => void | Promise<void>,
   intervalMs: number,
   deps: React.DependencyList = [],
-  enabled = true,
+  enabled = true
 ) {
   const fnRef = useRef(fn);
   fnRef.current = fn;

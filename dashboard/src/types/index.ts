@@ -1,7 +1,7 @@
 export interface Finding {
   id: number;
   artifact_id: number;
-  project_id: number | null;   // V3.2 Pydantic computed via Artifact relationship
+  project_id: number | null; // V3.2 Pydantic computed via Artifact relationship
   tool: string;
   rule_id: string;
   severity: string;
@@ -63,7 +63,11 @@ export interface AnalysisResult {
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 export const SEVERITY_ORDER: Record<string, number> = {
-  critical: 0, high: 1, medium: 2, low: 3, info: 4,
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
 };
 
 export interface CommandRequest {

@@ -59,18 +59,26 @@ export function PageMonitor() {
 
   if (loading) {
     return (
-      <div className="page-pad"><div className="empty-state"><Icon name="refresh" /><p>Loading monitor…</p></div></div>
+      <div className="page-pad">
+        <div className="empty-state">
+          <Icon name="refresh" />
+          <p>Loading monitor…</p>
+        </div>
+      </div>
     );
   }
 
   return (
     <div className="page-pad">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div
+        className="page-header"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
         <div>
           <h1 style={{ margin: 0 }}>Uptime — Health checks + Alerts</h1>
           <p style={{ color: 'var(--fg-3)', margin: '4px 0 0', fontSize: 13 }}>
-            Background ping mỗi 5 phút từ chat-system mcp tới staging URL của inheritor.
-            Đây là <b>uptime monitor server-side</b> — không track user action trên dashboard.
+            Background ping mỗi 5 phút từ chat-system mcp tới staging URL của inheritor. Đây là{' '}
+            <b>uptime monitor server-side</b> — không track user action trên dashboard.
           </p>
         </div>
         <button className="btn" onClick={onPing} disabled={pinging}>
@@ -80,15 +88,34 @@ export function PageMonitor() {
       </div>
 
       {error && (
-        <div style={{ background: 'var(--bg-2)', border: '1px solid var(--sev-high-fg)', padding: 12, borderRadius: 8, margin: '12px 0', fontSize: 13 }}>
+        <div
+          style={{
+            background: 'var(--bg-2)',
+            border: '1px solid var(--sev-high-fg)',
+            padding: 12,
+            borderRadius: 8,
+            margin: '12px 0',
+            fontSize: 13,
+          }}
+        >
           {error}
         </div>
       )}
 
       {/* Uptime summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginTop: 16 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: 16,
+          marginTop: 16,
+        }}
+      >
         {summary?.targets.length === 0 && (
-          <div className="empty-state" style={{ gridColumn: '1 / -1', padding: 32, textAlign: 'center' }}>
+          <div
+            className="empty-state"
+            style={{ gridColumn: '1 / -1', padding: 32, textAlign: 'center' }}
+          >
             <Icon name="alert" size={24} />
             <h3 style={{ margin: '12px 0 6px' }}>Chưa có monitor target</h3>
             <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>
@@ -96,13 +123,40 @@ export function PageMonitor() {
             </p>
           </div>
         )}
-        {summary?.targets.map(t => (
+        {summary?.targets.map((t) => (
           <div key={t.target_url} className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--fg-3)',
+                marginBottom: 4,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {t.target_url}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '8px 0' }}>
-              <div style={{ fontSize: 32, fontWeight: 600, color: t.uptime_pct >= 99 ? 'var(--sev-low-fg)' : t.uptime_pct >= 95 ? 'var(--sev-med-fg)' : 'var(--sev-high-fg)' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                margin: '8px 0',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 32,
+                  fontWeight: 600,
+                  color:
+                    t.uptime_pct >= 99
+                      ? 'var(--sev-low-fg)'
+                      : t.uptime_pct >= 95
+                        ? 'var(--sev-med-fg)'
+                        : 'var(--sev-high-fg)',
+                }}
+              >
                 {t.uptime_pct}%
               </div>
               <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
@@ -110,7 +164,7 @@ export function PageMonitor() {
               </div>
             </div>
             <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-              Up: {t.up}  ·  Down: {t.down}  ·  Last 24h
+              Up: {t.up} · Down: {t.down} · Last 24h
             </div>
           </div>
         ))}
@@ -133,18 +187,24 @@ export function PageMonitor() {
             </tr>
           </thead>
           <tbody>
-            {alerts.map(a => (
+            {alerts.map((a) => (
               <tr key={a.id}>
                 <td>
-                  <Badge variant={a.kind === 'down' ? 'high' : a.kind === 'recovered' ? 'low' : 'info'}>
+                  <Badge
+                    variant={a.kind === 'down' ? 'high' : a.kind === 'recovered' ? 'low' : 'info'}
+                  >
                     {a.kind}
                   </Badge>
                 </td>
                 <td>
-                  <Badge variant={a.severity as 'high' | 'medium' | 'low' | 'info'} dot>{a.severity}</Badge>
+                  <Badge variant={a.severity as 'high' | 'medium' | 'low' | 'info'} dot>
+                    {a.severity}
+                  </Badge>
                 </td>
                 <td style={{ maxWidth: 360 }}>{a.title}</td>
-                <td style={{ fontSize: 12, color: 'var(--fg-3)' }}>{new Date(a.raised_at).toLocaleString()}</td>
+                <td style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+                  {new Date(a.raised_at).toLocaleString()}
+                </td>
                 <td>
                   {a.acknowledged_at ? (
                     <span style={{ fontSize: 11, color: 'var(--sev-low-fg)' }}>ack'd</span>
@@ -154,7 +214,9 @@ export function PageMonitor() {
                 </td>
                 <td>
                   {!a.acknowledged_at && (
-                    <button className="btn ghost sm" onClick={() => onAck(a.id)}>Acknowledge</button>
+                    <button className="btn ghost sm" onClick={() => onAck(a.id)}>
+                      Acknowledge
+                    </button>
                   )}
                 </td>
               </tr>
@@ -170,18 +232,30 @@ export function PageMonitor() {
       ) : (
         <table className="data-table">
           <thead>
-            <tr><th>Time</th><th>Target</th><th>Status</th><th>Latency</th><th></th></tr>
+            <tr>
+              <th>Time</th>
+              <th>Target</th>
+              <th>Status</th>
+              <th>Latency</th>
+              <th></th>
+            </tr>
           </thead>
           <tbody>
-            {checks.map(c => (
+            {checks.map((c) => (
               <tr key={c.id}>
-                <td style={{ fontSize: 12, color: 'var(--fg-3)' }}>{new Date(c.checked_at).toLocaleString()}</td>
+                <td style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+                  {new Date(c.checked_at).toLocaleString()}
+                </td>
                 <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{c.target_url}</td>
                 <td>
                   {c.is_up ? (
-                    <Badge variant="low" dot>{c.http_status}</Badge>
+                    <Badge variant="low" dot>
+                      {c.http_status}
+                    </Badge>
                   ) : (
-                    <Badge variant="high" dot>{c.http_status || 'FAIL'}</Badge>
+                    <Badge variant="high" dot>
+                      {c.http_status || 'FAIL'}
+                    </Badge>
                   )}
                 </td>
                 <td style={{ fontSize: 12 }}>{c.response_time_ms ?? '—'}ms</td>

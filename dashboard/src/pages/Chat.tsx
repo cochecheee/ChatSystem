@@ -24,17 +24,25 @@ function parseCommand(input: string): { cmd: string; args: string[] } {
 }
 
 export function PageChat() {
-  const [messages, setMessages] = useState<Message[]>([{
-    role: 'ai',
-    text: 'Xin chào! Mình là Sentinel AI — trợ lý bảo mật của bạn. Bạn có thể chat tự do bằng tiếng Việt, hoặc dùng lệnh nhanh như /explain 5, /scan, /report.',
-  }]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: 'ai',
+      text: 'Xin chào! Mình là Sentinel AI — trợ lý bảo mật của bạn. Bạn có thể chat tự do bằng tiếng Việt, hoặc dùng lệnh nhanh như /explain 5, /scan, /report.',
+    },
+  ]);
   const { user, loading: authLoading, logout } = useAuth();
   const authed = !!user;
   const [input, setInput] = useState('');
   const [approvalId, setApprovalId] = useState<number | null>(null);
   const [revokeId, setRevokeId] = useState<number | null>(null);
-  const [cmdStatus, setCmdStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [reportStatus, setReportStatus] = useState<{ type: 'success' | 'error'; msg: string; downloadUrl?: string } | null>(null);
+  const [cmdStatus, setCmdStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(
+    null
+  );
+  const [reportStatus, setReportStatus] = useState<{
+    type: 'success' | 'error';
+    msg: string;
+    downloadUrl?: string;
+  } | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -43,9 +51,13 @@ export function PageChat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const addMsg = (msg: Message) => setMessages(m => [...m, msg]);
+  const addMsg = (msg: Message) => setMessages((m) => [...m, msg]);
   const replaceLastAi = (text: string) =>
-    setMessages(m => m.map((msg, i) => i === m.length - 1 && msg.role === 'ai' ? { ...msg, text, loading: false } : msg));
+    setMessages((m) =>
+      m.map((msg, i) =>
+        i === m.length - 1 && msg.role === 'ai' ? { ...msg, text, loading: false } : msg
+      )
+    );
 
   const handleReport = async () => {
     setReportLoading(true);
@@ -70,23 +82,29 @@ export function PageChat() {
     addMsg({ role: 'ai', text: '⏳ Đang xử lý…', loading: true });
 
     if (cmd === 'report') {
-      setMessages(m => m.filter(msg => !(msg.loading)));
+      setMessages((m) => m.filter((msg) => !msg.loading));
       await handleReport();
       return;
     }
 
     if (cmd === 'approve') {
       const id = parseInt(args[0]);
-      if (isNaN(id)) { replaceLastAi('Cú pháp: /approve [finding_id]'); return; }
-      setMessages(m => m.filter(msg => !(msg.loading)));
+      if (isNaN(id)) {
+        replaceLastAi('Cú pháp: /approve [finding_id]');
+        return;
+      }
+      setMessages((m) => m.filter((msg) => !msg.loading));
       setApprovalId(id);
       return;
     }
 
     if (cmd === 'revoke') {
       const id = parseInt(args[0]);
-      if (isNaN(id)) { replaceLastAi('Cú pháp: /revoke [finding_id]'); return; }
-      setMessages(m => m.filter(msg => !(msg.loading)));
+      if (isNaN(id)) {
+        replaceLastAi('Cú pháp: /revoke [finding_id]');
+        return;
+      }
+      setMessages((m) => m.filter((msg) => !msg.loading));
       setRevokeId(id);
       return;
     }
@@ -123,11 +141,13 @@ export function PageChat() {
     addMsg({ role: 'ai', text: '⏳ Đang xử lý…', loading: true });
     try {
       const res = await api.chat.message(text);
-      setMessages(m => m.map((msg, i) =>
-        i === m.length - 1 && msg.role === 'ai'
-          ? { ...msg, text: res.reply, loading: false, suggestedCommand: res.suggested_command }
-          : msg,
-      ));
+      setMessages((m) =>
+        m.map((msg, i) =>
+          i === m.length - 1 && msg.role === 'ai'
+            ? { ...msg, text: res.reply, loading: false, suggestedCommand: res.suggested_command }
+            : msg
+        )
+      );
     } catch (e) {
       replaceLastAi(`Lỗi: ${e}`);
     }
@@ -157,7 +177,11 @@ export function PageChat() {
   const handleApproveConfirm = async (justification: string) => {
     if (approvalId === null) return;
     try {
-      const res = await api.chat.command({ command: '/approve', finding_id: approvalId, justification });
+      const res = await api.chat.command({
+        command: '/approve',
+        finding_id: approvalId,
+        justification,
+      });
       setCmdStatus({ type: 'success', msg: res.message });
     } catch (e) {
       setCmdStatus({ type: 'error', msg: String(e) });
@@ -168,7 +192,11 @@ export function PageChat() {
   const handleRevokeConfirm = async (justification: string) => {
     if (revokeId === null) return;
     try {
-      const res = await api.chat.command({ command: '/revoke', finding_id: revokeId, justification });
+      const res = await api.chat.command({
+        command: '/revoke',
+        finding_id: revokeId,
+        justification,
+      });
       setCmdStatus({ type: 'success', msg: res.message });
     } catch (e) {
       setCmdStatus({ type: 'error', msg: String(e) });
@@ -177,25 +205,51 @@ export function PageChat() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', position: 'relative' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: 'calc(100vh - 52px)',
+        position: 'relative',
+      }}
+    >
       {!authLoading && !authed && (
-        <div style={{
-          position: 'absolute', inset: 0, zIndex: 5,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)',
-          fontSize: 13, color: 'var(--fg-2)', textAlign: 'center', padding: 24,
-        }}>
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.4)',
+            backdropFilter: 'blur(2px)',
+            fontSize: 13,
+            color: 'var(--fg-2)',
+            textAlign: 'center',
+            padding: 24,
+          }}
+        >
           Đăng nhập qua nút <strong>Sign in</strong> ở góc phải topbar để dùng AI Chat.
         </div>
       )}
 
       <div style={{ padding: '20px 28px 0', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingBottom: 16,
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div className="ai-orb" />
             <div>
               <h1 className="h2">AI Assistant</h1>
-              <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>Sentinel AI · Gemini · tiếng Việt</div>
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                Sentinel AI · Gemini · tiếng Việt
+              </div>
             </div>
           </div>
           {authed && (
@@ -218,25 +272,22 @@ export function PageChat() {
           type={reportStatus.type}
           message={reportStatus.msg}
           onDismiss={() => setReportStatus(null)}
-          action={reportStatus.downloadUrl
-            ? {
-                label: 'Tải xuống',
-                onClick: () => {
-                  const a = document.createElement('a');
-                  a.href = reportStatus.downloadUrl!;
-                  a.download = '';
-                  a.click();
-                },
-              }
-            : undefined}
+          action={
+            reportStatus.downloadUrl
+              ? {
+                  label: 'Tải xuống',
+                  onClick: () => {
+                    const a = document.createElement('a');
+                    a.href = reportStatus.downloadUrl!;
+                    a.download = '';
+                    a.click();
+                  },
+                }
+              : undefined
+          }
         />
       )}
-      {reportLoading && (
-        <AlertBanner
-          type="info"
-          message="Đang tạo báo cáo…"
-        />
-      )}
+      {reportLoading && <AlertBanner type="info" message="Đang tạo báo cáo…" />}
 
       <div className="ai-messages" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {messages.map((m, i) => (
@@ -246,10 +297,11 @@ export function PageChat() {
               <span className="who">{m.role === 'user' ? 'Bạn' : 'Sentinel AI'}</span>
             </div>
             <div className="msg-body">
-              {m.loading
-                ? <span className="muted">⏳ Đang xử lý…</span>
-                : m.text.split('\n').map((line, j) => <p key={j}>{line}</p>)
-              }
+              {m.loading ? (
+                <span className="muted">⏳ Đang xử lý…</span>
+              ) : (
+                m.text.split('\n').map((line, j) => <p key={j}>{line}</p>)
+              )}
             </div>
             {m.suggestedCommand && !m.loading && (
               <div className="msg-actions" style={{ marginTop: 6 }}>
@@ -268,10 +320,18 @@ export function PageChat() {
         <div ref={bottomRef} />
       </div>
 
-      <div style={{ padding: '0 28px 8px', display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
-        {PRESETS.map(cmd => (
-          <span key={cmd} className="suggestion-chip"
-            onClick={() => { setInput(cmd.replace(' [id]', ' ')); textareaRef.current?.focus(); }}>
+      <div
+        style={{ padding: '0 28px 8px', display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}
+      >
+        {PRESETS.map((cmd) => (
+          <span
+            key={cmd}
+            className="suggestion-chip"
+            onClick={() => {
+              setInput(cmd.replace(' [id]', ' '));
+              textareaRef.current?.focus();
+            }}
+          >
             {cmd}
           </span>
         ))}
@@ -284,8 +344,13 @@ export function PageChat() {
             data-testid="chat-input"
             rows={3}
             value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
             placeholder="Hỏi tự do bằng tiếng Việt, hoặc gõ lệnh /explain 1, /fix 1, /scan… (Enter để gửi)"
           />
           <div className="ai-composer-row">

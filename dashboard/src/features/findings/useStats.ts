@@ -17,12 +17,7 @@ export interface OverviewStats {
   pending: number;
 }
 
-const DEPS_TOOLS = new Set([
-  'dependency-check',
-  'owasp-dependency-check',
-  'trivy',
-  'trivy-deps',
-]);
+const DEPS_TOOLS = new Set(['dependency-check', 'owasp-dependency-check', 'trivy', 'trivy-deps']);
 
 /**
  * Hook poll `/stats/overview` — server-side counts đáng tin trên 8000+ findings.
@@ -37,13 +32,24 @@ export function useOverviewStats(intervalMs = POLL_INTERVAL_MS) {
   useEffect(() => {
     let cancelled = false;
     const fetch = () => {
-      api.stats.overview(projectId !== undefined ? { project_id: projectId } : undefined)
-        .then(s => { if (!cancelled) { setStats(s); setLoading(false); } })
-        .catch(() => { if (!cancelled) setLoading(false); });
+      api.stats
+        .overview(projectId !== undefined ? { project_id: projectId } : undefined)
+        .then((s) => {
+          if (!cancelled) {
+            setStats(s);
+            setLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setLoading(false);
+        });
     };
     fetch();
     const id = setInterval(fetch, intervalMs);
-    return () => { cancelled = true; clearInterval(id); };
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [intervalMs, projectId]);
 
   return { stats, loading };

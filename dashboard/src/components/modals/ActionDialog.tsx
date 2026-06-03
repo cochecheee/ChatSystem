@@ -60,15 +60,26 @@ export function ActionDialog({
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div
         style={{
-          background: 'var(--bg-elev)', border: '1px solid var(--line)',
-          borderRadius: 10, padding: '24px 28px', width: 440, maxWidth: '90vw',
+          background: 'var(--bg-elev)',
+          border: '1px solid var(--line)',
+          borderRadius: 10,
+          padding: '24px 28px',
+          width: 440,
+          maxWidth: '90vw',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
         }}
       >
@@ -78,19 +89,27 @@ export function ActionDialog({
             Finding #{findingId}
           </div>
         )}
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>{description}</div>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
+          {description}
+        </div>
 
         <textarea
           ref={textareaRef}
           rows={4}
           value={justification}
-          onChange={e => setJustification(e.target.value)}
+          onChange={(e) => setJustification(e.target.value)}
           placeholder={`Lý do (tối thiểu ${MIN_CHARS} ký tự)…`}
           style={{
-            width: '100%', resize: 'vertical', padding: '8px 10px',
-            background: 'var(--surface-2)', border: '1px solid var(--line)',
-            borderRadius: 6, color: 'var(--fg)', fontSize: 13,
-            fontFamily: 'inherit', outline: 'none',
+            width: '100%',
+            resize: 'vertical',
+            padding: '8px 10px',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--line)',
+            borderRadius: 6,
+            color: 'var(--fg)',
+            fontSize: 13,
+            fontFamily: 'inherit',
+            outline: 'none',
           }}
         />
 

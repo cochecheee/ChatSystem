@@ -12,7 +12,12 @@ import type { AiConfig, GatesConfig, SastToolsConfig } from '../features/config/
 import type { Project } from '../types';
 
 interface IntegrationsInfo {
-  github: { configured: boolean; owner: string | null; repo: string | null; polling_interval_seconds: number };
+  github: {
+    configured: boolean;
+    owner: string | null;
+    repo: string | null;
+    polling_interval_seconds: number;
+  };
   gemini: { configured: boolean; model: string };
   ci_ingest: { api_key_required: boolean; webhook_token_required: boolean };
 }
@@ -28,7 +33,9 @@ interface ToggleRowProps {
 function ToggleRow({ label, sub, on, onChange, disabled }: ToggleRowProps) {
   const [checked, setChecked] = useState(on);
   // Sync khi parent thay đổi (config load xong sau mount).
-  useEffect(() => { setChecked(on); }, [on]);
+  useEffect(() => {
+    setChecked(on);
+  }, [on]);
   const handleClick = () => {
     if (disabled) return;
     const next = !checked;
@@ -36,7 +43,10 @@ function ToggleRow({ label, sub, on, onChange, disabled }: ToggleRowProps) {
     onChange?.(next);
   };
   return (
-    <div className="toggle-row" style={disabled ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}>
+    <div
+      className="toggle-row"
+      style={disabled ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+    >
       <div>
         <div className="tog-label">{label}</div>
         <div className="tog-sub">{sub}</div>
@@ -47,25 +57,53 @@ function ToggleRow({ label, sub, on, onChange, disabled }: ToggleRowProps) {
 }
 
 const SAST_TOOLS: { key: keyof SastToolsConfig; label: string; sub: string }[] = [
-  { key: 'semgrep',          label: 'Semgrep',          sub: 'Static analysis — Java, JS/TS, Python' },
-  { key: 'codeql',           label: 'CodeQL',           sub: 'Deep semantic analysis — Java, JS' },
-  { key: 'spotbugs',         label: 'SpotBugs',         sub: 'Bytecode analysis — Java' },
-  { key: 'eslint',           label: 'ESLint SARIF',     sub: 'Lint + security rules — JS/TS' },
-  { key: 'dependency_check', label: 'OWASP Dep-Check',  sub: 'Dependency vulnerabilities' },
-  { key: 'trivy',            label: 'Trivy',            sub: 'Container & filesystem scan' },
+  { key: 'semgrep', label: 'Semgrep', sub: 'Static analysis — Java, JS/TS, Python' },
+  { key: 'codeql', label: 'CodeQL', sub: 'Deep semantic analysis — Java, JS' },
+  { key: 'spotbugs', label: 'SpotBugs', sub: 'Bytecode analysis — Java' },
+  { key: 'eslint', label: 'ESLint SARIF', sub: 'Lint + security rules — JS/TS' },
+  { key: 'dependency_check', label: 'OWASP Dep-Check', sub: 'Dependency vulnerabilities' },
+  { key: 'trivy', label: 'Trivy', sub: 'Container & filesystem scan' },
 ];
 
 const GATES: { key: keyof Omit<GatesConfig, 'min_cvss_score'>; label: string; sub: string }[] = [
-  { key: 'block_on_critical',   label: 'Block on critical',   sub: 'Fail pipeline nếu có finding critical' },
-  { key: 'block_on_high',       label: 'Block on high',       sub: 'Fail pipeline nếu có finding high' },
-  { key: 'block_on_secrets',    label: 'Block on secrets',    sub: 'Fail nếu phát hiện secrets/credentials' },
-  { key: 'require_ai_analysis', label: 'Require AI analysis', sub: 'Bắt buộc finding nghiêm trọng phải được AI phân tích trước khi merge' },
+  {
+    key: 'block_on_critical',
+    label: 'Block on critical',
+    sub: 'Fail pipeline nếu có finding critical',
+  },
+  { key: 'block_on_high', label: 'Block on high', sub: 'Fail pipeline nếu có finding high' },
+  {
+    key: 'block_on_secrets',
+    label: 'Block on secrets',
+    sub: 'Fail nếu phát hiện secrets/credentials',
+  },
+  {
+    key: 'require_ai_analysis',
+    label: 'Require AI analysis',
+    sub: 'Bắt buộc finding nghiêm trọng phải được AI phân tích trước khi merge',
+  },
 ];
 
-const AI_TOGGLES: { key: keyof Omit<AiConfig, 'model' | 'max_findings_per_run'>; label: string; sub: string }[] = [
-  { key: 'auto_analyze_critical',  label: 'Auto-analyze critical',  sub: 'Tự động AI phân tích finding critical khi tạo' },
-  { key: 'auto_analyze_high',      label: 'Auto-analyze high',      sub: 'Tự động AI phân tích finding high (tốn token nhiều hơn)' },
-  { key: 'include_source_context', label: 'Include source context', sub: 'Fetch source code từ GitHub kèm vào prompt' },
+const AI_TOGGLES: {
+  key: keyof Omit<AiConfig, 'model' | 'max_findings_per_run'>;
+  label: string;
+  sub: string;
+}[] = [
+  {
+    key: 'auto_analyze_critical',
+    label: 'Auto-analyze critical',
+    sub: 'Tự động AI phân tích finding critical khi tạo',
+  },
+  {
+    key: 'auto_analyze_high',
+    label: 'Auto-analyze high',
+    sub: 'Tự động AI phân tích finding high (tốn token nhiều hơn)',
+  },
+  {
+    key: 'include_source_context',
+    label: 'Include source context',
+    sub: 'Fetch source code từ GitHub kèm vào prompt',
+  },
 ];
 
 function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
@@ -76,7 +114,10 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
   const [open, setOpen] = useState(false);
 
   const handleSubmit = async () => {
-    if (!name.trim() || !url.trim()) { setError('Điền đầy đủ tên và GitHub URL'); return; }
+    if (!name.trim() || !url.trim()) {
+      setError('Điền đầy đủ tên và GitHub URL');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -94,7 +135,11 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
 
   if (!open) {
     return (
-      <button className="btn ghost sm" style={{ margin: '8px 16px 12px' }} onClick={() => setOpen(true)}>
+      <button
+        className="btn ghost sm"
+        style={{ margin: '8px 16px 12px' }}
+        onClick={() => setOpen(true)}
+      >
         <Icon name="plus" size={12} /> Add project
       </button>
     );
@@ -104,30 +149,50 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
     <div style={{ padding: '8px 16px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <input
         style={{
-          padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--line)',
-          borderRadius: 6, color: 'var(--fg)', fontSize: 12, outline: 'none',
+          padding: '6px 10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          color: 'var(--fg)',
+          fontSize: 12,
+          outline: 'none',
         }}
         placeholder="Project name"
         value={name}
-        onChange={e => setName(e.target.value)}
+        onChange={(e) => setName(e.target.value)}
       />
       <input
         className="mono"
         style={{
-          padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--line)',
-          borderRadius: 6, color: 'var(--fg)', fontSize: 12, outline: 'none',
+          padding: '6px 10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          color: 'var(--fg)',
+          fontSize: 12,
+          outline: 'none',
         }}
         placeholder="https://github.com/owner/repo"
         value={url}
-        onChange={e => setUrl(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
+        onChange={(e) => setUrl(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+        }}
       />
       {error && <AlertBanner type="error" message={error} onDismiss={() => setError('')} />}
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn primary sm" onClick={handleSubmit} disabled={loading}>
           {loading ? 'Đang lưu…' : 'Save'}
         </button>
-        <button className="btn ghost sm" onClick={() => { setOpen(false); setError(''); }}>Cancel</button>
+        <button
+          className="btn ghost sm"
+          onClick={() => {
+            setOpen(false);
+            setError('');
+          }}
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );
@@ -142,10 +207,12 @@ export function PageSettings() {
   const [configError, setConfigError] = useState<string>('');
 
   useEffect(() => {
-    api.health()
+    api
+      .health()
       .then(() => setHealth('ok'))
       .catch(() => setHealth('error'));
-    api.projects.list()
+    api.projects
+      .list()
       .then(setProjects)
       .catch(() => {});
   }, []);
@@ -195,7 +262,7 @@ export function PageSettings() {
     if (!confirm(`Xoá project "${name}"? Tất cả artifacts và findings sẽ mất.`)) return;
     try {
       await api.projects.delete(id);
-      setProjects(prev => prev.filter(p => p.id !== id));
+      setProjects((prev) => prev.filter((p) => p.id !== id));
     } catch (e) {
       setConfigError(`Xoá thất bại: ${e}`);
     }
@@ -203,12 +270,18 @@ export function PageSettings() {
 
   const [integrations, setIntegrations] = useState<IntegrationsInfo | null>(null);
   useEffect(() => {
-    api.config.integrations().then(setIntegrations).catch(() => {});
+    api.config
+      .integrations()
+      .then(setIntegrations)
+      .catch(() => {});
   }, []);
 
   const refreshHealth = () => {
     setHealth('checking');
-    api.health().then(() => setHealth('ok')).catch(() => setHealth('error'));
+    api
+      .health()
+      .then(() => setHealth('ok'))
+      .catch(() => setHealth('error'));
   };
 
   return (
@@ -224,13 +297,27 @@ export function PageSettings() {
       </div>
 
       {/* Backend health banner */}
-      <div className="card" style={{ marginBottom: 20, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div
+        className="card"
+        style={{
+          marginBottom: 20,
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
         <StatusDot status={health === 'ok' ? 'ok' : health === 'error' ? 'error' : 'info'} />
         <div>
           <div style={{ fontSize: 13, fontWeight: 500 }}>Backend API — GET /health</div>
           <div className="muted" style={{ fontSize: 11 }}>
-            {health === 'checking' ? 'Đang kiểm tra…' : health === 'ok' ? 'Connected — healthy' : 'Unreachable — kiểm tra server'}
-            {' · '}<span className="mono">{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</span>
+            {health === 'checking'
+              ? 'Đang kiểm tra…'
+              : health === 'ok'
+                ? 'Connected — healthy'
+                : 'Unreachable — kiểm tra server'}
+            {' · '}
+            <span className="mono">{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</span>
           </div>
         </div>
         <span style={{ marginLeft: 'auto' }}>
@@ -245,14 +332,22 @@ export function PageSettings() {
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <div className="h3">SAST Tools</div>
-              {!isAdmin && <span className="muted" style={{ fontSize: 11 }}>read-only · admin login required</span>}
+              {!isAdmin && (
+                <span className="muted" style={{ fontSize: 11 }}>
+                  read-only · admin login required
+                </span>
+              )}
             </div>
             {configError && (
               <div style={{ padding: '0 16px 8px' }}>
-                <AlertBanner type="error" message={configError} onDismiss={() => setConfigError('')} />
+                <AlertBanner
+                  type="error"
+                  message={configError}
+                  onDismiss={() => setConfigError('')}
+                />
               </div>
             )}
-            {SAST_TOOLS.map(t => (
+            {SAST_TOOLS.map((t) => (
               <ToggleRow
                 key={t.key}
                 label={t.label}
@@ -267,9 +362,13 @@ export function PageSettings() {
           <div className="card">
             <div className="card-header">
               <div className="h3">Security Gates</div>
-              {!isAdmin && <span className="muted" style={{ fontSize: 11 }}>read-only</span>}
+              {!isAdmin && (
+                <span className="muted" style={{ fontSize: 11 }}>
+                  read-only
+                </span>
+              )}
             </div>
-            {GATES.map(g => (
+            {GATES.map((g) => (
               <ToggleRow
                 key={g.key}
                 label={g.label}
@@ -280,7 +379,9 @@ export function PageSettings() {
               />
             ))}
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>
-              <div className="tog-label" style={{ marginBottom: 4 }}>Min CVSS score gate</div>
+              <div className="tog-label" style={{ marginBottom: 4 }}>
+                Min CVSS score gate
+              </div>
               <input
                 type="number"
                 min={0}
@@ -295,15 +396,25 @@ export function PageSettings() {
                   try {
                     const current = config.gates ?? ({} as GatesConfig);
                     await update('gates', { ...current, min_cvss_score: v });
-                  } catch (err) { setConfigError(`Lưu thất bại: ${err}`); }
+                  } catch (err) {
+                    setConfigError(`Lưu thất bại: ${err}`);
+                  }
                 }}
                 style={{
-                  width: 80, padding: '4px 8px', background: 'var(--surface-2)',
-                  border: '1px solid var(--line)', borderRadius: 4, color: 'var(--fg)',
-                  fontSize: 12, outline: 'none', fontFamily: 'inherit',
+                  width: 80,
+                  padding: '4px 8px',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 4,
+                  color: 'var(--fg)',
+                  fontSize: 12,
+                  outline: 'none',
+                  fontFamily: 'inherit',
                 }}
               />
-              <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>fail nếu CVSS ≥ giá trị này</span>
+              <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>
+                fail nếu CVSS ≥ giá trị này
+              </span>
             </div>
           </div>
         </div>
@@ -312,9 +423,13 @@ export function PageSettings() {
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <div className="h3">AI Analysis</div>
-              {!isAdmin && <span className="muted" style={{ fontSize: 11 }}>read-only</span>}
+              {!isAdmin && (
+                <span className="muted" style={{ fontSize: 11 }}>
+                  read-only
+                </span>
+              )}
             </div>
-            {AI_TOGGLES.map(t => (
+            {AI_TOGGLES.map((t) => (
               <ToggleRow
                 key={t.key}
                 label={t.label}
@@ -325,14 +440,18 @@ export function PageSettings() {
               />
             ))}
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>
-              <div className="tog-label" style={{ marginBottom: 4 }}>Gemini Model</div>
+              <div className="tog-label" style={{ marginBottom: 4 }}>
+                Gemini Model
+              </div>
               <div className="tool-tag">{config.ai?.model ?? 'gemini-3.1-pro-preview'}</div>
               <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
                 Cấu hình qua env <span className="mono">GEMINI_MODEL</span>
               </div>
             </div>
             <div style={{ padding: '0 16px 12px' }}>
-              <div className="tog-label" style={{ marginBottom: 4 }}>Max findings per run</div>
+              <div className="tog-label" style={{ marginBottom: 4 }}>
+                Max findings per run
+              </div>
               <input
                 type="number"
                 min={1}
@@ -346,12 +465,20 @@ export function PageSettings() {
                   try {
                     const current = config.ai ?? ({} as AiConfig);
                     await update('ai', { ...current, max_findings_per_run: v });
-                  } catch (err) { setConfigError(`Lưu thất bại: ${err}`); }
+                  } catch (err) {
+                    setConfigError(`Lưu thất bại: ${err}`);
+                  }
                 }}
                 style={{
-                  width: 80, padding: '4px 8px', background: 'var(--surface-2)',
-                  border: '1px solid var(--line)', borderRadius: 4, color: 'var(--fg)',
-                  fontSize: 12, outline: 'none', fontFamily: 'inherit',
+                  width: 80,
+                  padding: '4px 8px',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 4,
+                  color: 'var(--fg)',
+                  fontSize: 12,
+                  outline: 'none',
+                  fontFamily: 'inherit',
                 }}
               />
             </div>
@@ -361,25 +488,50 @@ export function PageSettings() {
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <div className="h3">Projects</div>
-              <span className="muted" style={{ fontSize: 11 }}>{projects.length} registered</span>
+              <span className="muted" style={{ fontSize: 11 }}>
+                {projects.length} registered
+              </span>
             </div>
             {projects.length === 0 ? (
-              <div className="empty" style={{ padding: '12px 16px', fontSize: 12 }}>No projects — add one below</div>
+              <div className="empty" style={{ padding: '12px 16px', fontSize: 12 }}>
+                No projects — add one below
+              </div>
             ) : (
-              projects.map(p => (
-                <div key={p.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              projects.map((p) => (
+                <div
+                  key={p.id}
+                  style={{
+                    padding: '10px 16px',
+                    borderBottom: '1px solid var(--line)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Icon name="github" size={14} style={{ color: 'var(--fg-3)', flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
-                      <div className="mono muted" style={{ fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div
+                        className="mono muted"
+                        style={{
+                          fontSize: 10.5,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         {p.github_url}
                       </div>
                       {p.last_processed_run_id != null && (
-                        <div className="muted" style={{ fontSize: 10.5 }}>Last run: #{p.last_processed_run_id}</div>
+                        <div className="muted" style={{ fontSize: 10.5 }}>
+                          Last run: #{p.last_processed_run_id}
+                        </div>
                       )}
                     </div>
-                    <span className="chip dot status-passed" style={{ fontSize: 10 }}>active</span>
+                    <span className="chip dot status-passed" style={{ fontSize: 10 }}>
+                      active
+                    </span>
                     <ProjectMembers projectId={p.id} />
                     <ProjectSuppressions projectId={p.id} />
                     <button
@@ -394,20 +546,27 @@ export function PageSettings() {
                 </div>
               ))
             )}
-            <AddProjectForm onAdded={p => setProjects(prev => [...prev, p])} />
+            <AddProjectForm onAdded={(p) => setProjects((prev) => [...prev, p])} />
           </div>
 
           <div className="card">
-            <div className="card-header"><div className="h3">Integrations</div></div>
+            <div className="card-header">
+              <div className="h3">Integrations</div>
+            </div>
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
               {/* MCP Gateway */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Icon name="link" size={14} style={{ color: 'var(--fg-3)' }} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>MCP Gateway</div>
-                  <div className="mono" style={{ fontSize: 12 }}>{import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}</div>
+                  <div className="mono" style={{ fontSize: 12 }}>
+                    {import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}
+                  </div>
                 </div>
-                <span className={`chip dot ${health === 'ok' ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
+                <span
+                  className={`chip dot ${health === 'ok' ? 'status-passed' : 'status-failed'}`}
+                  style={{ fontSize: 10 }}
+                >
                   {health === 'ok' ? 'active' : 'down'}
                 </span>
               </div>
@@ -422,7 +581,10 @@ export function PageSettings() {
                       : 'not configured'}
                   </div>
                 </div>
-                <span className={`chip dot ${integrations?.github.configured ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
+                <span
+                  className={`chip dot ${integrations?.github.configured ? 'status-passed' : 'status-failed'}`}
+                  style={{ fontSize: 10 }}
+                >
                   {integrations?.github.configured ? 'active' : 'missing'}
                 </span>
               </div>
@@ -435,7 +597,10 @@ export function PageSettings() {
                     {integrations?.gemini.configured ? integrations.gemini.model : 'no API key'}
                   </div>
                 </div>
-                <span className={`chip dot ${integrations?.gemini.configured ? 'status-passed' : 'status-failed'}`} style={{ fontSize: 10 }}>
+                <span
+                  className={`chip dot ${integrations?.gemini.configured ? 'status-passed' : 'status-failed'}`}
+                  style={{ fontSize: 10 }}
+                >
                   {integrations?.gemini.configured ? 'active' : 'missing'}
                 </span>
               </div>
@@ -443,14 +608,18 @@ export function PageSettings() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Icon name="branch" size={14} style={{ color: 'var(--fg-3)' }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>CI Ingest (webhook + artifact)</div>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                    CI Ingest (webhook + artifact)
+                  </div>
                   <div className="mono" style={{ fontSize: 12 }}>
                     {integrations
                       ? `webhook auth: ${integrations.ci_ingest.webhook_token_required ? 'on' : 'off'} · api-key: ${integrations.ci_ingest.api_key_required ? 'on' : 'off'}`
                       : '—'}
                   </div>
                 </div>
-                <span className="chip dot status-info" style={{ fontSize: 10 }}>configured</span>
+                <span className="chip dot status-info" style={{ fontSize: 10 }}>
+                  configured
+                </span>
               </div>
             </div>
           </div>

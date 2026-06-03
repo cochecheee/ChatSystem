@@ -37,14 +37,16 @@ export function PageRuntime() {
           critHigh: (ov as any).dast_critical_high ?? 0,
         });
       })
-      .catch(err => {
+      .catch((err) => {
         if (cancelled) return;
         setError(String(err.message ?? err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [project_id]);
 
   if (loading) {
@@ -76,10 +78,10 @@ export function PageRuntime() {
           <Icon name="alert" size={28} />
           <h3 style={{ margin: '12px 0 6px' }}>Chưa có DAST finding nào</h3>
           <p style={{ color: 'var(--fg-3)', maxWidth: 480, margin: '0 auto', lineHeight: 1.5 }}>
-            DAST (Dynamic Application Security Testing) chạy OWASP ZAP baseline scan
-            đối với app staging sau khi CD redeploy. Bật bằng cách thêm{' '}
-            <code>dast: true</code> + <code>staging_url</code> vào file{' '}
-            <code>.github/workflows/security.yml</code> của inheritor repo.
+            DAST (Dynamic Application Security Testing) chạy OWASP ZAP baseline scan đối với app
+            staging sau khi CD redeploy. Bật bằng cách thêm <code>dast: true</code> +{' '}
+            <code>staging_url</code> vào file <code>.github/workflows/security.yml</code> của
+            inheritor repo.
           </p>
         </div>
       </div>
@@ -120,7 +122,7 @@ export function PageRuntime() {
           </tr>
         </thead>
         <tbody>
-          {items.map(f => {
+          {items.map((f) => {
             const raw = f.raw_data ?? {};
             const alert = (raw.alert as string) ?? f.message;
             const uri = (raw.uri as string) ?? f.file_path;
@@ -129,7 +131,10 @@ export function PageRuntime() {
             return (
               <tr key={f.id}>
                 <td>
-                  <Badge variant={f.severity as 'critical' | 'high' | 'medium' | 'low' | 'info'} dot>
+                  <Badge
+                    variant={f.severity as 'critical' | 'high' | 'medium' | 'low' | 'info'}
+                    dot
+                  >
                     {f.severity}
                   </Badge>
                 </td>
@@ -142,9 +147,23 @@ export function PageRuntime() {
                   {uri}
                 </td>
                 <td>
-                  {f.cwe_id ? <Badge variant="info">{f.cwe_id}</Badge> : <span style={{ color: 'var(--fg-3)' }}>—</span>}
+                  {f.cwe_id ? (
+                    <Badge variant="info">{f.cwe_id}</Badge>
+                  ) : (
+                    <span style={{ color: 'var(--fg-3)' }}>—</span>
+                  )}
                 </td>
-                <td style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={evidence}>
+                <td
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    maxWidth: 240,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={evidence}
+                >
                   {evidence || <span style={{ color: 'var(--fg-3)' }}>—</span>}
                 </td>
               </tr>

@@ -8,7 +8,7 @@ interface ConsoleError {
 
 function newErrorCollector(page: Page): ConsoleError[] {
   const errors: ConsoleError[] = [];
-  page.on('console', msg => {
+  page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const loc = msg.location();
       errors.push({
@@ -18,42 +18,45 @@ function newErrorCollector(page: Page): ConsoleError[] {
       });
     }
   });
-  page.on('pageerror', err => {
+  page.on('pageerror', (err) => {
     errors.push({ type: 'pageerror', text: `${err.name}: ${err.message}\n${err.stack ?? ''}` });
   });
-  page.on('requestfailed', req => {
-    errors.push({ type: 'requestfailed', text: `${req.method()} ${req.url()} — ${req.failure()?.errorText}` });
+  page.on('requestfailed', (req) => {
+    errors.push({
+      type: 'requestfailed',
+      text: `${req.method()} ${req.url()} — ${req.failure()?.errorText}`,
+    });
   });
   return errors;
 }
 
 const PAGES: { id: string; label: string }[] = [
-  { id: 'overview',   label: 'Overview' },
-  { id: 'pipelines',  label: 'Pipelines' },
-  { id: 'vulns',      label: 'Vulnerabilities' },
-  { id: 'dast',       label: 'DAST' },
-  { id: 'sca',        label: 'SCA' },
-  { id: 'secrets',    label: 'Secrets' },
-  { id: 'repos',      label: 'Repositories' },
-  { id: 'chat',       label: 'AI Chat' },
-  { id: 'prbot',      label: 'PR Bot' },
+  { id: 'overview', label: 'Overview' },
+  { id: 'pipelines', label: 'Pipelines' },
+  { id: 'vulns', label: 'Vulnerabilities' },
+  { id: 'dast', label: 'DAST' },
+  { id: 'sca', label: 'SCA' },
+  { id: 'secrets', label: 'Secrets' },
+  { id: 'repos', label: 'Repositories' },
+  { id: 'chat', label: 'AI Chat' },
+  { id: 'prbot', label: 'PR Bot' },
   { id: 'governance', label: 'Governance' },
-  { id: 'reports',    label: 'Reports' },
-  { id: 'settings',   label: 'Settings' },
+  { id: 'reports', label: 'Reports' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 // Errors này là known noise trong TEST_MODE (không có GitHub token, demo login chưa run, etc.)
 const NOISE_PATTERNS = [
   /favicon/i,
   /HMR|hot-update/i,
-  /\/github\/runs.*502/i,                  // GitHub API unavailable in TEST_MODE
-  /Failed to load resource.*502/i,         // 502 from upstream GitHub
-  /Failed to load resource.*404/i,         // missing endpoints in test env (e.g. unauthed /auth/me)
-  /Failed to load resource.*401/i,         // /auth/me before login
+  /\/github\/runs.*502/i, // GitHub API unavailable in TEST_MODE
+  /Failed to load resource.*502/i, // 502 from upstream GitHub
+  /Failed to load resource.*404/i, // missing endpoints in test env (e.g. unauthed /auth/me)
+  /Failed to load resource.*401/i, // /auth/me before login
 ];
 
 function isNoise(text: string): boolean {
-  return NOISE_PATTERNS.some(re => re.test(text));
+  return NOISE_PATTERNS.some((re) => re.test(text));
 }
 
 for (const { id, label } of PAGES) {
@@ -71,7 +74,7 @@ for (const { id, label } of PAGES) {
 
     await page.screenshot({ path: `test-results/page-${id}.png`, fullPage: true });
 
-    const real = errors.filter(e => !isNoise(e.text));
+    const real = errors.filter((e) => !isNoise(e.text));
     if (real.length > 0) {
       console.log(`\n=== Real errors on "${label}" ===`);
       for (const e of real) {
@@ -79,6 +82,11 @@ for (const { id, label } of PAGES) {
       }
     }
 
-    expect.soft(real, `Errors on "${label}":\n${real.map(e => `  ${e.type}: ${e.text}${e.location ? ' @ ' + e.location : ''}`).join('\n')}`).toEqual([]);
+    expect
+      .soft(
+        real,
+        `Errors on "${label}":\n${real.map((e) => `  ${e.type}: ${e.text}${e.location ? ' @ ' + e.location : ''}`).join('\n')}`
+      )
+      .toEqual([]);
   });
 }

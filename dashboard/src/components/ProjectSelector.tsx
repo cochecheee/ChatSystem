@@ -12,7 +12,7 @@ export function ProjectSelector() {
     <select
       className="project-selector"
       value={activeProjectId ?? ''}
-      onChange={e => {
+      onChange={(e) => {
         const v = e.target.value;
         setActiveProjectId(v === '' ? null : parseInt(v, 10));
       }}
@@ -28,8 +28,10 @@ export function ProjectSelector() {
       }}
     >
       <option value="">All projects</option>
-      {projects.map(p => (
-        <option key={p.id} value={p.id}>{p.name}</option>
+      {projects.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name}
+        </option>
       ))}
     </select>
   );

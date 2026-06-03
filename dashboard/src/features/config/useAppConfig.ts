@@ -46,20 +46,24 @@ export function useAppConfig() {
 
   useEffect(() => {
     setLoading(true);
-    api.config.list()
-      .then(c => { setConfig(c as AllConfig); setError(null); })
-      .catch(e => setError(String(e)))
+    api.config
+      .list()
+      .then((c) => {
+        setConfig(c as AllConfig);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
 
-  const update = useCallback(
-    async <K extends keyof AllConfig>(key: K, value: AllConfig[K]) => {
-      const updated = await api.config.update(key as string, value as unknown as Record<string, unknown>);
-      setConfig(prev => ({ ...prev, [key]: updated }));
-      return updated;
-    },
-    [],
-  );
+  const update = useCallback(async <K extends keyof AllConfig>(key: K, value: AllConfig[K]) => {
+    const updated = await api.config.update(
+      key as string,
+      value as unknown as Record<string, unknown>
+    );
+    setConfig((prev) => ({ ...prev, [key]: updated }));
+    return updated;
+  }, []);
 
   return { config, loading, error, update };
 }

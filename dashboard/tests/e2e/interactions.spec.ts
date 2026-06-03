@@ -8,10 +8,10 @@ interface Issue {
 const issues: Issue[] = [];
 
 function trackErrors(page: Page, pageName: string) {
-  page.on('pageerror', err => {
+  page.on('pageerror', (err) => {
     issues.push({ page: pageName, problem: `pageerror: ${err.message}` });
   });
-  page.on('console', msg => {
+  page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const t = msg.text();
       // Skip known noise
@@ -129,9 +129,11 @@ test('Theme toggle switches data-theme attribute', async ({ page }) => {
   await page.waitForSelector('aside.sidebar');
 
   const initial = await page.locator('html').getAttribute('data-theme');
-  // Topbar có theme toggle button (icon-only)
-  const toggle = page.locator('.topbar button[title*="theme" i], .topbar button:has(svg)').first();
-  // Không cần test cụ thể nếu khó locate, chỉ verify initial set
+  // Topbar có theme toggle button (icon-only) — verify locator resolves nhưng chưa click
+  // (selector dễ vỡ khi UI refactor, để dành cho V2 spec).
+  await expect(
+    page.locator('.topbar button[title*="theme" i], .topbar button:has(svg)').first()
+  ).toBeAttached();
   expect(initial).toMatch(/light|dark/);
 });
 

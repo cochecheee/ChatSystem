@@ -21,7 +21,8 @@ interface NavItem {
 
 const NAV: { group: string; items: NavItem[] }[] = [
   {
-    group: 'Workspace', items: [
+    group: 'Workspace',
+    items: [
       { id: 'overview', label: 'Overview', icon: 'dashboard' },
       { id: 'pipelines', label: 'Pipelines', icon: 'pipeline' },
       { id: 'vulns', label: 'Vulnerabilities', icon: 'shield' },
@@ -31,12 +32,12 @@ const NAV: { group: string; items: NavItem[] }[] = [
     ],
   },
   {
-    group: 'Assistant', items: [
-      { id: 'chat', label: 'AI Chat', icon: 'chat' },
-    ],
+    group: 'Assistant',
+    items: [{ id: 'chat', label: 'AI Chat', icon: 'chat' }],
   },
   {
-    group: 'Admin', items: [
+    group: 'Admin',
+    items: [
       { id: 'reports', label: 'Reports', icon: 'report' },
       { id: 'settings', label: 'Settings', icon: 'settings' },
     ],
@@ -44,15 +45,15 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 
 const CRUMB: Record<PageId, string[]> = {
-  overview:   ['Workspace', 'Overview'],
-  pipelines:  ['Workspace', 'Pipelines'],
-  vulns:      ['Workspace', 'Vulnerabilities'],
-  sca:        ['Workspace', 'Dependencies · SCA'],
-  runtime:    ['Workspace', 'Runtime · DAST'],
-  monitor:    ['Workspace', 'Uptime · Health checks'],
-  chat:       ['Assistant', 'AI Assistant'],
-  reports:    ['Admin', 'Reports'],
-  settings:   ['Admin', 'Settings'],
+  overview: ['Workspace', 'Overview'],
+  pipelines: ['Workspace', 'Pipelines'],
+  vulns: ['Workspace', 'Vulnerabilities'],
+  sca: ['Workspace', 'Dependencies · SCA'],
+  runtime: ['Workspace', 'Runtime · DAST'],
+  monitor: ['Workspace', 'Uptime · Health checks'],
+  chat: ['Assistant', 'AI Assistant'],
+  reports: ['Admin', 'Reports'],
+  settings: ['Admin', 'Settings'],
 };
 
 interface SidebarProps {
@@ -62,9 +63,7 @@ interface SidebarProps {
 
 export function Sidebar({ active, onNav }: SidebarProps) {
   const { user } = useAuth();
-  const initials = user
-    ? user.username.slice(0, 2).toUpperCase()
-    : '?';
+  const initials = user ? user.username.slice(0, 2).toUpperCase() : '?';
   const chipName = user?.username ?? 'Not signed in';
   const chipRole = user?.role ?? 'anonymous';
   return (
@@ -76,10 +75,10 @@ export function Sidebar({ active, onNav }: SidebarProps) {
           <div className="brand-sub">SAST · CI/CD · AI</div>
         </div>
       </div>
-      {NAV.map(group => (
+      {NAV.map((group) => (
         <div key={group.group}>
           <div className="nav-group-label">{group.group}</div>
-          {group.items.map(it => (
+          {group.items.map((it) => (
             <div
               key={it.id}
               data-nav={it.id}
@@ -116,7 +115,15 @@ interface TopbarProps {
   onOpenLogin: () => void;
 }
 
-export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, onClearCritHigh, onOpenLogin }: TopbarProps) {
+export function Topbar({
+  active,
+  onNav,
+  theme,
+  onToggleTheme,
+  newCritHighCount,
+  onClearCritHigh,
+  onOpenLogin,
+}: TopbarProps) {
   const { user, logout } = useAuth();
   const crumbs = CRUMB[active] ?? [];
   return (
@@ -136,11 +143,13 @@ export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, 
           <input placeholder="Search vulnerabilities, repos, runs…" readOnly />
           <span className="kbd">⌘K</span>
         </div>
-        <button className="btn ghost" style={{ padding: 6, position: 'relative' }} onClick={onClearCritHigh}>
+        <button
+          className="btn ghost"
+          style={{ padding: 6, position: 'relative' }}
+          onClick={onClearCritHigh}
+        >
           <Icon name="bell" size={15} />
-          {(newCritHighCount ?? 0) > 0 && (
-            <span className="notif-dot">{newCritHighCount}</span>
-          )}
+          {(newCritHighCount ?? 0) > 0 && <span className="notif-dot">{newCritHighCount}</span>}
         </button>
         <button className="btn" onClick={onToggleTheme} title="Toggle theme">
           {theme === 'dark' ? '☀' : '☾'}
@@ -158,12 +167,20 @@ export function Topbar({ active, onNav, theme, onToggleTheme, newCritHighCount, 
             >
               <Icon name="user" size={11} /> {user.username}:{user.role}
             </span>
-            <button className="btn ghost sm" onClick={logout} style={{ padding: '4px 8px', fontSize: 11 }}>
+            <button
+              className="btn ghost sm"
+              onClick={logout}
+              style={{ padding: '4px 8px', fontSize: 11 }}
+            >
               Sign out
             </button>
           </div>
         ) : (
-          <button className="btn sm" onClick={onOpenLogin} style={{ padding: '4px 10px', fontSize: 12 }}>
+          <button
+            className="btn sm"
+            onClick={onOpenLogin}
+            style={{ padding: '4px 10px', fontSize: 12 }}
+          >
             <Icon name="user" size={12} /> Sign in
           </button>
         )}

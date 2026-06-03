@@ -11,12 +11,6 @@ interface BadgeProps {
 
 export function Badge({ variant, dot = false, children }: BadgeProps) {
   const isSev = ['critical', 'high', 'medium', 'low', 'info'].includes(variant);
-  const cls = isSev
-    ? `sev-${variant}`
-    : variant === 'neutral' ? '' : `status-${variant}`;
-  return (
-    <span className={`chip${dot ? ' dot' : ''} ${cls}`.trim()}>
-      {children}
-    </span>
-  );
+  const cls = isSev ? `sev-${variant}` : variant === 'neutral' ? '' : `status-${variant}`;
+  return <span className={`chip${dot ? ' dot' : ''} ${cls}`.trim()}>{children}</span>;
 }

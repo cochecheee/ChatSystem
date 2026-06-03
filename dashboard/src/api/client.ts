@@ -1,4 +1,13 @@
-import type { AnalysisResult, CommandRequest, CommandResponse, Finding, Project, TokenResponse, WorkflowArtifact, WorkflowRun } from '../types';
+import type {
+  AnalysisResult,
+  CommandRequest,
+  CommandResponse,
+  Finding,
+  Project,
+  TokenResponse,
+  WorkflowArtifact,
+  WorkflowRun,
+} from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -10,7 +19,9 @@ export function setAuthToken(token: string | null) {
   else localStorage.removeItem('auth_token');
 }
 
-export function getAuthToken() { return _token; }
+export function getAuthToken() {
+  return _token;
+}
 
 function authHeaders(): Record<string, string> {
   return _token ? { Authorization: `Bearer ${_token}` } : {};
@@ -46,7 +57,7 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
  */
 async function getWithTotal<T>(
   path: string,
-  params?: Record<string, string | number>,
+  params?: Record<string, string | number>
 ): Promise<{ data: T; total: number }> {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
@@ -165,11 +176,7 @@ export const api = {
         }[];
       }>(`/findings/triage${q.toString() ? '?' + q.toString() : ''}`);
     },
-    aiSummary: (params: {
-      project_id?: number;
-      run_id?: number;
-      force_refresh?: boolean;
-    }) => {
+    aiSummary: (params: { project_id?: number; run_id?: number; force_refresh?: boolean }) => {
       const q = new URLSearchParams();
       for (const [k, v] of Object.entries(params)) {
         if (v !== undefined && v !== null) q.set(k, String(v));
@@ -214,10 +221,11 @@ export const api = {
     },
   },
   monitor: {
-    summary: (hours = 24) =>
-      getRaw<UptimeSummary>(`/monitor/summary?hours=${hours}`),
+    summary: (hours = 24) => getRaw<UptimeSummary>(`/monitor/summary?hours=${hours}`),
     uptime: (hours = 24) =>
-      getRaw<{ count: number; hours: number; items: UptimeCheck[] }>(`/monitor/uptime?hours=${hours}`),
+      getRaw<{ count: number; hours: number; items: UptimeCheck[] }>(
+        `/monitor/uptime?hours=${hours}`
+      ),
     alerts: (params?: { only_open?: boolean; kind?: string }) => {
       const q = new URLSearchParams();
       if (params?.only_open) q.set('only_open', 'true');
@@ -228,60 +236,67 @@ export const api = {
       fetch(`${BASE}/monitor/alerts/${alertId}/ack`, {
         method: 'POST',
         headers: authHeaders(),
-      }).then(res => {
+      }).then((res) => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status}`);
       }),
     ping: () =>
       fetch(`${BASE}/monitor/ping`, {
         method: 'POST',
         headers: authHeaders(),
-      }).then(res => res.json() as Promise<{ checks_executed: number }>),
+      }).then((res) => res.json() as Promise<{ checks_executed: number }>),
   },
   projects: {
     list: () => get<Project[]>('/projects'),
     listMembers: (projectId: number) =>
       get<{ username: string; role: string; created_at: string }[]>(
-        `/projects/${projectId}/members`,
+        `/projects/${projectId}/members`
       ),
     addMember: (projectId: number, username: string, role: string) =>
-      post<{ username: string; role: string }>(
-        `/projects/${projectId}/members`,
-        { username, role },
-      ),
+      post<{ username: string; role: string }>(`/projects/${projectId}/members`, {
+        username,
+        role,
+      }),
     removeMember: (projectId: number, username: string) =>
       fetch(`${BASE}/projects/${projectId}/members/${encodeURIComponent(username)}`, {
         method: 'DELETE',
         headers: authHeaders(),
-      }).then(res => {
+      }).then((res) => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
       }),
     listSuppressions: (projectId: number) =>
-      get<{
-        id: number;
-        rule_id: string | null;
-        file_glob: string | null;
-        tool: string | null;
-        severity_max: string | null;
+      get<
+        {
+          id: number;
+          rule_id: string | null;
+          file_glob: string | null;
+          tool: string | null;
+          severity_max: string | null;
+          reason: string;
+          created_by: string;
+          created_at: string;
+          expires_at: string | null;
+        }[]
+      >(`/projects/${projectId}/suppressions`),
+    addSuppression: (
+      projectId: number,
+      body: {
         reason: string;
-        created_by: string;
-        created_at: string;
-        expires_at: string | null;
-      }[]>(`/projects/${projectId}/suppressions`),
-    addSuppression: (projectId: number, body: {
-      reason: string;
-      rule_id?: string | null;
-      file_glob?: string | null;
-      tool?: string | null;
-      severity_max?: string | null;
-      expires_in_days?: number | null;
-    }) => post<{ id: number; reason: string; expires_at: string | null }>(
-      `/projects/${projectId}/suppressions`, body,
-    ),
+        rule_id?: string | null;
+        file_glob?: string | null;
+        tool?: string | null;
+        severity_max?: string | null;
+        expires_in_days?: number | null;
+      }
+    ) =>
+      post<{ id: number; reason: string; expires_at: string | null }>(
+        `/projects/${projectId}/suppressions`,
+        body
+      ),
     deleteSuppression: (projectId: number, ruleId: number) =>
       fetch(`${BASE}/projects/${projectId}/suppressions/${ruleId}`, {
         method: 'DELETE',
         headers: authHeaders(),
-      }).then(res => {
+      }).then((res) => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
       }),
     create: (body: {
@@ -297,51 +312,54 @@ export const api = {
       active?: boolean;
     }) => post<Project>('/projects', body),
     delete: (id: number) =>
-      fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: authHeaders() }).then(res => {
+      fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: authHeaders() }).then((res) => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
       }),
   },
   stats: {
-    overview: (params?: { project_id?: number }) => get<{
-      total: number;
-      critical_high: number;
-      ai_analyzed: number;
-      ai_analyzed_pct: number;
-      by_severity: Record<string, number>;
-      by_status: Record<string, number>;
-      by_tool: Record<string, number>;
-      open: number;
-      sast_open: number;
-      deps_open: number;
-      sast_critical_high: number;
-      deps_critical_high: number;
-      dast_open?: number;
-      dast_critical_high?: number;
-      approved: number;
-      revoked: number;
-      pending: number;
-    }>('/stats/overview', params as Record<string, string | number> | undefined),
-    latestScan: (params?: { project_id?: number }) => get<{
-      run_id: number | null;
-      run_number: number | null;
-      head_branch: string | null;
-      created_at: string | null;
-      scanned_at: string | null;
-      total: number;
-      critical_high: number;
-      ai_analyzed: number;
-      ai_analyzed_pct: number;
-      by_severity: Record<string, number>;
-      by_status: Record<string, number>;
-      by_tool: Record<string, number>;
-    }>('/stats/latest-scan', params as Record<string, string | number> | undefined),
-    runs: (days = 30) => get<{
-      days: number;
-      total: number;
-      pass_rate: number;
-      by_conclusion: Record<string, number>;
-      by_day: Record<string, Record<string, number>>;
-    }>('/stats/runs', { days }),
+    overview: (params?: { project_id?: number }) =>
+      get<{
+        total: number;
+        critical_high: number;
+        ai_analyzed: number;
+        ai_analyzed_pct: number;
+        by_severity: Record<string, number>;
+        by_status: Record<string, number>;
+        by_tool: Record<string, number>;
+        open: number;
+        sast_open: number;
+        deps_open: number;
+        sast_critical_high: number;
+        deps_critical_high: number;
+        dast_open?: number;
+        dast_critical_high?: number;
+        approved: number;
+        revoked: number;
+        pending: number;
+      }>('/stats/overview', params as Record<string, string | number> | undefined),
+    latestScan: (params?: { project_id?: number }) =>
+      get<{
+        run_id: number | null;
+        run_number: number | null;
+        head_branch: string | null;
+        created_at: string | null;
+        scanned_at: string | null;
+        total: number;
+        critical_high: number;
+        ai_analyzed: number;
+        ai_analyzed_pct: number;
+        by_severity: Record<string, number>;
+        by_status: Record<string, number>;
+        by_tool: Record<string, number>;
+      }>('/stats/latest-scan', params as Record<string, string | number> | undefined),
+    runs: (days = 30) =>
+      get<{
+        days: number;
+        total: number;
+        pass_rate: number;
+        by_conclusion: Record<string, number>;
+        by_day: Record<string, Record<string, number>>;
+      }>('/stats/runs', { days }),
   },
   github: {
     runs: (branch?: string, project_id?: number) => {
@@ -350,29 +368,27 @@ export const api = {
       if (project_id !== undefined) params.project_id = project_id;
       return get<WorkflowRun[]>('/github/runs', Object.keys(params).length ? params : undefined);
     },
-    artifacts: (runId: number) =>
-      get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
-    runFindings: (runId: number) =>
-      get<Finding[]>(`/github/runs/${runId}/findings`),
+    artifacts: (runId: number) => get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
+    runFindings: (runId: number) => get<Finding[]>(`/github/runs/${runId}/findings`),
     reprocessRun: (runId: number) =>
       post<{ status: string; run_id: number; deleted_artifacts: number }>(
-        `/github/runs/${runId}/reprocess`,
+        `/github/runs/${runId}/reprocess`
       ),
   },
   chat: {
     login: (username: string, role: string) =>
       post<TokenResponse>('/api/chat/auth/token', { username, role }),
     me: () => get<{ username: string; role: string }>('/api/chat/auth/me'),
-    command: (req: CommandRequest) =>
-      post<CommandResponse>('/api/chat/command', req),
+    command: (req: CommandRequest) => post<CommandResponse>('/api/chat/command', req),
     message: (text: string, finding_id?: number) =>
-      post<{ reply: string; suggested_command: string | null }>(
-        '/api/chat/message',
-        { text, finding_id },
-      ),
+      post<{ reply: string; suggested_command: string | null }>('/api/chat/message', {
+        text,
+        finding_id,
+      }),
     reportUrl: (params?: { project_id?: number; severity?: string }) => {
       const url = new URL(`${BASE}/api/chat/report`);
-      if (params?.project_id !== undefined) url.searchParams.set('project_id', String(params.project_id));
+      if (params?.project_id !== undefined)
+        url.searchParams.set('project_id', String(params.project_id));
       if (params?.severity) url.searchParams.set('severity', params.severity);
       return url.toString();
     },
@@ -385,18 +401,24 @@ export const api = {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(value),
-      }).then(async res => {
+      }).then(async (res) => {
         if (!res.ok) {
           const detail = await res.json().catch(() => ({ detail: res.statusText }));
           throw new Error((detail as { detail?: string }).detail ?? `${res.status}`);
         }
         return res.json() as Promise<Record<string, unknown>>;
       }),
-    integrations: () => get<{
-      github: { configured: boolean; owner: string | null; repo: string | null; polling_interval_seconds: number };
-      gemini: { configured: boolean; model: string };
-      ci_ingest: { api_key_required: boolean; webhook_token_required: boolean };
-    }>('/config/integrations'),
+    integrations: () =>
+      get<{
+        github: {
+          configured: boolean;
+          owner: string | null;
+          repo: string | null;
+          polling_interval_seconds: number;
+        };
+        gemini: { configured: boolean; model: string };
+        ci_ingest: { api_key_required: boolean; webhook_token_required: boolean };
+      }>('/config/integrations'),
   },
   health: () => get<{ status: string }>('/health'),
 };
