@@ -144,7 +144,9 @@ async def test_get_projects_unfiltered_when_rbac_off(client, project):
 async def test_get_projects_filtered_when_rbac_on(client, project):
     """RBAC on → non-admin user with no membership sees an empty list,
     admin still sees everything."""
-    with patch("src.api.artifacts.settings") as mock_settings:
+    # GET /projects lives in src.api.projects (split out of artifacts in the
+    # router-by-resource refactor) — patch settings where the endpoint reads it.
+    with patch("src.api.projects.settings") as mock_settings:
         _mirror_settings(mock_settings)
         mock_settings.RBAC_PER_PROJECT = True
 
@@ -274,6 +276,7 @@ async def test_jwt_carries_memberships(client, project):
     token = await _login(client, "alice", role="developer")
     # Decode payload (best-effort — testing trust, not signing).
     from jose import jwt
+
     from src.core.config import settings
     payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
     assert payload.get("memberships") == {str(project["id"]): "developer"}

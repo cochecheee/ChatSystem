@@ -14,6 +14,7 @@ from .api.chat import router as chat_router
 from .api.config import router as config_router
 from .api.findings import router as findings_router
 from .api.monitor import router as monitor_router
+from .api.projects import router as projects_router
 from .api.stats import router as stats_router
 from .core.config import settings
 from .core.db import init_db
@@ -71,7 +72,7 @@ async def lifespan(app: FastAPI):
             log.info("Sentry initialized")
         except ImportError:
             log.warning("SENTRY_DSN set but sentry-sdk not installed")
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("Sentry init failed — continuing")
 
     if settings.APP_ENV not in ("testing", "test") and not TEST_MODE:
@@ -115,6 +116,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(projects_router, tags=["projects"])
 app.include_router(artifacts_router, tags=["core"])
 app.include_router(findings_router, tags=["findings"])
 app.include_router(analysis_router, tags=["ai"])
@@ -144,6 +146,7 @@ async def health_flags():
     UI but instance not restarted' confusion.
     """
     import os
+
     from .core.config import settings
 
     def _safe(v: str | None) -> str:
@@ -172,7 +175,8 @@ async def health_flags():
 
 if TEST_MODE:
     from fastapi import Body
-    from .core.db import get_session, AsyncSessionLocal
+
+    from .core.db import AsyncSessionLocal
     from .models.entities import Artifact, Finding, Project
 
     @app.post("/test/reset", tags=["test"])
