@@ -28,6 +28,8 @@ export interface Project {
   name: string;
   github_url: string;
   last_processed_run_id: number | null;
+  /** V3.7 — per-project uptime Monitor target. Empty = not monitored. */
+  staging_url?: string;
 }
 
 export interface WorkflowRun {

@@ -60,6 +60,7 @@ class ProjectCreate(BaseModel):
     artifact_profile: str = "github-actions-default"
     polling_workflow_name: str = "CI Workflow"
     polling_branch: str = "main"
+    staging_url: str = ""
     active: bool = True
 
 
@@ -74,7 +75,13 @@ class ProjectUpdate(BaseModel):
     artifact_profile: str | None = None
     polling_workflow_name: str | None = None
     polling_branch: str | None = None
+    staging_url: str | None = None
     active: bool | None = None
+
+
+class MonitorTargetUpdate(BaseModel):
+    """V3.7 — set/clear a project's uptime Monitor staging URL."""
+    staging_url: str = ""
 
 
 class ProjectOut(BaseModel):
@@ -96,6 +103,7 @@ class ProjectOut(BaseModel):
     artifact_profile: str = "github-actions-default"
     polling_workflow_name: str = "CI Workflow"
     polling_branch: str = "main"
+    staging_url: str = ""
     active: bool = True
     # V3.6 — gate policy + soft-delete flag
     gate_critical_threshold: int = 0
@@ -187,7 +195,12 @@ class CommandResponse(BaseModel):
 
 class TokenRequest(BaseModel):
     username: str
-    role: str = "developer"             # "developer" | "security_lead" | "admin"
+    password: str
+    # V3.8: role is no longer client-supplied — it's read from the users
+    # table after the password verifies, so the JWT `role` claim can't be
+    # forged. Kept as an ignored optional field for backward-compatible
+    # request bodies (older clients/tests that still send it).
+    role: str | None = None
 
 
 class TokenResponse(BaseModel):

@@ -75,14 +75,30 @@ async def lifespan(app: FastAPI):
             log.exception("Sentry init failed — continuing")
 
     if settings.APP_ENV not in ("testing", "test") and not TEST_MODE:
+        # V3.8 — seed user accounts (cochecheee + project members) with the
+        # default password so password login works out of the box. Idempotent:
+        # only creates missing users, never overwrites an existing password.
+        from .core.db import AsyncSessionLocal
+        from .repositories import seed_default_users
+        try:
+            async with AsyncSessionLocal() as session:
+                await seed_default_users(session)
+        except Exception:
+            log.exception("User seeding failed — login may have no accounts")
+
         from .services.poller import GitHubPoller
         poller = GitHubPoller()
         asyncio.create_task(poller.start())
         log.info("Background poller scheduled")
 
-        # V2.4 Monitor (uptime ping + alert) DISABLED — feature hidden from app.
-        # Service/model/config kept dormant; re-enable by restoring the
-        # monitor_loop/prune_loop scheduling here + the router mount below.
+        # V2.4 Monitor (uptime ping + alert) — re-enabled. Loops only start
+        # when MONITOR_ENABLED=true; the /monitor router is always mounted so
+        # manual /monitor/ping + viewing endpoints work regardless.
+        if settings.MONITOR_ENABLED:
+            from .services.monitor import monitor_loop, prune_loop
+            asyncio.create_task(monitor_loop())
+            asyncio.create_task(prune_loop())
+            log.info("Monitor + prune loops scheduled")
 
     yield
 
@@ -118,8 +134,9 @@ app.include_router(findings_router, tags=["findings"])
 app.include_router(analysis_router, tags=["ai"])
 app.include_router(chat_router)
 app.include_router(config_router)
-# Monitor (Uptime/DAST-adjacent) router unmounted — feature hidden. Re-add
-# `from .api.monitor import router as monitor_router` + this include to restore.
+# Monitor (Uptime/DAST-adjacent) router — re-mounted (V2.4 re-enabled).
+from .api.monitor import router as monitor_router  # noqa: E402
+app.include_router(monitor_router)
 app.include_router(stats_router)
 
 

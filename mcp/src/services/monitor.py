@@ -28,7 +28,12 @@ log = logging.getLogger(__name__)
 
 
 def _parse_targets() -> list[tuple[int, str]]:
-    """Parse `MONITOR_TARGETS=1:https://a,2:https://b` env var."""
+    """Parse legacy `MONITOR_TARGETS=1:https://a,2:https://b` env var.
+
+    V3.7: kept only as a fallback. Primary source is now per-project
+    `Project.staging_url` (see `_gather_targets`), so monitoring is generic
+    for any project integrating sast-action without editing server env.
+    """
     out: list[tuple[int, str]] = []
     raw = settings.MONITOR_TARGETS or ""
     for entry in raw.split(","):
@@ -42,6 +47,50 @@ def _parse_targets() -> list[tuple[int, str]]:
             log.warning("Bad MONITOR_TARGETS entry: %s", entry)
             continue
         out.append((pid, url.strip()))
+    return out
+
+
+async def _gather_targets() -> list[tuple[int, str]]:
+    """V3.7 — collect uptime targets generically across ALL active projects.
+
+    Primary: every active `Project` with a non-empty `staging_url` is pinged
+    (no env editing needed — any sast-action integrator is auto-monitored).
+    Fallback: legacy `MONITOR_TARGETS` env entries are merged in (deduped by
+    (project_id, url)) so existing single-tenant setups keep working.
+    """
+    out: list[tuple[int, str]] = []
+    seen: set[tuple[int, str]] = set()
+
+    try:
+        from sqlalchemy import select
+
+        from ..models.entities import Project
+        async with AsyncSessionLocal() as session:
+            # Monitor only needs a URL to ping — NOT GitHub credentials — so we
+            # query directly instead of ProjectRepository.list_active() (which
+            # also requires github_token/owner/repo and would skip webhook-only
+            # projects). Condition: active + not archived + has staging_url.
+            rows = (await session.execute(
+                select(Project).where(
+                    Project.active == 1,
+                    Project.archived_at.is_(None),
+                    Project.staging_url != "",
+                )
+            )).scalars().all()
+            for p in rows:
+                url = (p.staging_url or "").strip()
+                key = (p.id, url)
+                if url and key not in seen:
+                    seen.add(key)
+                    out.append(key)
+    except Exception:
+        log.exception("monitor: failed to load per-project staging_url targets")
+
+    for pid, url in _parse_targets():
+        key = (pid, url)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
     return out
 
 
@@ -141,9 +190,14 @@ async def _maybe_alert(check: UptimeCheck) -> None:
         # check.is_up — if there's an open down alert, close it + announce recovered
         if already_alerted and last_down is not None:
             last_down.acknowledged_at = datetime.now(UTC)
+            # MySQL DATETIME trả naive; coi là UTC trước khi trừ để tránh
+            # "can't compare offset-naive and offset-aware datetimes".
+            raised = last_down.raised_at
+            if raised.tzinfo is None:
+                raised = raised.replace(tzinfo=UTC)
             downtime_min = max(
                 1,
-                int((datetime.now(UTC) - last_down.raised_at).total_seconds() // 60),
+                int((datetime.now(UTC) - raised).total_seconds() // 60),
             )
             subject, body = format_recovered_alert(
                 target_url=check.target_url,
@@ -168,8 +222,11 @@ async def _maybe_alert(check: UptimeCheck) -> None:
 
 
 async def run_monitor_cycle() -> int:
-    """Run one full cycle of uptime checks. Returns count of checks executed."""
-    targets = _parse_targets()
+    """Run one full cycle of uptime checks. Returns count of checks executed.
+
+    V3.7 — targets gathered per-project (Project.staging_url) + env fallback.
+    """
+    targets = await _gather_targets()
     if not targets:
         return 0
     log.info("Monitor cycle — %d target(s)", len(targets))

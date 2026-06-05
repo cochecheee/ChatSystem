@@ -27,7 +27,7 @@ prompts:
     notes: Used by /findings/{id}/explain and /api/chat/command /explain.
 
   chat:
-    description: Free-form Sentinel chat assistant for the dashboard chat tab.
+    description: Free-form Shiftwall chat assistant for the dashboard chat tab.
     system: chat.system.md
     user: null                          # caller passes prompt directly
     response_schema: null               # plain text

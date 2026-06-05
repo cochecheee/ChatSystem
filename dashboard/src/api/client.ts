@@ -309,8 +309,22 @@ export const api = {
       gemini_model?: string;
       polling_workflow_name?: string;
       polling_branch?: string;
+      staging_url?: string;
       active?: boolean;
     }) => post<Project>('/projects', body),
+    /** V3.7 — set/clear a project's uptime Monitor staging URL (owner/admin). */
+    setMonitorTarget: (projectId: number, staging_url: string) =>
+      fetch(`${BASE}/projects/${projectId}/monitor`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ staging_url }),
+      }).then(async (res) => {
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error((detail as { detail?: string }).detail ?? `${res.status}`);
+        }
+        return res.json() as Promise<{ project_id: number; staging_url: string; monitored: boolean }>;
+      }),
     delete: (id: number) =>
       fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: authHeaders() }).then((res) => {
         if (!res.ok && res.status !== 204) throw new Error(`${res.status} ${res.statusText}`);
@@ -376,8 +390,8 @@ export const api = {
       ),
   },
   chat: {
-    login: (username: string, role: string) =>
-      post<TokenResponse>('/api/chat/auth/token', { username, role }),
+    login: (username: string, password: string) =>
+      post<TokenResponse>('/api/chat/auth/token', { username, password }),
     me: () => get<{ username: string; role: string }>('/api/chat/auth/me'),
     command: (req: CommandRequest) => post<CommandResponse>('/api/chat/command', req),
     message: (text: string, finding_id?: number) =>

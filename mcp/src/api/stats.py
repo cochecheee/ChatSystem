@@ -45,7 +45,10 @@ async def stats_overview(
     lộ data — cross-project global numbers chỉ ý nghĩa cho admin).
     """
     _check_project_scope(user, project_id)
-    return await StatsService(session).overview(project_id=project_id)
+    # V3.7 — khi không chỉ định project_id, scope global theo membership của
+    # caller (non-admin). allowed_project_ids trả None cho admin/RBAC-off → global thật.
+    scope = allowed_project_ids(user) if project_id is None else None
+    return await StatsService(session).overview(project_id=project_id, project_ids=scope)
 
 
 @router.get("/latest-scan", summary="Stats của run mới nhất có findings")
@@ -56,7 +59,8 @@ async def stats_latest_scan(
 ) -> dict[str, Any]:
     """Stats của scan mới nhất. Caller phải có membership trên project_id."""
     _check_project_scope(user, project_id)
-    return await StatsService(session).latest_scan(project_id=project_id)
+    scope = allowed_project_ids(user) if project_id is None else None
+    return await StatsService(session).latest_scan(project_id=project_id, project_ids=scope)
 
 
 @router.get("/runs", summary="Pass/fail trend cho last N runs")

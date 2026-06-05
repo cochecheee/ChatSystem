@@ -35,7 +35,9 @@ google-genai>=1.73.1
 
 # Auth
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+# bcrypt called directly (src/core/security.py); passlib 1.7.4 is broken
+# against bcrypt>=4.1 (reads removed bcrypt.__about__), so we don't use it.
+bcrypt>=4.0.0
 
 # Rate Limiting
 slowapi>=0.1.9

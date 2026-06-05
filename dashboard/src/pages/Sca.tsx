@@ -5,6 +5,7 @@ import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { flagFalsePositive } from '../features/findings/flagFalsePositive';
+import { useResizableSplit } from '../hooks/useResizableSplit';
 import type { Finding, Project } from '../types';
 
 const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
@@ -350,6 +351,7 @@ export function PageSCA() {
   // flow as the Vulnerabilities page. Backend keeps the security_lead+ gate.
   const [flaggingId, setFlaggingId] = useState<number | null>(null);
   const [flagNotice, setFlagNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const { containerRef, gridColumns, onResizerPointerDown } = useResizableSplit('sca.listWidth');
 
   useEffect(() => {
     api.projects
@@ -411,7 +413,11 @@ export function PageSCA() {
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <div className="vuln-split" style={{ flex: 1, minWidth: 0 }}>
+      <div
+        ref={containerRef}
+        className="vuln-split"
+        style={{ flex: 1, minWidth: 0, gridTemplateColumns: gridColumns }}
+      >
         <div
           className="vuln-list-pane"
           style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}
@@ -569,6 +575,8 @@ export function PageSCA() {
             ))}
           </div>
         </div>
+
+        <div className="col-resizer" onPointerDown={onResizerPointerDown} />
 
         <div
           style={{

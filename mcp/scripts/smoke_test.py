@@ -146,7 +146,7 @@ def main() -> int:
 
     ok, detail = _precheck_reachable(args.base)
     if not ok:
-        print(f"  [FAIL]  backend unreachable")
+        print("  [FAIL]  backend unreachable")
         print(f"      {detail}")
         print()
         print("Backend chua chay. Khoi dong:")

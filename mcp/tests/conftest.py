@@ -28,6 +28,29 @@ from src.core.db import Base, engine, init_db
 from src.main import app
 
 
+# V3.8 — /auth/token now requires a password + a row in the `users` table.
+# Tests that exercise the real login endpoint use this helper to seed a user
+# (with a known test password and the desired global role) and exchange the
+# password for a JWT. Tests that only need a token still call
+# create_access_token() directly (that path is unchanged).
+TEST_PASSWORD = "test-pass-123"
+
+
+async def issue_token(client, username="alice", role="developer", password=TEST_PASSWORD):
+    from src.core.db import AsyncSessionLocal
+    from src.repositories import UserRepository
+
+    async with AsyncSessionLocal() as session:
+        repo = UserRepository(session)
+        if await repo.get(username) is None:
+            await repo.create(username=username, password=password, role=role)
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": username, "password": password},
+    )
+    return resp.json()["access_token"]
+
+
 @pytest_asyncio.fixture
 async def client():
     # Fresh schema each test — drop_all + create_all avoids stale column issues

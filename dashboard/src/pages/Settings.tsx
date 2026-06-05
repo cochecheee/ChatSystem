@@ -109,6 +109,7 @@ const AI_TOGGLES: {
 function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [staging, setStaging] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
@@ -121,10 +122,15 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
     setLoading(true);
     setError('');
     try {
-      const p = await api.projects.create({ name: name.trim(), github_url: url.trim() });
+      const p = await api.projects.create({
+        name: name.trim(),
+        github_url: url.trim(),
+        staging_url: staging.trim() || undefined,
+      });
       onAdded(p);
       setName('');
       setUrl('');
+      setStaging('');
       setOpen(false);
     } catch (e) {
       setError(String(e));
@@ -179,6 +185,24 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
           if (e.key === 'Enter') handleSubmit();
         }}
       />
+      <input
+        className="mono"
+        style={{
+          padding: '6px 10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          color: 'var(--fg)',
+          fontSize: 12,
+          outline: 'none',
+        }}
+        placeholder="Staging URL để giám sát uptime (tuỳ chọn) — vd https://app.onrender.com/health"
+        value={staging}
+        onChange={(e) => setStaging(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+        }}
+      />
       {error && <AlertBanner type="error" message={error} onDismiss={() => setError('')} />}
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn primary sm" onClick={handleSubmit} disabled={loading}>
@@ -194,6 +218,94 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+// V3.7 — inline editor cho per-project uptime Monitor target (staging_url).
+// Monitor loop tự ping mọi project active có staging_url → generic, không cần env.
+function MonitorTargetEditor({
+  project,
+  onSaved,
+}: {
+  project: Project;
+  onSaved: (stagingUrl: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(project.staging_url ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const save = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      const res = await api.projects.setMonitorTarget(project.id, val.trim());
+      onSaved(res.staging_url);
+      setEditing(false);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputStyle = {
+    flex: 1,
+    minWidth: 220,
+    padding: '4px 8px',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--line)',
+    borderRadius: 6,
+    color: 'var(--fg)',
+    fontSize: 11,
+    outline: 'none',
+  } as const;
+
+  if (!editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 24 }}>
+        <Icon name="bell" size={11} style={{ color: 'var(--fg-3)', flexShrink: 0 }} />
+        {project.staging_url ? (
+          <span className="mono muted" style={{ fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Monitor: {project.staging_url}
+          </span>
+        ) : (
+          <span className="muted" style={{ fontSize: 10.5 }}>Chưa giám sát uptime</span>
+        )}
+        <button
+          className="btn ghost sm"
+          style={{ padding: '2px 8px', fontSize: 10 }}
+          onClick={() => {
+            setVal(project.staging_url ?? '');
+            setEditing(true);
+          }}
+        >
+          {project.staging_url ? 'Sửa' : 'Thêm monitor'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 24, flexWrap: 'wrap' }}>
+      <input
+        className="mono"
+        style={inputStyle}
+        placeholder="https://app.onrender.com/health (rỗng = tắt monitor)"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') save();
+        }}
+      />
+      <button className="btn primary sm" style={{ padding: '4px 10px', fontSize: 11 }} onClick={save} disabled={busy}>
+        {busy ? '…' : 'Lưu'}
+      </button>
+      <button className="btn ghost sm" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setEditing(false)}>
+        Huỷ
+      </button>
+      {err && <span style={{ color: 'var(--danger)', fontSize: 10 }}>{err}</span>}
     </div>
   );
 }
@@ -543,6 +655,14 @@ export function PageSettings() {
                       <Icon name="trash" size={12} />
                     </button>
                   </div>
+                  <MonitorTargetEditor
+                    project={p}
+                    onSaved={(stagingUrl) =>
+                      setProjects((prev) =>
+                        prev.map((x) => (x.id === p.id ? { ...x, staging_url: stagingUrl } : x))
+                      )
+                    }
+                  />
                 </div>
               ))
             )}

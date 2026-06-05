@@ -206,3 +206,54 @@ async def enforce_finding_project_access(
                 f"(finding {finding_id} belongs to that project)"
             ),
         )
+
+
+async def enforce_run_project_access(
+    run_id: int,
+    user: User | None,
+    session: AsyncSession,
+    *,
+    min_role: str = "viewer",
+) -> None:
+    """V3.7 RBAC for run-scoped endpoints (run findings/artifacts/reprocess).
+
+    A GitHub workflow run maps 1:1 to a project; we resolve it via the run's
+    Artifact rows (Artifact.github_run_id) and check the caller's membership.
+
+    Kill-switch: RBAC_PER_PROJECT=false → no-op. Global admin and the
+    anonymous-read bypass (user is None) → no-op. A run with no ingested
+    artifacts yet (unknown project) is not gated here — the underlying query
+    returns an empty/GitHub-sourced result, and reprocess falls back to the
+    env project which only an authenticated caller can reach.
+    """
+    if not settings.RBAC_PER_PROJECT:
+        return
+    if user is None or user.role == "admin":
+        return
+
+    from sqlalchemy import select
+
+    from ..models.entities import Artifact
+    from ..repositories import ProjectMemberRepository, role_satisfies
+
+    rows = await session.execute(
+        select(Artifact.project_id)
+        .where(Artifact.github_run_id == run_id)
+        .distinct()
+    )
+    project_ids = [r[0] for r in rows.all() if r[0] is not None]
+    if not project_ids:
+        return  # run not ingested → nothing to scope against
+
+    for pid in project_ids:
+        if user.memberships is not None:
+            role = user.memberships.get(pid)
+        else:
+            role = await ProjectMemberRepository(session).get_role(pid, user.username)
+        if role is not None and role_satisfies(role, min_role):
+            return
+
+    raise HTTPException(
+        status_code=403,
+        detail=f"Run {run_id} belongs to a project not in your memberships",
+    )

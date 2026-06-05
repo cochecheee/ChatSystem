@@ -8,13 +8,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy import select, func as sa_func
+from sqlalchemy import func as sa_func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.models import entities as _entities  # noqa: F401
-from src.models.entities import (  # noqa: E402
-    Alert, AppConfig, Artifact, CommandFeedback, Finding, Project,
-    ProjectMember, SuppressionRule, UptimeCheck,
+from src.models.entities import (
+    Alert,
+    AppConfig,
+    Artifact,
+    CommandFeedback,
+    Finding,
+    Project,
+    ProjectMember,
+    SuppressionRule,
+    UptimeCheck,
 )
 
 TABLES = [

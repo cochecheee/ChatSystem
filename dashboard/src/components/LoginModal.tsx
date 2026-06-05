@@ -11,14 +11,14 @@ interface Props {
 }
 
 /**
- * Global login modal — replaces the previous Chat-only LoginOverlay. Same
- * demo flow (username + role, no password) but reachable from anywhere via
- * the topbar Sign-in button.
+ * Global login modal — username + password. The user's role is determined
+ * server-side from the `users` table after the password verifies (no longer
+ * client-selectable). Reachable from anywhere via the topbar Sign-in button.
  */
 export function LoginModal({ open, onClose, required }: Props) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
-  const [role, setRole] = useState('developer');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -29,11 +29,16 @@ export function LoginModal({ open, onClose, required }: Props) {
       setError('Nhập tên đăng nhập');
       return;
     }
+    if (!password) {
+      setError('Nhập mật khẩu');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      await login(username.trim(), role);
+      await login(username.trim(), password);
       setUsername('');
+      setPassword('');
       onClose();
     } catch (e) {
       setError(String(e));
@@ -87,11 +92,17 @@ export function LoginModal({ open, onClose, required }: Props) {
           </button>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div className="ai-orb" style={{ width: 28, height: 28 }} />
+          <svg width="30" height="30" viewBox="0 0 64 64" aria-label="Shiftwall">
+            <rect width="64" height="64" rx="14" fill="var(--accent)" />
+            <g fill="none" stroke="#fff" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M24 16 H18 V48 H24" /><path d="M40 16 H46 V48 H40" />
+              <path d="M39 32 H27" /><path d="M31 27 L26 32 L31 37" />
+            </g>
+          </svg>
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Sentinel Login</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Shiftwall Login</div>
             <div className="muted" style={{ fontSize: 11.5 }}>
-              Demo — không cần password
+              Đăng nhập bằng mật khẩu
             </div>
           </div>
         </div>
@@ -121,9 +132,10 @@ export function LoginModal({ open, onClose, required }: Props) {
         />
 
         <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--fg-3)' }}>
-          Role
+          Password
         </label>
-        <select
+        <input
+          type="password"
           style={{
             width: '100%',
             padding: '7px 10px',
@@ -135,13 +147,13 @@ export function LoginModal({ open, onClose, required }: Props) {
             marginBottom: 16,
             outline: 'none',
           }}
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-        >
-          <option value="developer">developer</option>
-          <option value="security_lead">security_lead</option>
-          <option value="admin">admin</option>
-        </select>
+          placeholder="••••••••"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void handleLogin();
+          }}
+        />
 
         {error && (
           <div style={{ color: 'var(--sev-high-fg)', fontSize: 12, marginBottom: 12 }}>{error}</div>
@@ -157,8 +169,10 @@ export function LoginModal({ open, onClose, required }: Props) {
         </button>
 
         <div className="muted" style={{ fontSize: 10.5, marginTop: 12, lineHeight: 1.4 }}>
-          Project membership được pick up khi login. Seed sẵn: <code>cochecheee</code> (owner cả 2),{' '}
-          <code>viewer-demo</code> (viewer project 1).
+          Role &amp; project membership lấy từ server khi login. Tài khoản seed:{' '}
+          <code>cochecheee</code> (admin), <code>alice</code>/<code>bob</code>/
+          <code>viewer-demo</code> (developer). Mật khẩu mặc định:{' '}
+          <code>changeme123</code>.
         </div>
       </div>
     </div>

@@ -189,13 +189,14 @@ class SummaryService:
         self._llm_caller = llm_caller or _call_gemini_summary
 
     async def _gather_stats(
-        self, session: AsyncSession, *, project_id: int | None, run_id: int | None,
+        self, session: AsyncSession, *, project_id: int | None,
+        run_id: int | None, project_ids: list[int] | None = None,
     ) -> dict:
         """Compute the inputs we hand to the LLM + the deterministic pipeline_health."""
         from sqlalchemy import select
         repo = FindingRepository(session)
 
-        common = dict(project_id=project_id, run_id=run_id)
+        common = dict(project_id=project_id, run_id=run_id, project_ids=project_ids)
         # V3.4 BUG-2 — switch primary numbers to ACTIVE (exclude REVOKED).
         # Revoked findings are developer-triaged false positives; reporting
         # them as outstanding work confuses the briefing. We still expose
@@ -213,8 +214,8 @@ class SummaryService:
         # severity-first sorting can return 5 CVEs all from the same library
         # (V3.4 BUG-3 — ALOUTE returned 5 snakeyaml CVEs in a row).
         pool = await repo.list_with_filters(
-            project_id=project_id, run_id=run_id, exclude_revoked=True,
-            limit=50, skip=0,
+            project_id=project_id, run_id=run_id, project_ids=project_ids,
+            exclude_revoked=True, limit=50, skip=0,
         )
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         pool.sort(key=lambda f: (sev_order.get(f.severity, 9), -f.id))
@@ -293,8 +294,12 @@ class SummaryService:
         project_id: int | None,
         run_id: int | None,
         force_refresh: bool = False,
+        project_ids: list[int] | None = None,
     ) -> AiSummaryResponse:
-        key = (project_id, run_id)
+        # V3.7 — cache key gồm scope membership để member và admin không dùng
+        # chung entry (member chỉ được thấy số liệu project mình).
+        scope_key = tuple(sorted(project_ids)) if project_ids is not None else None
+        key = (project_id, run_id, scope_key)
         if not force_refresh:
             cached = _cache_get(key)
             if cached is not None:
@@ -319,7 +324,9 @@ class SummaryService:
         else:
             gemini = GeminiClient()
 
-        inputs = await self._gather_stats(session, project_id=project_id, run_id=run_id)
+        inputs = await self._gather_stats(
+            session, project_id=project_id, run_id=run_id, project_ids=project_ids,
+        )
         if inputs["stats"]["total"] == 0:
             # Empty project — skip LLM call, return a clean message.
             response = AiSummaryResponse(

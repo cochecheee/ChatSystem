@@ -27,7 +27,7 @@ export function PageChat() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'ai',
-      text: 'Xin chào! Mình là Sentinel AI — trợ lý bảo mật của bạn. Bạn có thể chat tự do bằng tiếng Việt, hoặc dùng lệnh nhanh như /explain 5, /scan, /report.',
+      text: 'Xin chào! Mình là Shiftwall AI — trợ lý bảo mật của bạn. Bạn có thể chat tự do bằng tiếng Việt, hoặc dùng lệnh nhanh như /explain 5, /scan, /report.',
     },
   ]);
   const { user, loading: authLoading, logout } = useAuth();
@@ -248,7 +248,7 @@ export function PageChat() {
             <div>
               <h1 className="h2">AI Assistant</h1>
               <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
-                Sentinel AI · Gemini · tiếng Việt
+                Shiftwall AI · Gemini · tiếng Việt
               </div>
             </div>
           </div>
@@ -294,7 +294,7 @@ export function PageChat() {
           <div key={i} className={`msg ${m.role}`}>
             <div className="msg-role">
               <Icon name={m.role === 'user' ? 'user' : 'bot'} size={13} />
-              <span className="who">{m.role === 'user' ? 'Bạn' : 'Sentinel AI'}</span>
+              <span className="who">{m.role === 'user' ? 'Bạn' : 'Shiftwall AI'}</span>
             </div>
             <div className="msg-body">
               {m.loading ? (

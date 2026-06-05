@@ -16,12 +16,20 @@ def _headers(role: str = "developer") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Auth — demo login
+# Auth — password login (V3.8)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_demo_login_returns_token(client):
-    resp = await client.post("/api/chat/auth/token", json={"username": "alice", "role": "developer"})
+async def test_login_returns_token(client):
+    """Correct username + password → 200 with a bearer token."""
+    from tests.conftest import TEST_PASSWORD, issue_token
+    # issue_token seeds the user then logs in; assert the token is usable.
+    token = await issue_token(client, "alice", role="developer")
+    assert token
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "alice", "password": TEST_PASSWORD},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["access_token"]
@@ -29,9 +37,42 @@ async def test_demo_login_returns_token(client):
 
 
 @pytest.mark.asyncio
-async def test_demo_login_invalid_role(client):
-    resp = await client.post("/api/chat/auth/token", json={"username": "bob", "role": "superadmin"})
-    assert resp.status_code == 400
+async def test_login_wrong_password_401(client):
+    """Seeded user + wrong password → 401."""
+    from tests.conftest import issue_token
+    await issue_token(client, "alice", role="developer")  # seed
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "alice", "password": "not-the-password"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_user_401(client):
+    """Unknown username → 401 (same as wrong password — no enumeration)."""
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "ghost", "password": "whatever"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_role_from_db_not_request(client):
+    """Role is read from the users table, not the request body (can't forge)."""
+    import jose.jwt as jwt
+
+    from src.core.config import settings
+    from tests.conftest import TEST_PASSWORD, issue_token
+    await issue_token(client, "alice", role="developer")  # seed as developer
+    resp = await client.post(
+        "/api/chat/auth/token",
+        json={"username": "alice", "password": TEST_PASSWORD, "role": "admin"},
+    )
+    assert resp.status_code == 200
+    payload = jwt.decode(resp.json()["access_token"], settings.SECRET_KEY, algorithms=["HS256"])
+    assert payload["role"] == "developer"  # request's "admin" ignored
 
 
 @pytest.mark.asyncio
@@ -235,6 +276,82 @@ async def test_revoke_already_revoked(client, finding_id):
 
 
 # ---------------------------------------------------------------------------
+# /unrevoke — đảo ngược /revoke
+# ---------------------------------------------------------------------------
+
+async def _revoke(client, finding_id):
+    return await client.post(
+        "/api/chat/command",
+        json={
+            "command": "/revoke",
+            "finding_id": finding_id,
+            "justification": "Marking as false positive for unrevoke test scenario",
+        },
+        headers=_headers("security_lead"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_unrevoke_restores_pending(client, finding_id):
+    """Revoke then unrevoke → finding returns to pending_review, audit fields cleared."""
+    assert (await _revoke(client, finding_id)).status_code == 200
+
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/unrevoke", "finding_id": finding_id},
+        headers=_headers("security_lead"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["data"]["status"] == "pending_review"
+    assert "khôi phục" in body["message"].lower()
+
+    # Confirm DB state: status flipped, revoke fields cleared.
+    from src.core.db import AsyncSessionLocal
+    from src.models.entities import Finding
+    async with AsyncSessionLocal() as s:
+        f = await s.get(Finding, finding_id)
+        assert f.status == "pending_review"
+        assert f.revoked_by is None
+        assert f.revoked_at is None
+        assert f.revoke_justification is None
+
+
+@pytest.mark.asyncio
+async def test_unrevoke_not_revoked_409(client, finding_id):
+    """Unrevoking a finding that isn't REVOKED → 409."""
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/unrevoke", "finding_id": finding_id},
+        headers=_headers("security_lead"),
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_unrevoke_requires_security_lead(client, finding_id):
+    """A plain developer cannot unrevoke (role gate → 403)."""
+    await _revoke(client, finding_id)
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/unrevoke", "finding_id": finding_id},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_unrevoke_nonexistent_404(client):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/unrevoke", "finding_id": 99999},
+        headers=_headers("security_lead"),
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # /report
 # ---------------------------------------------------------------------------
 
@@ -244,7 +361,7 @@ async def test_report_download(client):
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     assert "security-report.html" in resp.headers.get("content-disposition", "")
-    assert b"Sentinel SAST" in resp.content
+    assert b"Shiftwall" in resp.content
 
 
 # ---------------------------------------------------------------------------
@@ -262,9 +379,9 @@ async def test_help_lists_ten_commands(client):
     body = resp.json()
     cmds = body["data"]["commands"]
     names = {c["name"] for c in cmds}
-    # All 10 commands from docx ch.4.3 + /revoke (project addition)
+    # All 10 commands from docx ch.4.3 + /revoke + /unrevoke (additions)
     assert {"/status", "/scan", "/results", "/explain", "/fix", "/rerun",
-            "/approve", "/revoke", "/report", "/help", "/feedback"} <= names
+            "/approve", "/revoke", "/unrevoke", "/report", "/help", "/feedback"} <= names
     assert body["data"]["current_role"] == "developer"
 
 

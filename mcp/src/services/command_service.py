@@ -44,6 +44,7 @@ class CommandService:
             "rerun":    self._handle_rerun,
             "approve":  self._handle_approve,
             "revoke":   self._handle_revoke,
+            "unrevoke": self._handle_unrevoke,
             "report":   self._handle_report,
             # Báo cáo tiến độ docx ch.4.3 — 4 lệnh còn lại
             "status":   self._handle_status,
@@ -206,6 +207,58 @@ class CommandService:
                 "finding_id": finding.id,
                 "revoked_by": user.username,
                 "revoked_at": finding.revoked_at.isoformat(),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # /unrevoke — đảo ngược /revoke
+    # ------------------------------------------------------------------
+
+    async def _handle_unrevoke(
+        self,
+        request: CommandRequest,
+        user: User,
+        db: AsyncSession,
+    ) -> CommandResponse:
+        finding = await self._get_finding(request.finding_id, db)
+        # Same gate as /revoke — only security_lead+ may change triage state.
+        await enforce_finding_project_access(
+            finding.id, user, db, min_role="security_lead",
+        )
+
+        if finding.status != "REVOKED":
+            raise HTTPException(
+                status_code=409,
+                detail="Finding này hiện không ở trạng thái thu hồi (REVOKED).",
+            )
+
+        # Restore to the default active state. The pre-revoke status isn't
+        # persisted (revoke overwrote it), so we return the finding to
+        # `pending_review` — back into the active triage queue — and clear the
+        # revoke audit fields (incl. any auto-suppress marker). This also stops
+        # the V3.1 Tier 1 dedup-hash inheritance from propagating the revoke to
+        # future ingests, since that lookup keys on findings still REVOKED.
+        was = finding.revoked_by
+        finding.status = "pending_review"
+        finding.revoke_justification = None
+        finding.revoked_by = None
+        finding.revoked_at = None
+        await db.commit()
+
+        log.info("finding %d unrevoked by %s (was revoked by %s)", finding.id, user.username, was)
+        note = ""
+        if was and was.startswith("auto-suppress"):
+            note = (
+                " Lưu ý: finding này bị thu hồi tự động — nếu còn suppression "
+                "rule khớp, nó có thể bị thu hồi lại ở lần scan sau."
+            )
+        return CommandResponse(
+            status="ok",
+            message=f"Finding #{finding.id} đã được khôi phục (bỏ thu hồi) bởi {user.username}.{note}",
+            data={
+                "finding_id": finding.id,
+                "status": finding.status,
+                "unrevoked_by": user.username,
             },
         )
 
@@ -382,7 +435,8 @@ class CommandService:
             {"name": "/fix",      "group": "Analysis",   "args": "finding_id",       "roles": ["developer", "security_lead", "admin"], "desc": "AI đề xuất diff khắc phục."},
             {"name": "/rerun",    "group": "Action",     "args": "run_id",           "roles": ["security_lead", "admin"],                "desc": "Re-run workflow."},
             {"name": "/approve",  "group": "Action",     "args": "finding_id, justification", "roles": ["security_lead", "admin"],       "desc": "Phê duyệt bypass (≥20 ký tự)."},
-            {"name": "/revoke",   "group": "Action",     "args": "finding_id, justification", "roles": ["security_lead", "admin"],       "desc": "Thu hồi phê duyệt."},
+            {"name": "/revoke",   "group": "Action",     "args": "finding_id, justification", "roles": ["security_lead", "admin"],       "desc": "Thu hồi finding (đánh dấu không phải lỗi)."},
+            {"name": "/unrevoke", "group": "Action",     "args": "finding_id",       "roles": ["security_lead", "admin"],                "desc": "Khôi phục finding đã thu hồi về pending."},
             {"name": "/report",   "group": "Monitoring", "args": "",                 "roles": ["developer", "security_lead", "admin"], "desc": "Xuất báo cáo HTML."},
             {"name": "/help",     "group": "General",    "args": "",                 "roles": ["developer", "security_lead", "admin"], "desc": "Danh sách lệnh."},
             {"name": "/feedback", "group": "General",    "args": "[finding_id] text", "roles": ["developer", "security_lead", "admin"], "desc": "Gửi feedback chất lượng AI."},

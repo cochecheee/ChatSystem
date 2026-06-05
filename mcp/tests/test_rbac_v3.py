@@ -44,13 +44,11 @@ def test_role_lattice_ordering():
 # Helpers
 # ---------------------------------------------------------------------------
 
+from tests.conftest import issue_token
+
+
 async def _login(client, username: str, role: str = "developer") -> str:
-    resp = await client.post(
-        "/api/chat/auth/token",
-        json={"username": username, "role": role},
-    )
-    assert resp.status_code == 200, resp.text
-    return resp.json()["access_token"]
+    return await issue_token(client, username, role)
 
 
 # ---------------------------------------------------------------------------

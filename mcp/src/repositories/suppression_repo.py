@@ -26,8 +26,15 @@ def rule_matches(
     finding_severity: str,
 ) -> bool:
     """All non-null fields on rule must match the finding."""
-    if rule.expires_at is not None and rule.expires_at < datetime.now(UTC):
-        return False
+    # MySQL DATETIME trả về naive datetime (không tz); Postgres TIMESTAMPTZ trả aware.
+    # So sánh trực tiếp naive vs aware → TypeError. Coi naive là UTC (đúng vì
+    # create() lưu datetime.now(UTC), MySQL chỉ drop phần tzinfo).
+    if rule.expires_at is not None:
+        exp = rule.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=UTC)
+        if exp < datetime.now(UTC):
+            return False
     if rule.rule_id is not None and rule.rule_id != finding_rule_id:
         return False
     if rule.tool is not None and rule.tool != finding_tool:

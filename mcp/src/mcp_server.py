@@ -203,6 +203,27 @@ async def revoke_finding(finding_id: int, justification: str) -> dict:
 
 
 @mcp.tool
+async def unrevoke_finding(finding_id: int) -> dict:
+    """Undo a revoke — restore a REVOKED finding to pending_review (active
+    triage). No justification required. Audit trail records mcp:security_lead."""
+    async with AsyncSessionLocal() as session:
+        cs = CommandService()
+        try:
+            resp = await cs.handle(
+                "unrevoke",
+                CommandRequest(
+                    command="/unrevoke",
+                    finding_id=int(finding_id),
+                ),
+                _user("security_lead"),
+                session,
+            )
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
+        return resp.model_dump()
+
+
+@mcp.tool
 async def list_pipelines(limit: int = 20) -> dict:
     """Most recent GitHub Actions workflow runs for the configured repo."""
     limit = max(1, min(50, int(limit)))

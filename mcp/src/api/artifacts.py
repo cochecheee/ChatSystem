@@ -5,7 +5,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.auth import User, allowed_project_ids, require_read_access
+from ..core.auth import (
+    User,
+    allowed_project_ids,
+    enforce_run_project_access,
+    require_read_access,
+)
 from ..core.config import settings
 from ..core.db import AsyncSessionLocal, get_session
 from ..models.entities import WebhookDelivery
@@ -93,11 +98,16 @@ async def list_github_runs(
 async def list_github_artifacts(
     run_id: int,
     github: GitHubClient = Depends(get_github_client),
-    _: User | None = Depends(require_read_access),
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
 ) -> list[dict]:
     """Return artifacts for the given workflow run.
     Use the `id` field as `github_artifact_id` in **POST /artifacts/process**.
+
+    V3.7 — when the run is already ingested, scope by membership so a
+    non-admin can't list another project's run artifacts.
     """
+    await enforce_run_project_access(run_id, user, session)
     try:
         return await github.list_artifacts(run_id)
     except Exception as exc:
@@ -307,12 +317,18 @@ async def reprocess_run(
     run_id: int,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
 ) -> dict:
     """Wipe existing findings/artifacts for a run and reprocess from GitHub.
 
     Used after fixing the normalizer or pulling in new artifact types — the
     previous artifacts in the DB are stale, so we delete them and re-fetch.
+
+    V3.7 — destructive re-ingest: requires developer+ membership on the run's
+    project (when RBAC is on). Admin bypasses; anonymous-read bypass still
+    gated by the kill-switch via require_read_access.
     """
+    await enforce_run_project_access(run_id, user, session, min_role="developer")
     artifact_repo = ArtifactRepository(session)
     finding_repo = FindingRepository(session)
     project_repo = ProjectRepository(session)

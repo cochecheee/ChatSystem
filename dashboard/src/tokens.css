@@ -1,5 +1,5 @@
 /* ============================================================
-   SAST Sentinel — Design tokens
+   Shiftwall — Design tokens
    Warm off-white base, single earthy-orange accent
    ============================================================ */
 
@@ -1219,6 +1219,17 @@ a {
 }
 .vuln-row-meta .mono {
   font-size: 10.5px;
+}
+/* Draggable divider between the list and detail panes (useResizableSplit) */
+.col-resizer {
+  cursor: col-resize;
+  background: var(--line);
+  transition: background 0.12s;
+  touch-action: none;
+}
+.col-resizer:hover,
+.col-resizer:active {
+  background: var(--accent);
 }
 
 /* Vuln detail */

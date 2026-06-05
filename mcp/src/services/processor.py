@@ -89,18 +89,26 @@ class SecurityProcessor:
                 if project is not None:
                     session.expunge(project)
 
-        if project is not None and project.github_token and project.github_owner and project.github_repo:
+        # Route to the project's OWN repo whenever owner+repo are known — a
+        # per-project token is NOT required. GitHubClient.for_project falls
+        # back to the env GITHUB_TOKEN for auth (public repos work even
+        # unauthenticated), so keying on github_token here was a bug: a
+        # tokenless multi-tenant project (e.g. a public repo) silently fell
+        # back to the ENV repo and fetched the WRONG run → 404 → 0 findings
+        # (which wiped that project's data on reprocess).
+        if project is not None and project.github_owner and project.github_repo:
             gh = GitHubClient.for_project(project)
             profile = load_profile(project.artifact_profile or None)
             log.info(
-                "process_run %d: using per-project credentials for %s/%s",
+                "process_run %d: using repo %s/%s (token=%s)",
                 github_run_id, project.github_owner, project.github_repo,
+                "per-project" if project.github_token else "env-fallback",
             )
         else:
             gh = self.github_client
             profile = load_profile()
             log.info(
-                "process_run %d: using env-bound GitHub client (no per-project credentials)",
+                "process_run %d: using env-bound GitHub client (project has no owner/repo)",
                 github_run_id,
             )
 

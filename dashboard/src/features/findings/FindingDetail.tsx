@@ -159,7 +159,7 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
           <div className="msg">
             <div className="msg-role">
               <Icon name="bot" size={13} />
-              <span className="who">Sentinel AI</span>
+              <span className="who">Shiftwall AI</span>
             </div>
             <div className="msg-body">
               <p>
@@ -194,7 +194,7 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
           <div className="msg">
             <div className="msg-role">
               <Icon name="bot" size={13} />
-              <span className="who">Sentinel AI</span>
+              <span className="who">Shiftwall AI</span>
             </div>
             <div className="msg-body" style={{ color: 'var(--fg-3)', fontSize: 12 }}>
               Đang phân tích…
@@ -220,7 +220,7 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
           <div className="msg">
             <div className="msg-role">
               <Icon name="bot" size={13} />
-              <span className="who">Sentinel AI</span>
+              <span className="who">Shiftwall AI</span>
               <span className="chip" style={{ fontSize: 10, marginLeft: 4 }}>
                 confidence: {analysis.confidence}
               </span>
@@ -263,7 +263,7 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
           <div key={i} className={`msg ${m.role}`}>
             <div className="msg-role">
               <Icon name={m.role === 'user' ? 'user' : 'bot'} size={13} />
-              <span className="who">{m.role === 'user' ? 'Bạn' : 'Sentinel AI'}</span>
+              <span className="who">{m.role === 'user' ? 'Bạn' : 'Shiftwall AI'}</span>
             </div>
             <div className="msg-body">
               <p>{m.text}</p>
@@ -346,6 +346,20 @@ export function FindingDetail({
     setLastJustification(justification);
     onRevoked();
     setSuppressOpen(true); // FP-B prompt
+  };
+
+  // Undo a revoke — restore the finding to pending_review. Wraps the
+  // /unrevoke ChatOps command (security_lead+). Parent re-fetches so the
+  // "Revoked" badge clears.
+  const [unrevoking, setUnrevoking] = useState(false);
+  const handleUnrevoke = async () => {
+    setUnrevoking(true);
+    try {
+      await api.chat.command({ command: '/unrevoke', finding_id: finding.id });
+      onRevoked();
+    } finally {
+      setUnrevoking(false);
+    }
   };
 
   const handleSuppress = async () => {
@@ -470,6 +484,16 @@ export function FindingDetail({
                   title="Đánh dấu finding này không phải lỗi thật. Các lần quét sau sẽ tự bỏ qua theo dedup_hash."
                 >
                   <Icon name="shield" size={12} /> Đánh dấu không phải lỗi
+                </button>
+              )}
+              {alreadyRevoked && (
+                <button
+                  className="btn sm"
+                  onClick={handleUnrevoke}
+                  disabled={unrevoking}
+                  title="Khôi phục finding đã thu hồi về trạng thái pending (đưa lại vào hàng chờ triage)."
+                >
+                  <Icon name="shield" size={12} /> {unrevoking ? 'Đang khôi phục…' : 'Khôi phục'}
                 </button>
               )}
               <button className="btn sm" onClick={onToggleAI}>

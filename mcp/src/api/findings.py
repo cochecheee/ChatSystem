@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.auth import (
     User,
     allowed_project_ids,
+    enforce_run_project_access,
     get_current_user,
     require_read_access,
 )
@@ -123,11 +124,15 @@ async def findings_ai_summary(
         )
 
     svc = SummaryService()
+    # V3.7 — khi không chỉ định project_id, scope briefing theo membership
+    # (non-admin) để không lộ số liệu tổng hợp của project khác.
+    summary_scope = scope_ids if project_id is None else None
     result = await svc.generate(
         session,
         project_id=project_id,
         run_id=run_id,
         force_refresh=force_refresh,
+        project_ids=summary_scope,
     )
     return result.model_dump()
 
@@ -297,11 +302,16 @@ async def get_finding(
 @router.get(
     "/github/runs/{run_id}/findings",
     response_model=list[FindingOut],
-    dependencies=[Depends(require_read_access)],
 )
 async def get_run_findings(
     run_id: int,
     session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
 ) -> list[Finding]:
-    """Return all findings from a specific GitHub Actions workflow run."""
+    """Return all findings from a specific GitHub Actions workflow run.
+
+    V3.7 — scoped by membership: a run's findings belong to one project, so
+    a non-admin caller must be a member of that project (when RBAC is on).
+    """
+    await enforce_run_project_access(run_id, user, session)
     return await FindingRepository(session).list_for_run(run_id)

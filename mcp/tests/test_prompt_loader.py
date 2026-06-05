@@ -131,4 +131,4 @@ def test_summary_user_snapshot():
 def test_chat_has_no_user_template():
     rendered = get_registry().render("chat")
     assert rendered.user is None
-    assert "Sentinel" in rendered.system
+    assert "Shiftwall" in rendered.system

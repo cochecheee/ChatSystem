@@ -22,7 +22,6 @@ from src.core.config import settings
 from src.core.db import AsyncSessionLocal, engine
 from src.models.entities import Project
 
-
 _NEW_COLUMNS: dict[str, str] = {
     "github_owner":          "VARCHAR(255) NOT NULL DEFAULT ''",
     "github_repo":           "VARCHAR(255) NOT NULL DEFAULT ''",

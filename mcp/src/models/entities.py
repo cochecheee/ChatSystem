@@ -58,6 +58,12 @@ class Project(Base):
     )
     polling_workflow_name: Mapped[str] = mapped_column(String(255), default="CI Workflow", nullable=False)
     polling_branch: Mapped[str] = mapped_column(String(255), default="main", nullable=False)
+    # V3.7 — per-project staging URL for the uptime Monitor. When set, the
+    # monitor loop pings this URL (instead of relying on the global env
+    # MONITOR_TARGETS) so ANY project integrating sast-action gets uptime
+    # monitoring without editing server env. Empty = not monitored.
+    # Typically the same `staging_url` the project passes to sast-action DAST.
+    staging_url: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     # Stored as INTEGER (0/1) for SQLite compat; Mapped[int] keeps the
     # type honest so asyncpg doesn't try to coerce bool -> bool to a
     # Postgres INTEGER column, which raises 'invalid input syntax'.
@@ -239,6 +245,34 @@ class ProjectMember(Base):
     # additive: no schema-level migration of existing users needed.
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="viewer")
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
+    )
+
+
+class UserAccount(Base):
+    """V3.8 — password-based login.
+
+    Until V3.8 the system had no users table: identity was just the JWT
+    `sub` string, and `/auth/token` minted a token for any username + a
+    self-selected role (anyone could pick `admin`). This table makes
+    identity real — login now verifies a bcrypt password and reads the
+    global role from here, so the role claim can no longer be forged.
+
+    Named `UserAccount` (table `users`) to avoid colliding with the
+    Pydantic `User` in core.auth that represents the decoded JWT.
+
+    `username` is the join key to ProjectMember.username (no FK — members
+    can predate their user row; seeding backfills users from members).
+    Global `role` is one of developer | security_lead | admin and is the
+    JWT `role` claim source. Per-project roles still live in ProjectMember.
+    """
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="developer")
     created_at: Mapped[datetime] = mapped_column(
         DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
     )

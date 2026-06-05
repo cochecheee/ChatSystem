@@ -30,7 +30,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.models import entities as _entities  # noqa: F401 - register
-from src.models.entities import (  # noqa: E402
+from src.models.entities import (
     Alert,
     AppConfig,
     Artifact,

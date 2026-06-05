@@ -192,11 +192,13 @@ class SarifNormalizer(BaseNormalizer):
                 # SARIF spec: level="none" means the result is NOT a problem
                 # (informational metric, suppressed kind, etc.). Skip — storing
                 # these inflates info-tier counts with non-actionable entries.
-                # However, if `properties.security-severity` overrides to a
-                # real risk score, keep it (some tools mis-emit level=none).
-                if (result.get("level") or "").lower() == "none":
+                # We use the EFFECTIVE level (result.level → rule
+                # defaultConfiguration.level) so a rule configured as "none"
+                # is caught too. If `security-severity` overrides to a real
+                # risk score, keep it (some tools mis-emit level=none).
+                rule_def_for_none = rules_index.get(result.get("ruleId") or "") or {}
+                if self._effective_level(result, rule_def_for_none) == "none":
                     props = result.get("properties") or {}
-                    rule_def_for_none = rules_index.get(result.get("ruleId") or "") or {}
                     rule_props = rule_def_for_none.get("properties") or {}
                     has_override = False
                     for src in (props, rule_props):
@@ -231,17 +233,39 @@ class SarifNormalizer(BaseNormalizer):
 
     @staticmethod
     def _index_rules(run: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """Build a {ruleId: rule_dict} index from `tool.driver.rules` if present."""
+        """Build a {ruleId: rule_dict} index from the run's rule metadata.
+
+        Per SARIF 2.1.0 rules live in two possible places:
+          - `tool.driver.rules` — Semgrep, Bandit, Trivy, ESLint
+          - `tool.extensions[].rules` — CodeQL packs ALL query metadata here
+            and leaves `driver.rules` EMPTY. Indexing only the driver dropped
+            every CodeQL rule's `security-severity` / `problem.severity` / CWE
+            tags, collapsing those findings to `info`.
+
+        Driver rules take precedence on an id collision (the driver is the
+        canonical tool; extensions are supplementary).
+        """
         tool = run.get("tool") or {}
-        driver = tool.get("driver") if isinstance(tool, dict) else None
-        rules = driver.get("rules") if isinstance(driver, dict) else None
-        if not isinstance(rules, list):
+        if not isinstance(tool, dict):
             return {}
-        return {
-            r.get("id"): r
-            for r in rules
-            if isinstance(r, dict) and r.get("id")
-        }
+
+        index: dict[str, dict[str, Any]] = {}
+
+        # Extensions first; driver overwrites below on the rare id collision.
+        for ext in tool.get("extensions") or []:
+            if not isinstance(ext, dict):
+                continue
+            for r in ext.get("rules") or []:
+                if isinstance(r, dict) and r.get("id"):
+                    index.setdefault(r["id"], r)
+
+        driver = tool.get("driver")
+        if isinstance(driver, dict):
+            for r in driver.get("rules") or []:
+                if isinstance(r, dict) and r.get("id"):
+                    index[r["id"]] = r
+
+        return index
 
     def _result_to_finding(
         self,
@@ -251,8 +275,10 @@ class SarifNormalizer(BaseNormalizer):
         artifact_id: int,
     ) -> FindingCreate:
         rule_id = result.get("ruleId") or result.get("rule", {}).get("id") or "unknown-rule"
-        level = (result.get("level") or "none")
         rule_def = rules_index.get(rule_id) or {}
+        # SARIF effective level (§3.27.10): explicit result.level wins, else
+        # inherit the rule's defaultConfiguration.level, else spec default.
+        level = self._effective_level(result, rule_def)
         severity = self._extract_severity(result, rule_def, level)
 
         msg_obj = result.get("message") or {}
@@ -289,6 +315,26 @@ class SarifNormalizer(BaseNormalizer):
         )
 
     @staticmethod
+    def _effective_level(result: dict[str, Any], rule_def: dict[str, Any]) -> str:
+        """Resolve the SARIF effective level (§3.27.10).
+
+        Order: explicit `result.level` → the matched rule's
+        `defaultConfiguration.level` → spec default `"warning"`. Semgrep and
+        Bandit omit `result.level` and encode the real severity ONLY in
+        `defaultConfiguration.level` (error/warning/note), so without this
+        inheritance every such finding collapsed to `info`.
+        """
+        lvl = result.get("level")
+        if isinstance(lvl, str) and lvl.strip():
+            return lvl.strip().lower()
+        dc = rule_def.get("defaultConfiguration") or {}
+        if isinstance(dc, dict):
+            dlvl = dc.get("level")
+            if isinstance(dlvl, str) and dlvl.strip():
+                return dlvl.strip().lower()
+        return "warning"  # SARIF spec default when level is unspecified
+
+    @staticmethod
     def _extract_severity(
         result: dict[str, Any],
         rule_def: dict[str, Any],
@@ -323,7 +369,11 @@ class SarifNormalizer(BaseNormalizer):
                 mapped = _UPPERCASE_TO_SEVERITY.get(prop_sev.strip().upper())
                 if mapped:
                     return mapped
-        return _SARIF_LEVEL_TO_SEVERITY.get(level, "info")
+        # `level` is the resolved effective level (error/warning/note/none).
+        # An unrecognised level defaults to "medium" (pending triage), NOT
+        # "info" — mirroring _sca_severity. Defaulting unknowns to the lowest
+        # bucket silently under-rated real issues whose level didn't resolve.
+        return _SARIF_LEVEL_TO_SEVERITY.get(level, "medium")
 
     @staticmethod
     def _extract_location(result: dict[str, Any]) -> tuple[str, int | None]:
@@ -362,24 +412,32 @@ class SarifNormalizer(BaseNormalizer):
 
     @staticmethod
     def _extract_cwe(rule_def: dict[str, Any]) -> str | None:
-        """Try to pull a CWE id out of rule properties / tags (CodeQL & Semgrep)."""
+        """Pull a CWE id out of rule properties / tags (CodeQL & Semgrep).
+
+        Handles both tag conventions seen in the wild:
+          - CodeQL:  "external/cwe/cwe-079"  (lives in extensions rules)
+          - Semgrep: "CWE-89: Improper Neutralization ... ('SQL Injection')"
+        A single regex `cwe[-/_ ]?(\\d+)` covers both; the previous parser only
+        matched the CodeQL form, so Semgrep findings lost their CWE — which in
+        turn disabled the CWE-based high→critical promotion for SAST.
+        """
         if not rule_def:
             return None
         props = rule_def.get("properties") or {}
         if not isinstance(props, dict):
             return None
-        # CodeQL: properties.tags = ["external/cwe/cwe-079", ...]
         tags = props.get("tags") or []
         if isinstance(tags, list):
             for tag in tags:
-                if isinstance(tag, str) and "cwe" in tag.lower():
-                    parts = tag.lower().split("cwe-")
-                    if len(parts) > 1 and parts[1][:4].rstrip("/").isdigit():
-                        num = parts[1].split("/")[0]
-                        return f"CWE-{int(num)}"
+                if isinstance(tag, str):
+                    m = re.search(r"cwe[-/_ ]?(\d+)", tag, re.IGNORECASE)
+                    if m:
+                        return f"CWE-{int(m.group(1))}"
         cwe = props.get("cwe")
         if isinstance(cwe, str) and cwe:
-            return cwe if cwe.startswith("CWE-") else f"CWE-{cwe}"
+            m = re.search(r"(\d+)", cwe)
+            if m:
+                return f"CWE-{int(m.group(1))}"
         return None
 
 

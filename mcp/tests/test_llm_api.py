@@ -20,11 +20,9 @@ SAMPLE_RESULT = AnalysisResult(
 
 async def _auth_headers(client) -> dict[str, str]:
     """Helper — V3.2 BUG-3 made /findings/{id}/explain require authentication."""
-    r = await client.post(
-        "/api/chat/auth/token",
-        json={"username": "tester", "role": "admin"},
-    )
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    from tests.conftest import issue_token
+    token = await issue_token(client, "tester", role="admin")
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./mcp.db"
     SECRET_KEY: str = "change-me-in-production-min-32-chars"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+    # V3.8 — password login. Every seeded user (cochecheee + each
+    # project_members username) is created with this password on first boot.
+    # Change in .env before first run, or have users rotate after login.
+    # Seeding is idempotent and NEVER overwrites an existing password.
+    DEFAULT_USER_PASSWORD: str = "changeme123"
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.1-pro-preview"
     GEMINI_MAX_RETRIES: int = 3

@@ -2,7 +2,16 @@ import { useAuth } from '../features/auth/AuthContext';
 import { Icon } from './Icon';
 import { ProjectSelector } from './ProjectSelector';
 
-export type PageId = 'overview' | 'pipelines' | 'vulns' | 'sca' | 'chat' | 'reports' | 'settings';
+export type PageId =
+  | 'overview'
+  | 'pipelines'
+  | 'vulns'
+  | 'sca'
+  | 'runtime'
+  | 'monitor'
+  | 'chat'
+  | 'reports'
+  | 'settings';
 
 interface NavItem {
   id: PageId;
@@ -18,6 +27,13 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { id: 'pipelines', label: 'Pipelines', icon: 'pipeline' },
       { id: 'vulns', label: 'Vulnerabilities', icon: 'shield' },
       { id: 'sca', label: 'Dependencies', icon: 'package' },
+    ],
+  },
+  {
+    group: 'Runtime',
+    items: [
+      { id: 'runtime', label: 'DAST', icon: 'zap' },
+      { id: 'monitor', label: 'Uptime', icon: 'bell' },
     ],
   },
   {
@@ -38,6 +54,8 @@ const CRUMB: Record<PageId, string[]> = {
   pipelines: ['Workspace', 'Pipelines'],
   vulns: ['Workspace', 'Vulnerabilities'],
   sca: ['Workspace', 'Dependencies · SCA'],
+  runtime: ['Runtime', 'DAST · Runtime'],
+  monitor: ['Runtime', 'Uptime · Health checks'],
   chat: ['Assistant', 'AI Assistant'],
   reports: ['Admin', 'Reports'],
   settings: ['Admin', 'Settings'],
@@ -56,10 +74,18 @@ export function Sidebar({ active, onNav }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">S</div>
+        <div className="brand-mark" aria-label="Shiftwall">
+          <svg width="16" height="16" viewBox="0 0 64 64" fill="none"
+               stroke="currentColor" strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12 H14 V52 H21" />
+            <path d="M43 12 H50 V52 H43" />
+            <path d="M40 32 H26" />
+            <path d="M31 26 L25 32 L31 38" />
+          </svg>
+        </div>
         <div>
-          <div className="brand-name">Sentinel</div>
-          <div className="brand-sub">SAST · CI/CD · AI</div>
+          <div className="brand-name">Shiftwall</div>
+          <div className="brand-sub">Secure CI/CD · SAST · AI</div>
         </div>
       </div>
       {NAV.map((group) => (

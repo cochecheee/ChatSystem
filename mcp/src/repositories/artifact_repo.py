@@ -26,13 +26,18 @@ class ArtifactRepository:
         )
         return list(result.scalars().all())
 
-    async def latest_run_id_with_findings(self, *, project_id: int | None = None) -> int | None:
+    async def latest_run_id_with_findings(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> int | None:
         """Run ID mới nhất có findings (theo Artifact.created_at).
 
         Một run có thể có nhiều artifacts; trả về run_id của artifact mới nhất
         mà có ít nhất 1 finding trong DB. Dùng cho Overview "scan mới nhất".
+
+        V3.7: `project_ids` giới hạn trong tập project của member (khi non-admin
+        chọn "All projects"). project_id (đơn) vẫn ưu tiên nếu được truyền.
         """
-        from sqlalchemy import desc
+        from sqlalchemy import desc, false as sql_false
         from sqlalchemy import func as sql_func
 
         from ..models.entities import Finding
@@ -43,6 +48,10 @@ class ArtifactRepository:
         )
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
+        elif project_ids is not None:
+            query = query.where(
+                Artifact.project_id.in_(project_ids) if project_ids else sql_false()
+            )
         query = (
             query.group_by(Artifact.github_run_id)
             .order_by(desc("latest"))

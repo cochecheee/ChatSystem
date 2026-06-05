@@ -19,13 +19,21 @@ class StatsService:
         self.findings = FindingRepository(session)
         self.artifacts = ArtifactRepository(session)
 
-    async def overview(self, *, project_id: int | None = None) -> dict[str, Any]:
-        """KPI cards cho Overview page. project_id=None ⇒ aggregate toàn hệ thống."""
-        sev = await self.findings.count_by_severity(project_id=project_id)
-        status = await self.findings.count_by_status(project_id=project_id)
-        tool = await self.findings.count_by_tool(project_id=project_id)
-        ai_analyzed = await self.findings.count_ai_analyzed(project_id=project_id)
-        total = await self.findings.count_total(project_id=project_id)
+    async def overview(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """KPI cards cho Overview page.
+
+        project_id=None ⇒ aggregate. V3.7: khi caller là member non-admin,
+        endpoint truyền `project_ids` = các project họ thuộc → aggregate chỉ
+        trong phạm vi đó thay vì toàn hệ thống.
+        """
+        scope = {"project_id": project_id, "project_ids": project_ids}
+        sev = await self.findings.count_by_severity(**scope)
+        status = await self.findings.count_by_status(**scope)
+        tool = await self.findings.count_by_tool(**scope)
+        ai_analyzed = await self.findings.count_ai_analyzed(**scope)
+        total = await self.findings.count_total(**scope)
 
         critical = sev.get("critical", 0)
         high = sev.get("high", 0)
@@ -35,24 +43,24 @@ class StatsService:
 
         # Per-category open counts so the Vulns badge (SAST-only) and
         # SCA badge (deps-only) match what their pages actually show.
-        sast_total = await self.findings.count_with_filters(project_id=project_id, category="sast")
-        sast_approved = await self.findings.count_with_filters(project_id=project_id, category="sast", status="APPROVED")
-        sast_revoked = await self.findings.count_with_filters(project_id=project_id, category="sast", status="REVOKED")
-        deps_total = await self.findings.count_with_filters(project_id=project_id, category="deps")
-        deps_approved = await self.findings.count_with_filters(project_id=project_id, category="deps", status="APPROVED")
-        deps_revoked = await self.findings.count_with_filters(project_id=project_id, category="deps", status="REVOKED")
+        sast_total = await self.findings.count_with_filters(**scope, category="sast")
+        sast_approved = await self.findings.count_with_filters(**scope, category="sast", status="APPROVED")
+        sast_revoked = await self.findings.count_with_filters(**scope, category="sast", status="REVOKED")
+        deps_total = await self.findings.count_with_filters(**scope, category="deps")
+        deps_approved = await self.findings.count_with_filters(**scope, category="deps", status="APPROVED")
+        deps_revoked = await self.findings.count_with_filters(**scope, category="deps", status="REVOKED")
 
-        sast_crit = await self.findings.count_with_filters(project_id=project_id, category="sast", severity="critical")
-        sast_high = await self.findings.count_with_filters(project_id=project_id, category="sast", severity="high")
-        deps_crit = await self.findings.count_with_filters(project_id=project_id, category="deps", severity="critical")
-        deps_high = await self.findings.count_with_filters(project_id=project_id, category="deps", severity="high")
+        sast_crit = await self.findings.count_with_filters(**scope, category="sast", severity="critical")
+        sast_high = await self.findings.count_with_filters(**scope, category="sast", severity="high")
+        deps_crit = await self.findings.count_with_filters(**scope, category="deps", severity="critical")
+        deps_high = await self.findings.count_with_filters(**scope, category="deps", severity="high")
 
         # DAST counts (V2.3 — OWASP ZAP runtime scan)
-        dast_total = await self.findings.count_with_filters(project_id=project_id, category="dast")
-        dast_approved = await self.findings.count_with_filters(project_id=project_id, category="dast", status="APPROVED")
-        dast_revoked = await self.findings.count_with_filters(project_id=project_id, category="dast", status="REVOKED")
-        dast_crit = await self.findings.count_with_filters(project_id=project_id, category="dast", severity="critical")
-        dast_high = await self.findings.count_with_filters(project_id=project_id, category="dast", severity="high")
+        dast_total = await self.findings.count_with_filters(**scope, category="dast")
+        dast_approved = await self.findings.count_with_filters(**scope, category="dast", status="APPROVED")
+        dast_revoked = await self.findings.count_with_filters(**scope, category="dast", status="REVOKED")
+        dast_crit = await self.findings.count_with_filters(**scope, category="dast", severity="critical")
+        dast_high = await self.findings.count_with_filters(**scope, category="dast", severity="high")
 
         return {
             "total": total,
@@ -74,14 +82,20 @@ class StatsService:
             "pending": pending,
         }
 
-    async def latest_scan(self, *, project_id: int | None = None) -> dict[str, Any]:
+    async def latest_scan(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
         """Stats cho run mới nhất CÓ findings trong DB (không phải latest GitHub run).
 
         Dashboard Overview dùng endpoint này để hiển thị "kết quả scan mới nhất".
         Cố gắng enrich với run metadata từ GitHub (run_number, head_branch, created_at);
         nếu GitHub fail thì vẫn trả run_id + counts.
+
+        V3.7: `project_ids` giới hạn trong tập project của member non-admin.
         """
-        run_id = await self.artifacts.latest_run_id_with_findings(project_id=project_id)
+        run_id = await self.artifacts.latest_run_id_with_findings(
+            project_id=project_id, project_ids=project_ids,
+        )
         if run_id is None:
             return {
                 "run_id": None,

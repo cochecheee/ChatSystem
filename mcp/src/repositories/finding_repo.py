@@ -1,7 +1,7 @@
 """Finding repository — tất cả DB query liên quan tới Finding."""
 from __future__ import annotations
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, false as sql_false, or_, select
 from sqlalchemy import func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -133,12 +133,17 @@ class FindingRepository:
         project_id: int | None = None,
         severity: str | None = None,
     ) -> list[Finding]:
-        """Findings cho HTML report — không pagination."""
-        query = select(Finding)
+        """Findings cho HTML report — không pagination.
+
+        Eager-load Artifact để report đọc được github_run_id / project_id
+        mà không trigger lazy-load (async) khi render.
+        """
+        query = select(Finding).options(selectinload(Finding.artifact))
         if project_id is not None:
             query = query.join(Artifact).where(Artifact.project_id == project_id)
         if severity is not None:
             query = query.where(Finding.severity == severity)
+        query = query.order_by(Finding.id.desc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -200,34 +205,54 @@ class FindingRepository:
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
 
-    async def count_by_severity(self, *, project_id: int | None = None) -> dict[str, int]:
-        query = select(Finding.severity, sql_func.count(Finding.id))
+    @staticmethod
+    def _scope(query, project_id: int | None, project_ids: list[int] | None):
+        """Apply project scoping. project_id wins; project_ids restricts to a
+        set (V3.7 — used to scope global stats to a member's projects). Empty
+        project_ids → match nothing (authenticated user with zero memberships).
+        """
         if project_id is not None:
-            query = query.join(Artifact).where(Artifact.project_id == project_id)
-        query = query.group_by(Finding.severity)
+            return query.join(Artifact).where(Artifact.project_id == project_id)
+        if project_ids is not None:
+            if not project_ids:
+                return query.join(Artifact).where(sql_false())
+            return query.join(Artifact).where(Artifact.project_id.in_(project_ids))
+        return query
+
+    async def count_by_severity(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> dict[str, int]:
+        query = self._scope(
+            select(Finding.severity, sql_func.count(Finding.id)), project_id, project_ids,
+        ).group_by(Finding.severity)
         result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
-    async def count_by_status(self, *, project_id: int | None = None) -> dict[str, int]:
-        query = select(Finding.status, sql_func.count(Finding.id))
-        if project_id is not None:
-            query = query.join(Artifact).where(Artifact.project_id == project_id)
-        query = query.group_by(Finding.status)
+    async def count_by_status(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> dict[str, int]:
+        query = self._scope(
+            select(Finding.status, sql_func.count(Finding.id)), project_id, project_ids,
+        ).group_by(Finding.status)
         result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
-    async def count_by_tool(self, *, project_id: int | None = None) -> dict[str, int]:
-        query = select(Finding.tool, sql_func.count(Finding.id))
-        if project_id is not None:
-            query = query.join(Artifact).where(Artifact.project_id == project_id)
-        query = query.group_by(Finding.tool)
+    async def count_by_tool(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> dict[str, int]:
+        query = self._scope(
+            select(Finding.tool, sql_func.count(Finding.id)), project_id, project_ids,
+        ).group_by(Finding.tool)
         result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
-    async def count_ai_analyzed(self, *, project_id: int | None = None) -> int:
-        query = select(sql_func.count(Finding.id)).where(Finding.ai_analysis.is_not(None))
-        if project_id is not None:
-            query = query.join(Artifact).where(Artifact.project_id == project_id)
+    async def count_ai_analyzed(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> int:
+        query = self._scope(
+            select(sql_func.count(Finding.id)).where(Finding.ai_analysis.is_not(None)),
+            project_id, project_ids,
+        )
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
 
@@ -267,9 +292,9 @@ class FindingRepository:
                 }
         return out
 
-    async def count_total(self, *, project_id: int | None = None) -> int:
-        query = select(sql_func.count(Finding.id))
-        if project_id is not None:
-            query = query.join(Artifact).where(Artifact.project_id == project_id)
+    async def count_total(
+        self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+    ) -> int:
+        query = self._scope(select(sql_func.count(Finding.id)), project_id, project_ids)
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)

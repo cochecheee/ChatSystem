@@ -186,6 +186,30 @@ async def test_revoke_after_approve(client, seeded_finding):
     assert data["data"]["revoked_by"] == "mcp:security_lead"
 
 
+@pytest.mark.asyncio
+async def test_unrevoke_finding_restores_pending(client, seeded_finding):
+    from src.mcp_server import mcp
+
+    await mcp.call_tool(
+        "revoke_finding",
+        {
+            "finding_id": seeded_finding,
+            "justification": "Marking false positive before testing the unrevoke tool",
+        },
+    )
+    result = await mcp.call_tool("unrevoke_finding", {"finding_id": seeded_finding})
+    data = result.structured_content
+    assert data["status"] == "ok"
+    assert data["data"]["status"] == "pending_review"
+
+    from src.core.db import AsyncSessionLocal
+    from src.models.entities import Finding
+    async with AsyncSessionLocal() as s:
+        f = await s.get(Finding, seeded_finding)
+        assert f.status == "pending_review"
+        assert f.revoked_by is None
+
+
 # ---------------------------------------------------------------------------
 # Stats / pipelines / trigger — wrap existing services
 # ---------------------------------------------------------------------------

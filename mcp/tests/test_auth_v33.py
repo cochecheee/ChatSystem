@@ -19,12 +19,11 @@ READ_ENDPOINTS_NO_PATH = [
 ]
 
 
+from tests.conftest import issue_token
+
+
 async def _token(client, username="alice", role="developer") -> str:
-    resp = await client.post(
-        "/api/chat/auth/token",
-        json={"username": username, "role": role},
-    )
-    return resp.json()["access_token"]
+    return await issue_token(client, username, role)
 
 
 def _patch_anonymous(enabled: bool):

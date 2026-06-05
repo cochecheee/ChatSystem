@@ -154,6 +154,9 @@ def _migrate_schema(sync_conn) -> None:
         # global CI_WEBHOOK_TOKEN fallback keeps working until each
         # project rotates one in.
         ("webhook_token", "VARCHAR(500) NOT NULL DEFAULT ''"),
+        # V3.7 — per-project staging URL for the uptime Monitor (generic
+        # multi-tenant monitoring; replaces hardcoded env MONITOR_TARGETS).
+        ("staging_url", "VARCHAR(512) NOT NULL DEFAULT ''"),
     ])
 
 

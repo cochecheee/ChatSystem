@@ -6,6 +6,7 @@ import { useVulnsFindings } from '../features/findings/useVulnsFindings';
 import { FindingDetail } from '../features/findings/FindingDetail';
 import { DEP_SCAN_TOOLS, SevChip } from '../features/findings/sast';
 import { flagFalsePositive } from '../features/findings/flagFalsePositive';
+import { useResizableSplit } from '../hooks/useResizableSplit';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import type { Finding } from '../types';
 
@@ -40,6 +41,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
   const { stats } = useOverviewStats(POLL_INTERVAL_MS);
   const [showAI, setShowAI] = useState(true);
   const [triageOpen, setTriageOpen] = useState(false);
+  const { containerRef, gridColumns, onResizerPointerDown } = useResizableSplit('vulns.listWidth');
 
   // Inline "flag as false positive" — 1-click revoke + Tier 2 suppression so
   // the next pipeline scan skips it. Backend keeps the security_lead+ gate.
@@ -90,7 +92,11 @@ export function PageVulns({ initialId }: { initialId?: number }) {
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <div className="vuln-split" style={{ flex: 1, minWidth: 0 }}>
+      <div
+        ref={containerRef}
+        className="vuln-split"
+        style={{ flex: 1, minWidth: 0, gridTemplateColumns: gridColumns }}
+      >
         <div
           className="vuln-list-pane"
           style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}
@@ -372,6 +378,8 @@ export function PageVulns({ initialId }: { initialId?: number }) {
             ))}
           </div>
         </div>
+
+        <div className="col-resizer" onPointerDown={onResizerPointerDown} />
 
         <div
           style={{

@@ -60,7 +60,7 @@ class GeminiClient:
         raise RuntimeError(f"Gemini API không phản hồi sau {self._max_retries} lần thử: {last_exc}")
 
     async def chat(self, prompt: str, context: str = "") -> str:
-        """Free-form Vietnamese chat for the Sentinel assistant.
+        """Free-form Vietnamese chat for the Shiftwall assistant.
 
         Returns plain text — no JSON schema enforced — so the assistant can
         answer general questions about security findings, the pipeline, or

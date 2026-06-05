@@ -13,6 +13,8 @@ import { PageReports } from './pages/Reports';
 import { PageSCA } from './pages/Sca';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
+import { PageRuntime } from './pages/Runtime';
+import { PageMonitor } from './pages/Monitor';
 
 function AppInner() {
   const [active, setActive] = useState<PageId>('overview');
@@ -62,7 +64,9 @@ function AppInner() {
     fetchData();
     const id = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [activeProjectId]);
+    // Re-fetch on login/logout too (user?.username) so KPIs refresh when the
+    // RBAC scope changes — not only when the active project changes.
+  }, [activeProjectId, user?.username]);
 
   const onNav = (id: PageId) => {
     setActive(id);
@@ -87,6 +91,12 @@ function AppInner() {
       break;
     case 'sca':
       page = <PageSCA />;
+      break;
+    case 'runtime':
+      page = <PageRuntime />;
+      break;
+    case 'monitor':
+      page = <PageMonitor />;
       break;
     case 'chat':
       page = <PageChat />;

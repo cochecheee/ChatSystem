@@ -38,11 +38,11 @@ import argparse
 import asyncio
 import logging
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, text
 
 from src.core.config import settings
 from src.core.db import AsyncSessionLocal, init_db
@@ -60,7 +60,10 @@ from src.repositories.project_repo import _encrypt_kwargs
 log = logging.getLogger("sync_from_render")
 
 DEFAULT_URL = "https://mcp-l958.onrender.com"
-ADMIN_USERNAME = "sync-script"
+# V3.8 — login now needs a real account + password. Default to the seeded
+# admin (cochecheee) with the default password; override via env for prod.
+ADMIN_USERNAME = os.environ.get("SYNC_USERNAME", "cochecheee")
+ADMIN_PASSWORD = os.environ.get("SYNC_PASSWORD") or settings.DEFAULT_USER_PASSWORD
 PAGE_SIZE = 200          # /findings cap
 TIMEOUT = httpx.Timeout(60.0, connect=30.0)  # cold start on Render free
 
@@ -72,7 +75,7 @@ TIMEOUT = httpx.Timeout(60.0, connect=30.0)  # cold start on Render free
 async def login(client: httpx.AsyncClient) -> str:
     r = await client.post(
         "/api/chat/auth/token",
-        json={"username": ADMIN_USERNAME, "role": "admin"},
+        json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
     )
     r.raise_for_status()
     return r.json()["access_token"]
@@ -352,7 +355,7 @@ async def sync(url: str, apply: bool) -> None:
 
         # 4b) project.last_processed_run_id — make sure every project has
         #     a non-null pointer so /stats/latest-scan returns a run id.
-        from sqlalchemy import select, func
+        from sqlalchemy import func, select
         for p in projects:
             if last_run_by_project.get(p["id"]) is not None:
                 continue

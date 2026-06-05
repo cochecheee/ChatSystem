@@ -268,11 +268,8 @@ async def test_findings_run_id_filter(client, db_session):
 # ---------------------------------------------------------------------------
 
 async def _login_admin(client) -> str:
-    resp = await client.post(
-        "/api/chat/auth/token",
-        json={"username": "root", "role": "admin"},
-    )
-    return resp.json()["access_token"]
+    from tests.conftest import issue_token
+    return await issue_token(client, "root", role="admin")
 
 
 @pytest.mark.asyncio
@@ -305,11 +302,8 @@ async def test_suppression_crud_admin(client, project):
 @pytest.mark.asyncio
 async def test_suppression_requires_security_lead(client, project):
     """A plain developer without project membership cannot create rules."""
-    resp = await client.post(
-        "/api/chat/auth/token",
-        json={"username": "junior", "role": "developer"},
-    )
-    token = resp.json()["access_token"]
+    from tests.conftest import issue_token
+    token = await issue_token(client, "junior", role="developer")
     headers = {"Authorization": f"Bearer {token}"}
     resp = await client.post(
         f"/projects/{project['id']}/suppressions",

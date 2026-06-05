@@ -10,7 +10,7 @@ interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (username: string, role: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   /** Re-validate current token via GET /api/chat/auth/me. */
   refresh: () => Promise<void>;
@@ -46,8 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(
-    async (username: string, role: string) => {
-      const res = await api.chat.login(username, role);
+    async (username: string, password: string) => {
+      const res = await api.chat.login(username, password);
       setAuthToken(res.access_token);
       await refresh();
     },

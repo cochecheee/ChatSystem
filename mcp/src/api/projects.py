@@ -16,7 +16,12 @@ from ..core.auth import (
 from ..core.config import settings
 from ..core.db import get_session
 from ..models.entities import Project
-from ..models.schemas import GatePolicyUpdate, ProjectCreate, ProjectOut
+from ..models.schemas import (
+    GatePolicyUpdate,
+    MonitorTargetUpdate,
+    ProjectCreate,
+    ProjectOut,
+)
 from ..repositories import ArtifactRepository, FindingRepository, ProjectRepository
 
 router = APIRouter()
@@ -515,6 +520,52 @@ async def update_gate_policy(
     )
     await session.commit()
     return {"project_id": project_id, **new, "changed": True}
+
+
+@router.patch("/projects/{project_id}/monitor")
+async def update_monitor_target(
+    project_id: int,
+    body: MonitorTargetUpdate,
+    session: AsyncSession = Depends(get_session),
+    current: User = Depends(get_current_user_required),
+) -> dict:
+    """V3.7 — set/clear a project's uptime Monitor staging URL.
+
+    Owner / global admin only. The monitor loop auto-picks up active projects
+    with a non-empty `staging_url` — so this single endpoint is all an
+    inheritor project needs to opt into uptime monitoring (no server env).
+    Pass empty string to stop monitoring the project.
+    """
+    from ..repositories.audit_log_repo import write_audit
+
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if current.role != "admin":
+        role = current.memberships.get(project_id) if current.memberships else None
+        if role is None:
+            from ..repositories import ProjectMemberRepository
+            role = await ProjectMemberRepository(session).get_role(project_id, current.username)
+        if role != "owner":
+            raise HTTPException(
+                status_code=403,
+                detail="Only project owner (or global admin) can change the monitor target",
+            )
+
+    url = (body.staging_url or "").strip()
+    if url and not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="staging_url must start with http:// or https://")
+
+    old = project.staging_url
+    await ProjectRepository(session).update(project, {"staging_url": url})
+    await write_audit(
+        session, actor=current.username, action="set_monitor_target",
+        project_id=project_id, target_kind="project", target_id=project_id,
+        payload={"old": old, "new": url},
+    )
+    await session.commit()
+    return {"project_id": project_id, "staging_url": url, "monitored": bool(url)}
 
 
 @router.post("/projects/{project_id}/archive", status_code=200)

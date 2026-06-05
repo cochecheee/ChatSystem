@@ -14,7 +14,7 @@ from ..models.schemas import (
     TokenRequest,
     TokenResponse,
 )
-from ..repositories import FindingRepository, ProjectMemberRepository
+from ..repositories import FindingRepository, ProjectMemberRepository, UserRepository
 from ..services import report_service
 from ..services.command_service import CommandService
 from ..services.llm.client import GeminiClient
@@ -31,6 +31,7 @@ COMMAND_ROLES: dict[str, list[str]] = {
     "rerun":    ["security_lead", "admin"],
     "approve":  ["security_lead", "admin"],
     "revoke":   ["security_lead", "admin"],
+    "unrevoke": ["security_lead", "admin"],
     # Báo cáo tiến độ docx ch.4.3 — 4 lệnh còn lại
     "status":   ["developer", "security_lead", "admin"],
     "results":  ["developer", "security_lead", "admin"],
@@ -142,6 +143,11 @@ def _suggested_command(text: str) -> str | None:
     m = re.search(r"(?:approve|phê duyệt|duyệt).*?\b(\d+)\b", t)
     if m:
         return f"/approve {m.group(1)}"
+    # unrevoke must be checked BEFORE revoke — "unrevoke"/"khôi phục" else the
+    # revoke pattern (substring "revoke") would swallow it.
+    m = re.search(r"(?:unrevoke|khôi phục|bỏ thu hồi|huỷ thu hồi).*?\b(\d+)\b", t)
+    if m:
+        return f"/unrevoke {m.group(1)}"
     m = re.search(r"(?:revoke|thu hồi|huỷ duyệt).*?\b(\d+)\b", t)
     if m:
         return f"/revoke {m.group(1)}"
@@ -217,23 +223,33 @@ async def auth_me(current_user: User = Depends(get_current_user)) -> AuthMeRespo
 
 
 @router.post("/auth/token", response_model=TokenResponse, tags=["auth"])
-async def demo_login(
+async def login(
     request: TokenRequest,
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
-    """Demo login — trả về JWT không cần password (dành cho thesis demo).
+    """V3.8 — password login.
 
-    Trong production, thay bằng auth thật (LDAP, OAuth2, v.v.)
+    Verifies a bcrypt password against the `users` table and issues a JWT.
+    The global `role` claim is read from the user row (NOT from the request),
+    so it can no longer be self-selected/forged. Any `role` sent in the body
+    is ignored.
 
-    V3.0: JWT còn chứa per-project memberships (snapshot lúc issue) để
-    `require_project_access` kiểm tra không cần hit DB mỗi request.
+    Seeded users (cochecheee + each project member) get the default password
+    on first boot (settings.DEFAULT_USER_PASSWORD); rotate via a future
+    change-password flow. Bad username or password → 401 (indistinguishable
+    to avoid leaking which usernames exist).
+
+    V3.0: JWT also carries a per-project memberships snapshot so
+    `require_project_access` can check without hitting the DB each request.
     """
-    valid_roles = {"developer", "security_lead", "admin"}
-    if request.role not in valid_roles:
-        raise HTTPException(status_code=400, detail=f"Role không hợp lệ. Chọn: {valid_roles}")
+    user = await UserRepository(session).verify_credentials(
+        request.username, request.password,
+    )
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu")
 
-    memberships = await ProjectMemberRepository(session).memberships_dict(request.username)
+    memberships = await ProjectMemberRepository(session).memberships_dict(user.username)
     token = create_access_token(
-        username=request.username, role=request.role, memberships=memberships,
+        username=user.username, role=user.role, memberships=memberships,
     )
     return TokenResponse(access_token=token)

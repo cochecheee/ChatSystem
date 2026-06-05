@@ -15,6 +15,7 @@ from .finding_repo import FindingRepository
 from .project_member_repo import ROLE_LATTICE, ProjectMemberRepository, role_satisfies
 from .project_repo import ProjectRepository
 from .suppression_repo import SuppressionRuleRepository, rule_matches
+from .user_repo import UserRepository, seed_default_users
 
 __all__ = [
     "ROLE_LATTICE",
@@ -24,6 +25,8 @@ __all__ = [
     "ProjectMemberRepository",
     "ProjectRepository",
     "SuppressionRuleRepository",
+    "UserRepository",
     "role_satisfies",
     "rule_matches",
+    "seed_default_users",
 ]
