@@ -13,7 +13,12 @@ class Settings(BaseSettings):
     GITHUB_OWNER: str = ""
     GITHUB_REPO: str = ""
     POLLING_INTERVAL_SECONDS: int = 300
-    POLLING_WORKFLOW_NAME: str = "CI Workflow"
+    # Empty = name-agnostic: poll EVERY completed run and let the artifact
+    # profile (sast-reports-* etc.) decide what carries findings. This is the
+    # robust default — each inheritor repo names its workflow freely and the
+    # poller never misses runs because of a name mismatch. Set a value (here or
+    # per-Project.polling_workflow_name) only to narrow polling for efficiency.
+    POLLING_WORKFLOW_NAME: str = ""
     POLLING_BRANCH: str = "main"
     APP_ENV: str = "development"
     CI_API_KEY: str = ""        # if empty, auth disabled (dev/test mode)
