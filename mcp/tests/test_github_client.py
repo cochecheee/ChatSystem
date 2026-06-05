@@ -53,6 +53,28 @@ async def test_list_workflow_runs_filters_by_name():
 
 
 @pytest.mark.asyncio
+async def test_list_workflow_runs_empty_name_returns_all():
+    """Empty workflow_name = name-agnostic: no filtering, every run returned.
+
+    This is the contract the poller's default (POLLING_WORKFLOW_NAME="") relies
+    on — runs are kept regardless of name and the artifact profile does the
+    real filtering downstream.
+    """
+    runs = [
+        {"name": "CI Workflow", "id": 1},
+        {"name": "Deploy", "id": 2},
+        {"name": "anything", "id": 3},
+    ]
+    mock_http = _mock_client(json_data={"workflow_runs": runs})
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.list_workflow_runs("", "main")
+
+    assert [r["id"] for r in result] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
 async def test_list_workflow_runs_empty():
     mock_http = _mock_client(json_data={"workflow_runs": []})
     with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):

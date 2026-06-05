@@ -56,7 +56,9 @@ class Project(Base):
     artifact_profile: Mapped[str] = mapped_column(
         String(64), default="github-actions-default", nullable=False,
     )
-    polling_workflow_name: Mapped[str] = mapped_column(String(255), default="CI Workflow", nullable=False)
+    # Empty = match any workflow; the artifact profile is the real filter.
+    # Set a name only to narrow this project's polling to one workflow.
+    polling_workflow_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     polling_branch: Mapped[str] = mapped_column(String(255), default="main", nullable=False)
     # V3.7 — per-project staging URL for the uptime Monitor. When set, the
     # monitor loop pings this URL (instead of relying on the global env

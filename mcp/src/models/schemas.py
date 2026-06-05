@@ -58,7 +58,7 @@ class ProjectCreate(BaseModel):
     gemini_api_key: str = ""
     gemini_model: str = ""
     artifact_profile: str = "github-actions-default"
-    polling_workflow_name: str = "CI Workflow"
+    polling_workflow_name: str = ""   # empty = match any workflow (artifact profile filters)
     polling_branch: str = "main"
     staging_url: str = ""
     active: bool = True
@@ -101,7 +101,7 @@ class ProjectOut(BaseModel):
     has_webhook_token: bool = False
     gemini_model: str = ""
     artifact_profile: str = "github-actions-default"
-    polling_workflow_name: str = "CI Workflow"
+    polling_workflow_name: str = ""
     polling_branch: str = "main"
     staging_url: str = ""
     active: bool = True
