@@ -6,7 +6,7 @@ import { Icon } from '../components/Icon';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { flagFalsePositive } from '../features/findings/flagFalsePositive';
 import { useResizableSplit } from '../hooks/useResizableSplit';
-import type { Finding, Project } from '../types';
+import type { AnalysisResult, Finding, Project } from '../types';
 
 const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 const PAGE_SIZE = 500;
@@ -197,6 +197,25 @@ function PackageDetail({
 }) {
   const cmd = upgradeCmd(group.name, group.recommended, group.manifestPath);
 
+  // CVE fix suggestion — AI giải thích CVE + đề xuất nâng cấp (gọi /findings/{id}/explain,
+  // backend tự dùng prompt CVE-aware cho finding phụ thuộc).
+  const [aiById, setAiById] = useState<Record<number, AnalysisResult>>({});
+  const [aiLoadingId, setAiLoadingId] = useState<number | null>(null);
+  const [aiErr, setAiErr] = useState<Record<number, string>>({});
+
+  const runFix = async (f: Finding) => {
+    setAiLoadingId(f.id);
+    setAiErr((e) => ({ ...e, [f.id]: '' }));
+    try {
+      const res = await api.findings.explain(f.id);
+      setAiById((m) => ({ ...m, [f.id]: res }));
+    } catch (err) {
+      setAiErr((e) => ({ ...e, [f.id]: err instanceof Error ? err.message : 'Lỗi gọi AI' }));
+    } finally {
+      setAiLoadingId(null);
+    }
+  };
+
   return (
     <div style={{ overflowY: 'auto', padding: '20px 28px 40px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -256,57 +275,126 @@ function PackageDetail({
             .sort((a, b) => (SEV_RANK[b.severity] ?? 0) - (SEV_RANK[a.severity] ?? 0))
             .map((f) => {
               const { cveId, fixed } = pkgMeta(f);
+              const ai = aiById[f.id];
+              const aiLoading = aiLoadingId === f.id;
+              const err = aiErr[f.id];
+              // Gemini đôi khi bọc diff trong ```diff … ``` — bỏ fence cho gọn.
+              const fixText = (ai?.remediation_diff || '')
+                .replace(/^```[a-z]*\n?/i, '')
+                .replace(/```\s*$/, '')
+                .trim();
               return (
                 <div
                   key={f.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '8px 10px',
-                    background: 'var(--bg-elev)',
-                    border: '1px solid var(--line)',
-                    borderRadius: 6,
-                  }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
                 >
-                  <SevChip sev={f.severity} />
-                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, minWidth: 140 }}>
-                    {cveId || f.rule_id}
-                  </span>
-                  {f.cvss_score != null && (
-                    <span className="chip" style={{ fontSize: 10 }}>
-                      CVSS {f.cvss_score}
-                    </span>
-                  )}
-                  <span
+                  <div
                     style={{
-                      flex: 1,
-                      fontSize: 12,
-                      color: 'var(--fg-2)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 10px',
+                      background: 'var(--bg-elev)',
+                      border: '1px solid var(--line)',
+                      borderRadius: 6,
                     }}
                   >
-                    {f.message.split('\n')[0]}
-                  </span>
-                  {fixed && fixed !== group.recommended && (
-                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>
-                      fix: {fixed}
+                    <SevChip sev={f.severity} />
+                    <span className="mono" style={{ fontSize: 12, fontWeight: 600, minWidth: 140 }}>
+                      {cveId || f.rule_id}
                     </span>
-                  )}
-                  {f.status === 'REVOKED' ? (
-                    <span className="row-status-badge revoked">Rev</span>
-                  ) : (
+                    {f.cvss_score != null && (
+                      <span className="chip" style={{ fontSize: 10 }}>
+                        CVSS {f.cvss_score}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        flex: 1,
+                        fontSize: 12,
+                        color: 'var(--fg-2)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {f.message.split('\n')[0]}
+                    </span>
+                    {fixed && fixed !== group.recommended && (
+                      <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>
+                        fix: {fixed}
+                      </span>
+                    )}
                     <button
                       className="btn ghost sm"
                       style={{ padding: '1px 6px', fontSize: 10 }}
-                      title="Đánh dấu CVE này là false positive — lần quét sau tự bỏ qua (cần security_lead+)"
-                      disabled={flaggingId === f.id}
-                      onClick={() => onFlag(f)}
+                      title="AI gợi ý cách khắc phục CVE này (nâng cấp phiên bản)"
+                      disabled={aiLoading}
+                      onClick={() => runFix(f)}
                     >
-                      <Icon name="shield" size={11} /> {flaggingId === f.id ? '…' : 'Flag FP'}
+                      <Icon name="sparkle" size={11} /> {aiLoading ? '…' : ai ? 'AI ✓' : 'AI fix'}
                     </button>
+                    {f.status === 'REVOKED' ? (
+                      <span className="row-status-badge revoked">Rev</span>
+                    ) : (
+                      <button
+                        className="btn ghost sm"
+                        style={{ padding: '1px 6px', fontSize: 10 }}
+                        title="Đánh dấu CVE này là false positive — lần quét sau tự bỏ qua (cần security_lead+)"
+                        disabled={flaggingId === f.id}
+                        onClick={() => onFlag(f)}
+                      >
+                        <Icon name="shield" size={11} /> {flaggingId === f.id ? '…' : 'Flag FP'}
+                      </button>
+                    )}
+                  </div>
+
+                  {err && (
+                    <div style={{ fontSize: 11.5, color: 'var(--err-fg)', padding: '0 10px' }}>
+                      {err}
+                    </div>
+                  )}
+
+                  {ai && (
+                    <div
+                      className="cve-ai-fix"
+                      style={{
+                        border: '1px solid var(--line)',
+                        borderLeft: '3px solid var(--accent, #ff6a3d)',
+                        borderRadius: 6,
+                        padding: '10px 12px',
+                        background: 'var(--bg)',
+                        fontSize: 12.5,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, marginBottom: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <Icon name="sparkle" size={12} /> AI gợi ý fix
+                        <span className="chip" style={{ fontSize: 10 }}>confidence: {ai.confidence}</span>
+                      </div>
+                      <p style={{ margin: '4px 0' }}>
+                        <strong>Giải thích:</strong> {ai.explanation_vi}
+                      </p>
+                      <p style={{ margin: '4px 0' }}>
+                        <strong>Tác động:</strong> {ai.impact_vi}
+                      </p>
+                      {fixText && (
+                        <div className="code-block" style={{ marginTop: 8 }}>
+                          <div className="code-block-header">
+                            <span>Khắc phục (nâng cấp)</span>
+                            <button
+                              className="btn ghost sm"
+                              onClick={() => navigator.clipboard?.writeText(fixText)}
+                            >
+                              <Icon name="copy" size={12} /> Copy
+                            </button>
+                          </div>
+                          <pre style={{ margin: 0, padding: 12, fontSize: 12, overflowX: 'auto' }}>
+                            {fixText}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -364,7 +452,10 @@ export function PageSCA() {
 
   useEffect(() => {
     setLoading(true);
-    const params: FindingListParams = { category: 'deps', limit: PAGE_SIZE, skip: 0 };
+    const params: FindingListParams = {
+      category: 'deps', limit: PAGE_SIZE, skip: 0,
+      exclude_revoked: true, latest_run_only: true,
+    };
     // Page-level dropdown wins; otherwise fall back to the topbar selection.
     if (projectFilter !== 'all') params.project_id = projectFilter as number;
     else if (ambient.project_id !== undefined) params.project_id = ambient.project_id;

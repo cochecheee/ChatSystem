@@ -7,6 +7,11 @@
 .vscode/
 *.log
 
+# Local dev helpers (chứa secret / tạm thời — không commit)
+mcp/ngrok-v2.yml
+mcp/ngrok.yml
+revoke-test-ids.txt
+
 # Python (mcp/)
 mcp/__pycache__/
 mcp/.venv/

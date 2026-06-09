@@ -53,6 +53,7 @@ async def list_findings(
     q: str | None = None,
     run_id: int | None = None,
     exclude_revoked: bool = False,
+    latest_run_only: bool = False,
     skip: int = 0,
     limit: int = 50,
     session: AsyncSession = Depends(get_session),
@@ -89,6 +90,7 @@ async def list_findings(
         q=q,
         run_id=run_id,
         exclude_revoked=exclude_revoked,
+        latest_run_only=latest_run_only,
     )
     total = await repo.count_with_filters(**filter_kwargs)
     response.headers["X-Total-Count"] = str(total)
@@ -239,6 +241,15 @@ async def findings_gate_count(
     medium = await repo.count_with_filters(severity="medium", **common)
     low = await repo.count_with_filters(severity="low", **common)
 
+    # V3.7 — ingest signal for the CI gate. The gate calls this with the
+    # CURRENT run_id, but chat-system ingests the run asynchronously (webhook
+    # → background process_run). If the gate reads counts BEFORE ingest it sees
+    # 0/0 and would PASS for the wrong reason. `run_total` counts every finding
+    # of the run (REVOKED included); `run_ingested` lets the gate poll until the
+    # run is actually in the DB, then trust the REVOKED-excluded counts above.
+    run_total = await repo.count_with_filters(project_id=project_id, run_id=run_id)
+    run_ingested = run_total > 0
+
     # V3.6 — server-side policy decision when project_id is known.
     pass_verdict: bool | None = None
     policy: dict | None = None
@@ -267,6 +278,9 @@ async def findings_gate_count(
         "high": high,
         "medium": medium,
         "low": low,
+        # V3.7 — ingest signal (see above). Gate polls on run_ingested.
+        "run_total": run_total,
+        "run_ingested": run_ingested,
         # V3.6 additions — None when project_id missing (back-compat shape).
         "policy": policy,
         "pass": pass_verdict,
@@ -305,13 +319,20 @@ async def get_finding(
 )
 async def get_run_findings(
     run_id: int,
+    exclude_revoked: bool = False,
     session: AsyncSession = Depends(get_session),
     user: User | None = Depends(require_read_access),
 ) -> list[Finding]:
-    """Return all findings from a specific GitHub Actions workflow run.
+    """Return findings from a specific GitHub Actions workflow run.
 
     V3.7 — scoped by membership: a run's findings belong to one project, so
     a non-admin caller must be a member of that project (when RBAC is on).
+
+    `exclude_revoked=true` hides REVOKED false-positives so the dashboard's
+    latest-scan views don't resurface findings the team already triaged on a
+    previous run (Tier-1 auto-revoke re-marks them REVOKED on every re-scan).
     """
     await enforce_run_project_access(run_id, user, session)
-    return await FindingRepository(session).list_for_run(run_id)
+    return await FindingRepository(session).list_for_run(
+        run_id, exclude_revoked=exclude_revoked,
+    )

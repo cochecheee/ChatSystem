@@ -30,7 +30,9 @@ class GeminiClient:
         self._model = model or settings.GEMINI_MODEL
         self._max_retries = settings.GEMINI_MAX_RETRIES
 
-    async def analyze(self, prompt: str) -> AnalysisOutput:
+    async def analyze(self, prompt: str, system_prompt_id: str = "analyze") -> AnalysisOutput:
+        # system_prompt_id chọn system instruction: "analyze" (SAST/code) hoặc
+        # "cve" (dependency CVE — remediation là nâng cấp phiên bản).
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -42,7 +44,7 @@ class GeminiClient:
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=AnalysisOutput,
-                        system_instruction=get_registry().system_for("analyze"),
+                        system_instruction=get_registry().system_for(system_prompt_id),
                     ),
                 )
                 return AnalysisOutput.model_validate_json(response.text)

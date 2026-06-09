@@ -21,7 +21,7 @@ async def test_stats_overview_with_findings(client, db_session):
     p = Project(name="P", github_url="https://github.com/a/b")
     db_session.add(p)
     await db_session.flush()
-    a = Artifact(github_artifact_id="x", project_id=p.id, status="processed")
+    a = Artifact(github_artifact_id="x", project_id=p.id, github_run_id=1, status="processed")
     db_session.add(a)
     await db_session.flush()
 
@@ -109,6 +109,45 @@ async def test_latest_scan_returns_most_recent_run(client, db_session):
     assert body["by_severity"]["medium"] == 1
 
 
+@pytest.mark.asyncio
+async def test_overview_and_list_scope_to_latest_run(client, db_session):
+    """V3.8 — CI chạy lại nhân bản findings qua các run. Overview + list phải
+    chỉ tính run MỚI NHẤT (current-state), không cộng dồn run cũ."""
+    p = Project(name="P", github_url="https://github.com/x/z")
+    db_session.add(p)
+    await db_session.flush()
+
+    # Run cũ (flush trước → created_at sớm hơn): 1 high
+    a_old = Artifact(github_artifact_id="o", project_id=p.id, github_run_id=100, status="processed")
+    db_session.add(a_old)
+    await db_session.flush()
+    db_session.add(Finding(artifact_id=a_old.id, tool="trivy", rule_id="old", severity="high",
+                           message="m", file_path="a.py", status="pending_review"))
+    # Run mới: 1 critical + 1 medium (cùng codebase, re-scan)
+    a_new = Artifact(github_artifact_id="n", project_id=p.id, github_run_id=200, status="processed")
+    db_session.add(a_new)
+    await db_session.flush()
+    db_session.add_all([
+        Finding(artifact_id=a_new.id, tool="trivy", rule_id="new1", severity="critical",
+                message="m", file_path="b.py", status="pending_review"),
+        Finding(artifact_id=a_new.id, tool="trivy", rule_id="new2", severity="medium",
+                message="m", file_path="b.py", status="pending_review"),
+    ])
+    await db_session.commit()
+
+    # Overview: chỉ run mới nhất (200) → total 2, critical_high 1 (KHÔNG +1 high của run cũ)
+    ov = (await client.get(f"/stats/overview?project_id={p.id}")).json()
+    assert ov["total"] == 2, ov
+    assert ov["critical_high"] == 1, ov
+
+    # List: latest_run_only=true → chỉ 2 finding của run 200
+    lst = (await client.get(f"/findings?project_id={p.id}&latest_run_only=true")).json()
+    assert len(lst) == 2
+    # Không bật cờ → thấy cả 3 (lịch sử mọi run)
+    allruns = (await client.get(f"/findings?project_id={p.id}")).json()
+    assert len(allruns) == 3
+
+
 # V2.9 — multi-project filtering on /stats endpoints
 
 
@@ -120,8 +159,8 @@ async def test_stats_overview_filters_by_project_id(client, db_session):
     db_session.add_all([p1, p2])
     await db_session.flush()
 
-    a1 = Artifact(github_artifact_id="a1", project_id=p1.id, status="processed")
-    a2 = Artifact(github_artifact_id="a2", project_id=p2.id, status="processed")
+    a1 = Artifact(github_artifact_id="a1", project_id=p1.id, github_run_id=1, status="processed")
+    a2 = Artifact(github_artifact_id="a2", project_id=p2.id, github_run_id=2, status="processed")
     db_session.add_all([a1, a2])
     await db_session.flush()
 

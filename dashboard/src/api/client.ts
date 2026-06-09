@@ -40,7 +40,7 @@ function handle401(status: number) {
   if (status === 401 && _onAuthChallenge) _onAuthChallenge();
 }
 
-async function get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
+async function get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   const res = await fetch(url.toString(), { headers: authHeaders() });
@@ -57,7 +57,7 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
  */
 async function getWithTotal<T>(
   path: string,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number | boolean>
 ): Promise<{ data: T; total: number }> {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
@@ -95,6 +95,11 @@ export interface FindingListParams {
   q?: string;
   skip?: number;
   limit?: number;
+  /** Khi true → ẩn finding REVOKED (false-positive đã triage) khỏi list. */
+  exclude_revoked?: boolean;
+  /** Khi true → chỉ findings của run mới nhất mỗi project (current-state,
+   * khớp Overview; tránh nhân bản qua các lần CI chạy lại). */
+  latest_run_only?: boolean;
 }
 
 async function getRaw<T>(path: string): Promise<T> {
@@ -142,10 +147,10 @@ export interface AlertItem {
 export const api = {
   findings: {
     list: (params?: FindingListParams) =>
-      get<Finding[]>('/findings', params as Record<string, string | number>),
+      get<Finding[]>('/findings', params as Record<string, string | number | boolean>),
     /** Like list nhưng kèm X-Total-Count header → cho server-side pagination. */
     listWithTotal: (params?: FindingListParams) =>
-      getWithTotal<Finding[]>('/findings', params as Record<string, string | number>),
+      getWithTotal<Finding[]>('/findings', params as Record<string, string | number | boolean>),
     get: (id: number) => get<Finding>(`/findings/${id}`),
     explain: (id: number) => post<AnalysisResult>(`/findings/${id}/explain`),
     triage: (params: {
@@ -383,7 +388,11 @@ export const api = {
       return get<WorkflowRun[]>('/github/runs', Object.keys(params).length ? params : undefined);
     },
     artifacts: (runId: number) => get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
-    runFindings: (runId: number) => get<Finding[]>(`/github/runs/${runId}/findings`),
+    runFindings: (runId: number, excludeRevoked = false) =>
+      get<Finding[]>(
+        `/github/runs/${runId}/findings`,
+        excludeRevoked ? { exclude_revoked: true } : undefined,
+      ),
     reprocessRun: (runId: number) =>
       post<{ status: string; run_id: number; deleted_artifacts: number }>(
         `/github/runs/${runId}/reprocess`

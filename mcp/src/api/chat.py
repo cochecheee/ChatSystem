@@ -85,10 +85,13 @@ async def download_report(
             detail=f"Project {project_id} not in your memberships",
         )
 
+    # V3.8 — report phản ánh current-state (run mới nhất mỗi project) để khớp
+    # với dashboard, không cộng dồn findings của các lần CI chạy lại.
     html_content = await report_service.generate_html(
         db,
         project_id=project_id,
         severity=severity,
+        latest_run_only=True,
     )
     return Response(
         content=html_content,

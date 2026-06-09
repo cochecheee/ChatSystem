@@ -186,10 +186,14 @@ async def generate_html(
     project_name: str = "Tất cả dự án",
     project_id: int | None = None,
     severity: str | None = None,
+    latest_run_only: bool = False,
 ) -> str:
-    """Render báo cáo bảo mật chi tiết (HTML, light theme, in/PDF-friendly)."""
+    """Render báo cáo bảo mật chi tiết (HTML, light theme, in/PDF-friendly).
+
+    latest_run_only=True → report khớp dashboard (chỉ run mới nhất mỗi project).
+    """
     findings: list[Finding] = await FindingRepository(db).list_for_report(
-        project_id=project_id, severity=severity,
+        project_id=project_id, severity=severity, latest_run_only=latest_run_only,
     )
 
     # Tên project (nếu lọc theo 1 project).
@@ -202,7 +206,9 @@ async def generate_html(
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     # --- aggregations ---
-    by_sev = Counter(_sev(f) for f in findings)
+    # by_sev / KPI critical-high = ACTIVE risk (loại REVOKED false-positive),
+    # khớp với gate-count. Danh sách revoked vẫn nằm ở phụ lục riêng.
+    by_sev = Counter(_sev(f) for f in findings if f.status != "REVOKED")
     by_status = Counter(f.status for f in findings)
     by_tool = Counter(f.tool for f in findings)
     by_cat = Counter(_category(f.tool) for f in findings)

@@ -24,7 +24,15 @@ prompts:
     user: analyze.user.j2
     response_schema: AnalysisOutput     # src/services/llm/schemas.py
     temperature: null                   # let Gemini default
-    notes: Used by /findings/{id}/explain and /api/chat/command /explain.
+    notes: Used by /findings/{id}/explain and /api/chat/command /explain (SAST/code findings).
+
+  cve:
+    description: CVE / dependency (SCA) fix suggestion — upgrade-oriented remediation (Vietnamese).
+    system: cve.system.md
+    user: cve.user.j2
+    response_schema: AnalysisOutput     # same schema as analyze; remediation_diff = upgrade
+    temperature: null
+    notes: Used by /findings/{id}/explain when the finding is a dependency CVE (Trivy/Dep-Check).
 
   chat:
     description: Free-form Shiftwall chat assistant for the dashboard chat tab.

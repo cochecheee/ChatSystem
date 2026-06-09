@@ -28,8 +28,17 @@ class StatsService:
         endpoint truyền `project_ids` = các project họ thuộc → aggregate chỉ
         trong phạm vi đó thay vì toàn hệ thống.
         """
-        scope = {"project_id": project_id, "project_ids": project_ids}
-        sev = await self.findings.count_by_severity(**scope)
+        # V3.8 — current-state = run MỚI NHẤT mỗi project. latest_run_only đưa
+        # vào scope dùng chung → MỌI count dưới đây chỉ tính run mới nhất, khớp
+        # với /stats/latest-scan + trang list (hết lệch "board tổng vs list").
+        scope = {
+            "project_id": project_id, "project_ids": project_ids,
+            "latest_run_only": True,
+        }
+        # by_severity / critical_high reflect ACTIVE risk → exclude REVOKED
+        # (false-positives) so the dashboard matches the gate-count semantics.
+        # by_status keeps the full breakdown (incl REVOKED) for the status chart.
+        sev = await self.findings.count_by_severity(exclude_revoked=True, **scope)
         status = await self.findings.count_by_status(**scope)
         tool = await self.findings.count_by_tool(**scope)
         ai_analyzed = await self.findings.count_ai_analyzed(**scope)
@@ -50,17 +59,17 @@ class StatsService:
         deps_approved = await self.findings.count_with_filters(**scope, category="deps", status="APPROVED")
         deps_revoked = await self.findings.count_with_filters(**scope, category="deps", status="REVOKED")
 
-        sast_crit = await self.findings.count_with_filters(**scope, category="sast", severity="critical")
-        sast_high = await self.findings.count_with_filters(**scope, category="sast", severity="high")
-        deps_crit = await self.findings.count_with_filters(**scope, category="deps", severity="critical")
-        deps_high = await self.findings.count_with_filters(**scope, category="deps", severity="high")
+        sast_crit = await self.findings.count_with_filters(**scope, category="sast", severity="critical", exclude_revoked=True)
+        sast_high = await self.findings.count_with_filters(**scope, category="sast", severity="high", exclude_revoked=True)
+        deps_crit = await self.findings.count_with_filters(**scope, category="deps", severity="critical", exclude_revoked=True)
+        deps_high = await self.findings.count_with_filters(**scope, category="deps", severity="high", exclude_revoked=True)
 
         # DAST counts (V2.3 — OWASP ZAP runtime scan)
         dast_total = await self.findings.count_with_filters(**scope, category="dast")
         dast_approved = await self.findings.count_with_filters(**scope, category="dast", status="APPROVED")
         dast_revoked = await self.findings.count_with_filters(**scope, category="dast", status="REVOKED")
-        dast_crit = await self.findings.count_with_filters(**scope, category="dast", severity="critical")
-        dast_high = await self.findings.count_with_filters(**scope, category="dast", severity="high")
+        dast_crit = await self.findings.count_with_filters(**scope, category="dast", severity="critical", exclude_revoked=True)
+        dast_high = await self.findings.count_with_filters(**scope, category="dast", severity="high", exclude_revoked=True)
 
         return {
             "total": total,
@@ -116,14 +125,19 @@ class StatsService:
         artifacts = await self.artifacts.list_for_run(run_id)
         scanned_at = max((a.created_at for a in artifacts), default=None)
 
-        total = len(findings)
+        # Active = exclude REVOKED (false-positives) so the latest-scan KPIs
+        # match the gate. by_status still counts everything for the breakdown.
         sev: dict[str, int] = {}
         status: dict[str, int] = {}
         tool: dict[str, int] = {}
         ai = 0
+        total = 0
         for f in findings:
-            sev[f.severity] = sev.get(f.severity, 0) + 1
             status[f.status] = status.get(f.status, 0) + 1
+            if f.status == "REVOKED":
+                continue
+            total += 1
+            sev[f.severity] = sev.get(f.severity, 0) + 1
             tool[f.tool] = tool.get(f.tool, 0) + 1
             if f.ai_analysis:
                 ai += 1

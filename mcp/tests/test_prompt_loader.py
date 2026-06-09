@@ -41,7 +41,7 @@ def _assert_snapshot(name: str, content: str) -> None:
 
 def test_registry_lists_all_known_prompts():
     r = get_registry()
-    assert set(r.list_ids()) == {"analyze", "chat", "summary", "triage"}
+    assert set(r.list_ids()) == {"analyze", "cve", "chat", "summary", "triage"}
 
 
 def test_registry_unknown_prompt_raises():

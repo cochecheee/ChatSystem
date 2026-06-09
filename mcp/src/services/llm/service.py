@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +9,7 @@ from ...core.config import settings
 from ...core.guardrails import InjectionGuardrail, ScrubbingService
 from ...models.entities import Artifact, Finding, Project
 from ...models.schemas import AnalysisResult
+from ...repositories.finding_repo import DEPS_TOOLS
 from ..github_client import GitHubClient
 from .client import GeminiClient
 from .prompt_loader import get_registry
@@ -16,6 +18,45 @@ from .schemas import AnalysisOutput
 log = logging.getLogger(__name__)
 
 _CONTEXT_LINES = 15  # lines before and after the vulnerable line
+
+# Rule-id prefixes that mark a dependency/advisory finding even when the tool
+# isn't in DEPS_TOOLS (e.g. a Semgrep supply-chain rule that emits a GHSA id).
+_ADVISORY_RE = re.compile(r"^(CVE|GHSA|SNYK|PRISMA|RUSTSEC)-", re.IGNORECASE)
+
+
+def _is_dependency_finding(finding: Finding) -> bool:
+    """True khi finding là lỗ hổng thư viện phụ thuộc (SCA/CVE) — cần fix bằng
+    nâng cấp phiên bản chứ không phải sửa mã nguồn."""
+    if finding.tool in DEPS_TOOLS:
+        return True
+    return bool(_ADVISORY_RE.match(finding.rule_id or ""))
+
+
+def _dep_meta(finding: Finding) -> dict[str, str]:
+    """Trích package/version/CVE từ raw_data (chuẩn hoá khoá Trivy + Dep-Check)."""
+    d = finding.raw_data or {}
+
+    def pick(*keys: str) -> str:
+        for k in keys:
+            v = d.get(k)
+            if v:
+                return str(v)
+        return ""
+
+    cve = pick("VulnerabilityID", "vulnerability_id", "cve_id")
+    if not cve and _ADVISORY_RE.match(finding.rule_id or ""):
+        cve = finding.rule_id
+    return {
+        "pkg_name": pick("PkgName", "pkg_name", "package_name", "packageName", "component"),
+        "installed_version": pick(
+            "InstalledVersion", "installed_version", "current_version", "version",
+        ),
+        "fixed_version": pick(
+            "FixedVersion", "fixed_version", "fix_version", "patchedVersions",
+        ),
+        "manifest_path": finding.file_path or pick("PkgPath", "Target", "manifest"),
+        "cve_id": cve,
+    }
 
 
 def _extract_context(source_code: str | None, line_number: int | None) -> str:
@@ -93,58 +134,76 @@ class LLMAnalysisService:
                 settings.GEMINI_MODEL,
             )
 
-        source_code: str | None = None
-        raw = finding.raw_data or {}
-        source_code = raw.get("source_code")
+        # CVE fix suggestion: lỗ hổng phụ thuộc (SCA) không sửa bằng code —
+        # fix = nâng cấp phiên bản. Dùng prompt "cve" (gói + version) thay vì
+        # "analyze" (vốn đòi unified diff sửa mã nguồn → vô nghĩa với CVE).
+        prompt_id = "cve" if _is_dependency_finding(finding) else "analyze"
 
-        # Fetch live from GitHub if not cached and path is a real source file
-        if (
-            not source_code
-            and finding.file_path
-            and finding.file_path not in ("unknown", "")
-            and not finding.file_path.endswith((".jar", ".class", ".war", ".ear"))
-        ):
-            try:
-                fetched = await github_client.fetch_file_content(finding.file_path)
-                if fetched:
-                    # Scrub for PII/secrets before storing or passing to Gemini
-                    source_code = self._scrubber.scrub_content(fetched)
-                    raw = dict(finding.raw_data or {})
-                    raw["source_code"] = source_code
-                    finding.raw_data = raw
-                    # session.commit() at end of method persists the cache
-            except Exception as exc:
-                log.warning("Could not fetch source for finding %d: %s", finding.id, exc)
-
-        code_context = _extract_context(source_code, finding.line_number)
-
-        # Defend against indirect prompt injection: SAST finding messages and
-        # code context come from untrusted sources (open-source repos, CI
-        # tools). Reject obvious injection patterns; sanitize anything that
-        # passes (truncate, strip control chars) before it hits Gemini.
         safe_message, reason_msg = self._guardrail.check(finding.message or "")
-        safe_context, reason_ctx = self._guardrail.check(code_context)
-        if not safe_message or not safe_context:
+        if not safe_message:
             log.warning(
-                "Injection guardrail blocked finding %d: msg=%r ctx=%r",
-                finding.id, reason_msg, reason_ctx,
+                "Injection guardrail blocked finding %d: msg=%r", finding.id, reason_msg,
             )
             raise ValueError("Finding content rejected by injection guardrail")
 
-        rendered = get_registry().render(
-            "analyze",
-            tool_name=finding.tool,
-            rule_id=finding.rule_id,
-            message=self._guardrail.sanitize(finding.message or ""),
-            file_path=finding.file_path,
-            line_number=finding.line_number,
-            cwe_id=finding.cwe_id,
-            cvss_score=finding.cvss_score,
-            code_context=self._guardrail.sanitize(code_context),
-        )
+        if prompt_id == "cve":
+            meta = _dep_meta(finding)
+            rendered = get_registry().render(
+                "cve",
+                tool_name=finding.tool,
+                rule_id=finding.rule_id,
+                message=self._guardrail.sanitize(finding.message or ""),
+                cvss_score=finding.cvss_score,
+                **meta,
+            )
+        else:
+            source_code = (finding.raw_data or {}).get("source_code")
+
+            # Fetch live from GitHub if not cached and path is a real source file
+            if (
+                not source_code
+                and finding.file_path
+                and finding.file_path not in ("unknown", "")
+                and not finding.file_path.endswith((".jar", ".class", ".war", ".ear"))
+            ):
+                try:
+                    fetched = await github_client.fetch_file_content(finding.file_path)
+                    if fetched:
+                        # Scrub for PII/secrets before storing or passing to Gemini
+                        source_code = self._scrubber.scrub_content(fetched)
+                        raw = dict(finding.raw_data or {})
+                        raw["source_code"] = source_code
+                        finding.raw_data = raw
+                        # session.commit() at end of method persists the cache
+                except Exception as exc:
+                    log.warning("Could not fetch source for finding %d: %s", finding.id, exc)
+
+            code_context = _extract_context(source_code, finding.line_number)
+
+            # Defend against indirect prompt injection: code context comes from
+            # untrusted sources (open-source repos). Reject obvious injection.
+            safe_context, reason_ctx = self._guardrail.check(code_context)
+            if not safe_context:
+                log.warning(
+                    "Injection guardrail blocked finding %d: ctx=%r", finding.id, reason_ctx,
+                )
+                raise ValueError("Finding content rejected by injection guardrail")
+
+            rendered = get_registry().render(
+                "analyze",
+                tool_name=finding.tool,
+                rule_id=finding.rule_id,
+                message=self._guardrail.sanitize(finding.message or ""),
+                file_path=finding.file_path,
+                line_number=finding.line_number,
+                cwe_id=finding.cwe_id,
+                cvss_score=finding.cvss_score,
+                code_context=self._guardrail.sanitize(code_context),
+            )
+
         prompt = rendered.user or ""
 
-        output: AnalysisOutput = await gemini.analyze(prompt)
+        output: AnalysisOutput = await gemini.analyze(prompt, system_prompt_id=prompt_id)
 
         result = AnalysisResult(
             finding_id=finding.id,

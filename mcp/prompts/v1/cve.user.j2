@@ -1,0 +1,12 @@
+### Thông tin lỗ hổng phụ thuộc (SCA)
+- Công cụ: {{ tool_name }}
+- CVE / Advisory: {{ cve_id or rule_id }}
+- Gói (package): {{ pkg_name or "N/A" }}
+- Phiên bản đang dùng: {{ installed_version or "N/A" }}
+- Phiên bản đã vá (fixed): {{ fixed_version or "chưa có / không rõ" }}
+- Manifest / vị trí: {{ manifest_path or "N/A" }}
+- CVSS Score: {{ cvss_score or "N/A" }}
+- Mô tả: {{ message }}
+
+Hãy phân tích lỗ hổng phụ thuộc trên và trả về kết quả theo JSON schema đã định nghĩa.
+Lưu ý: remediation_diff phải là hướng NÂNG CẤP phiên bản (diff manifest hoặc lệnh package-manager), không phải sửa mã nguồn dự án.
