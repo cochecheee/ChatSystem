@@ -31,6 +31,7 @@ async def seeded_finding(client):
         artifact = Artifact(
             github_artifact_id="mcp-test-art",
             project_id=project.id,
+            github_run_id=1,
             status="processed",
         )
         session.add(artifact)

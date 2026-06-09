@@ -124,12 +124,12 @@ async def test_stats_overview_global_scoped_to_memberships(client, db_session):
         "name": "B", "github_url": "https://github.com/t/b2"})).json()
     from src.models.entities import Artifact, Finding
 
-    arta = Artifact(github_artifact_id="aa", project_id=a["id"], status="processed")
+    arta = Artifact(github_artifact_id="aa", project_id=a["id"], github_run_id=1, status="processed")
     db_session.add(arta)
     await db_session.flush()
     db_session.add(Finding(artifact_id=arta.id, tool="t", rule_id="r",
                            severity="high", message="m", file_path="f"))
-    artb = Artifact(github_artifact_id="bb", project_id=b["id"], status="processed")
+    artb = Artifact(github_artifact_id="bb", project_id=b["id"], github_run_id=2, status="processed")
     db_session.add(artb)
     await db_session.flush()
     db_session.add(Finding(artifact_id=artb.id, tool="t", rule_id="r",

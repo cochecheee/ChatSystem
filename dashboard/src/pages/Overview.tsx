@@ -90,7 +90,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
     }
     setLoadingFindings(true);
     api.github
-      .runFindings(latestStats.run_id)
+      .runFindings(latestStats.run_id, true) // exclude REVOKED — đã triage thì không hiện lại
       .then((f) => {
         setLatestFindings(f);
         setLoadingFindings(false);
@@ -122,7 +122,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
     : 0;
 
   const recentCritHigh = latestFindings
-    .filter((f) => f.severity === 'critical' || f.severity === 'high')
+    .filter((f) => (f.severity === 'critical' || f.severity === 'high') && f.status !== 'REVOKED')
     .sort((a, b) => {
       if (a.severity !== b.severity) return a.severity === 'critical' ? -1 : 1;
       return b.id - a.id;

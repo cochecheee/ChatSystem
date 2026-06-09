@@ -196,7 +196,13 @@ class SummaryService:
         from sqlalchemy import select
         repo = FindingRepository(session)
 
-        common = dict(project_id=project_id, run_id=run_id, project_ids=project_ids)
+        # V3.8 — khi không chỉ định run cụ thể → current-state = run MỚI NHẤT
+        # mỗi project (khớp Overview latest-scan; hết phồng do cộng dồn nhiều run).
+        latest_run_only = run_id is None
+        common = dict(
+            project_id=project_id, run_id=run_id, project_ids=project_ids,
+            latest_run_only=latest_run_only,
+        )
         # V3.4 BUG-2 — switch primary numbers to ACTIVE (exclude REVOKED).
         # Revoked findings are developer-triaged false positives; reporting
         # them as outstanding work confuses the briefing. We still expose
@@ -215,7 +221,7 @@ class SummaryService:
         # (V3.4 BUG-3 — ALOUTE returned 5 snakeyaml CVEs in a row).
         pool = await repo.list_with_filters(
             project_id=project_id, run_id=run_id, project_ids=project_ids,
-            exclude_revoked=True, limit=50, skip=0,
+            exclude_revoked=True, latest_run_only=latest_run_only, limit=50, skip=0,
         )
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         pool.sort(key=lambda f: (sev_order.get(f.severity, 9), -f.id))

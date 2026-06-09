@@ -23,7 +23,7 @@ export function PageRuntime() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const findingParams: any = { category: 'dast', limit: 200 };
+    const findingParams: any = { category: 'dast', limit: 200, exclude_revoked: true, latest_run_only: true };
     if (project_id !== undefined) findingParams.project_id = project_id;
     Promise.all([
       api.findings.list(findingParams),

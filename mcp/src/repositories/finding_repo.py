@@ -49,6 +49,7 @@ class FindingRepository:
         q: str | None = None,
         run_id: int | None = None,
         exclude_revoked: bool = False,
+        latest_run_only: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> list[Finding]:
@@ -57,6 +58,9 @@ class FindingRepository:
         project_ids (V3.3): khi non-None, restrict to that set — used by the
         RBAC layer to enforce membership-scoped reads. Empty list → empty
         result (user authed but no memberships).
+
+        latest_run_only (V3.8): chỉ findings của run mới nhất mỗi project —
+        current-state, tránh nhân bản qua các lần CI chạy lại.
         """
         # V3.2 SMELL-6: eager-load Artifact so FindingOut.project_id resolves
         # without triggering an async lazy load during serialization.
@@ -67,6 +71,10 @@ class FindingRepository:
             if not project_ids:
                 return []
             query = query.where(Artifact.project_id.in_(project_ids))
+        if latest_run_only:
+            query = query.where(
+                Artifact.github_run_id.in_(self._latest_run_ids(project_id, project_ids))
+            )
         if run_id is not None:
             query = query.where(Artifact.github_run_id == run_id)
         if severity is not None:
@@ -101,8 +109,16 @@ class FindingRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def list_for_run(self, run_id: int) -> list[Finding]:
-        """Tất cả findings từ artifacts của 1 GitHub run, sorted by severity + rule."""
+    async def list_for_run(
+        self, run_id: int, *, exclude_revoked: bool = False,
+    ) -> list[Finding]:
+        """Tất cả findings từ artifacts của 1 GitHub run, sorted by severity + rule.
+
+        `exclude_revoked=True` bỏ finding REVOKED — dùng cho các view "latest
+        scan" để FP đã triage không hiện lại sau mỗi lần re-scan. Callers cần
+        full breakdown theo status (vd stats_service.latest_scan) để mặc định
+        False rồi tự nhóm.
+        """
         artifact_result = await self.session.execute(
             select(Artifact).where(Artifact.github_run_id == run_id)
         )
@@ -110,18 +126,25 @@ class FindingRepository:
         if not artifacts:
             return []
         artifact_ids = [a.id for a in artifacts]
-        finding_result = await self.session.execute(
+        query = (
             select(Finding)
             .where(Finding.artifact_id.in_(artifact_ids))
             .order_by(Finding.severity, Finding.rule_id)
         )
+        if exclude_revoked:
+            query = query.where(Finding.status != "REVOKED")
+        finding_result = await self.session.execute(query)
         return list(finding_result.scalars().all())
 
     async def list_recent_critical(self, limit: int = 5) -> list[Finding]:
-        """Recent critical/high findings — dùng cho chat context."""
+        """Recent critical/high findings — dùng cho chat context.
+
+        Bỏ REVOKED: AI không nên trích dẫn finding đã bị triage là false-positive.
+        """
         result = await self.session.execute(
             select(Finding)
             .where(Finding.severity.in_(["critical", "high"]))
+            .where(Finding.status != "REVOKED")
             .order_by(Finding.id.desc())
             .limit(limit)
         )
@@ -132,17 +155,29 @@ class FindingRepository:
         *,
         project_id: int | None = None,
         severity: str | None = None,
+        latest_run_only: bool = False,
     ) -> list[Finding]:
         """Findings cho HTML report — không pagination.
 
         Eager-load Artifact để report đọc được github_run_id / project_id
         mà không trigger lazy-load (async) khi render.
+
+        latest_run_only (V3.8): report phản ánh current-state = run mới nhất
+        mỗi project (khớp dashboard; không cộng dồn các lần CI chạy lại).
         """
         query = select(Finding).options(selectinload(Finding.artifact))
+        joined = False
         if project_id is not None:
             query = query.join(Artifact).where(Artifact.project_id == project_id)
+            joined = True
         if severity is not None:
             query = query.where(Finding.severity == severity)
+        if latest_run_only:
+            if not joined:
+                query = query.join(Artifact)
+            query = query.where(
+                Artifact.github_run_id.in_(self._latest_run_ids(project_id, None))
+            )
         query = query.order_by(Finding.id.desc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -164,6 +199,7 @@ class FindingRepository:
         q: str | None = None,
         run_id: int | None = None,
         exclude_revoked: bool = False,
+        latest_run_only: bool = False,
     ) -> int:
         """Count rows match filter — dùng cho pagination total + stats."""
         query = select(sql_func.count(Finding.id)).select_from(Finding).join(Artifact)
@@ -173,6 +209,10 @@ class FindingRepository:
             if not project_ids:
                 return 0
             query = query.where(Artifact.project_id.in_(project_ids))
+        if latest_run_only:
+            query = query.where(
+                Artifact.github_run_id.in_(self._latest_run_ids(project_id, project_ids))
+            )
         if run_id is not None:
             query = query.where(Artifact.github_run_id == run_id)
         if severity is not None:
@@ -206,52 +246,123 @@ class FindingRepository:
         return int(result.scalar_one() or 0)
 
     @staticmethod
-    def _scope(query, project_id: int | None, project_ids: list[int] | None):
+    def _latest_run_ids(project_id: int | None, project_ids: list[int] | None):
+        """Subquery → github_run_id của run MỚI NHẤT (theo Artifact.created_at,
+        trong số run CÓ findings) cho TỪNG project trong scope.
+
+        Cốt lõi của nguyên tắc "dashboard = current state = lần quét gần nhất":
+        mỗi lần CI chạy lại tạo bộ Finding mới, nên current-state chỉ lấy run
+        mới nhất từng project (tránh cộng dồn/nhân bản qua các run cũ).
+
+        Portable (không dùng window function — chạy cả MariaDB 10.4 + Postgres):
+        gom max(created_at) theo (project, run) → lấy run có created_at lớn nhất
+        mỗi project. github_run_id là duy nhất theo repo nên IN không lẫn project.
+        """
+        run_times = (
+            select(
+                Artifact.project_id.label("pid"),
+                Artifact.github_run_id.label("rid"),
+                sql_func.max(Artifact.created_at).label("t"),
+            )
+            .join(Finding, Finding.artifact_id == Artifact.id)
+            .where(Artifact.github_run_id.is_not(None))
+        )
+        if project_id is not None:
+            run_times = run_times.where(Artifact.project_id == project_id)
+        elif project_ids is not None:
+            run_times = run_times.where(
+                Artifact.project_id.in_(project_ids) if project_ids else sql_false()
+            )
+        run_times = run_times.group_by(
+            Artifact.project_id, Artifact.github_run_id,
+        ).subquery()
+        proj_latest = (
+            select(run_times.c.pid, sql_func.max(run_times.c.t).label("tmax"))
+            .group_by(run_times.c.pid)
+            .subquery()
+        )
+        return (
+            select(run_times.c.rid).join(
+                proj_latest,
+                (run_times.c.pid == proj_latest.c.pid)
+                & (run_times.c.t == proj_latest.c.tmax),
+            )
+        )
+
+    @staticmethod
+    def _scope(
+        query, project_id: int | None, project_ids: list[int] | None,
+        latest_run_only: bool = False,
+    ):
         """Apply project scoping. project_id wins; project_ids restricts to a
         set (V3.7 — used to scope global stats to a member's projects). Empty
         project_ids → match nothing (authenticated user with zero memberships).
+
+        latest_run_only (V3.8): chỉ tính findings của run mới nhất mỗi project
+        → current-state nhất quán với Overview latest-scan.
         """
+        joined = False
         if project_id is not None:
-            return query.join(Artifact).where(Artifact.project_id == project_id)
-        if project_ids is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+            joined = True
+        elif project_ids is not None:
             if not project_ids:
                 return query.join(Artifact).where(sql_false())
-            return query.join(Artifact).where(Artifact.project_id.in_(project_ids))
+            query = query.join(Artifact).where(Artifact.project_id.in_(project_ids))
+            joined = True
+        if latest_run_only:
+            if not joined:
+                query = query.join(Artifact)
+            query = query.where(
+                Artifact.github_run_id.in_(
+                    FindingRepository._latest_run_ids(project_id, project_ids)
+                )
+            )
         return query
 
     async def count_by_severity(
         self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+        exclude_revoked: bool = False, latest_run_only: bool = False,
     ) -> dict[str, int]:
         query = self._scope(
-            select(Finding.severity, sql_func.count(Finding.id)), project_id, project_ids,
-        ).group_by(Finding.severity)
+            select(Finding.severity, sql_func.count(Finding.id)),
+            project_id, project_ids, latest_run_only,
+        )
+        if exclude_revoked:
+            query = query.where(Finding.status != "REVOKED")
+        query = query.group_by(Finding.severity)
         result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
     async def count_by_status(
         self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+        latest_run_only: bool = False,
     ) -> dict[str, int]:
         query = self._scope(
-            select(Finding.status, sql_func.count(Finding.id)), project_id, project_ids,
+            select(Finding.status, sql_func.count(Finding.id)),
+            project_id, project_ids, latest_run_only,
         ).group_by(Finding.status)
         result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
     async def count_by_tool(
         self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+        latest_run_only: bool = False,
     ) -> dict[str, int]:
         query = self._scope(
-            select(Finding.tool, sql_func.count(Finding.id)), project_id, project_ids,
+            select(Finding.tool, sql_func.count(Finding.id)),
+            project_id, project_ids, latest_run_only,
         ).group_by(Finding.tool)
         result = await self.session.execute(query)
         return {row[0]: int(row[1]) for row in result.all()}
 
     async def count_ai_analyzed(
         self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+        latest_run_only: bool = False,
     ) -> int:
         query = self._scope(
             select(sql_func.count(Finding.id)).where(Finding.ai_analysis.is_not(None)),
-            project_id, project_ids,
+            project_id, project_ids, latest_run_only,
         )
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
@@ -294,7 +405,10 @@ class FindingRepository:
 
     async def count_total(
         self, *, project_id: int | None = None, project_ids: list[int] | None = None,
+        latest_run_only: bool = False,
     ) -> int:
-        query = self._scope(select(sql_func.count(Finding.id)), project_id, project_ids)
+        query = self._scope(
+            select(sql_func.count(Finding.id)), project_id, project_ids, latest_run_only,
+        )
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)

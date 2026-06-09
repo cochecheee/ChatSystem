@@ -44,6 +44,7 @@ export function useVulnsFindings(initialId?: number) {
       limit: PAGE_SIZE,
       skip: page * PAGE_SIZE,
       category: 'sast',
+      latest_run_only: true, // current-state: chỉ run mới nhất (khớp Overview)
       ...override,
     };
     if (projectFilter !== 'all') params.project_id = projectFilter as number;
@@ -58,6 +59,10 @@ export function useVulnsFindings(initialId?: number) {
         revoked: 'REVOKED',
       };
       if (map[statusFilter]) params.status = map[statusFilter];
+    } else {
+      // Default view hides REVOKED false-positives — user đã triage thì
+      // không hiện lại ở run sau. Muốn xem lại thì chọn filter "Revoked".
+      params.exclude_revoked = true;
     }
     if (search.trim()) params.q = search.trim();
     return params;
