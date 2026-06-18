@@ -65,12 +65,6 @@ export function PageVulns({ initialId }: { initialId?: number }) {
     }
   };
 
-  // Total SAST findings từ server stats (across all severity/status filter).
-  let sastTotal = 0;
-  for (const [tool, count] of Object.entries(stats?.by_tool ?? {})) {
-    if (!DEP_SCAN_TOOLS.has(tool.toLowerCase())) sastTotal += count;
-  }
-
   // Tools dropdown: chỉ SAST tools.
   const tools = Object.keys(stats?.by_tool ?? {})
     .filter((t) => !DEP_SCAN_TOOLS.has(t.toLowerCase()))
@@ -116,7 +110,7 @@ export function PageVulns({ initialId }: { initialId?: number }) {
               SAST findings
             </h2>
             <span className="muted" style={{ fontSize: 12 }}>
-              {stats == null ? '…' : `${sastTotal} total`}
+              {loading && findings.length === 0 ? '…' : `${total} total`}
             </span>
             <div style={{ flex: 1 }} />
             <button

@@ -608,13 +608,34 @@ async def delete_project(
     project_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Xoá project + cascade delete artifacts/findings.
+    """Xoá project + cascade toàn bộ dữ liệu con.
 
-    Hard delete — kept for admin-only / cleanup scripts (no auth gate here
-    because legacy test suite + cleanup tooling rely on the unauthenticated
-    contract). Prefer POST /projects/{id}/archive (V3.6 soft delete) for
-    normal "remove this project" flows.
+    Hard delete. Xoá theo thứ tự FK-safe MỌI bảng tham chiếu projects.id
+    (findings -> artifacts -> pipeline_runs -> webhook_deliveries ->
+    suppression_rules -> project_members -> uptime_checks -> alerts) trước
+    khi xoá project. `audit_log` dùng ON DELETE SET NULL nên DB tự xử lý
+    (giữ lại log lịch sử).
+
+    Trước đây handler chỉ xoá findings + artifacts -> vướng FK của
+    pipeline_runs / webhook_deliveries / project_members trên MySQL (InnoDB)
+    -> HTTP 500. Nay xoá đủ con nên DELETE chạy được trên cả MySQL lẫn
+    Postgres. Flow "remove" thông thường vẫn nên dùng POST .../archive
+    (V3.6 soft delete) để giữ dữ liệu cho trend/audit.
+
+    Không gate auth ở đây vì test suite + cleanup tooling legacy dựa vào
+    contract unauthenticated.
     """
+    from sqlalchemy import delete as _delete
+
+    from ..models.entities import (
+        Alert,
+        PipelineRun,
+        ProjectMember,
+        SuppressionRule,
+        UptimeCheck,
+        WebhookDelivery,
+    )
+
     project_repo = ProjectRepository(session)
     artifact_repo = ArtifactRepository(session)
     finding_repo = FindingRepository(session)
@@ -625,7 +646,19 @@ async def delete_project(
 
     artifacts = await artifact_repo.list_for_project(project_id)
     artifact_ids = [a.id for a in artifacts]
+    # Con trước, cha sau — tránh vi phạm khoá ngoại trên InnoDB.
     await finding_repo.delete_by_artifact_ids(artifact_ids)
     await artifact_repo.delete_by_ids(artifact_ids)
-    await project_repo.delete(project)
+    for _model in (
+        PipelineRun,
+        WebhookDelivery,
+        SuppressionRule,
+        ProjectMember,
+        UptimeCheck,
+        Alert,
+    ):
+        await session.execute(
+            _delete(_model).where(_model.project_id == project_id),
+        )
+    await project_repo.delete(project)  # commit cuối -> 1 transaction
     return Response(status_code=204)

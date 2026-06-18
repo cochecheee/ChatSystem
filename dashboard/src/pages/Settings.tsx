@@ -106,17 +106,44 @@ const AI_TOGGLES: {
   },
 ];
 
+// Tách owner/repo từ URL GitHub để wire multi-tenant đúng. Chấp nhận cả
+// https://github.com/owner/repo(.git)(/), git@github.com:owner/repo.git.
+function parseGitHubRepo(url: string): { owner: string; repo: string } | null {
+  const m = url
+    .trim()
+    .match(/github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2] };
+}
+
 function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
+  const [gemini, setGemini] = useState('');
   const [staging, setStaging] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
 
+  // Hiển thị owner/repo suy ra từ URL để người dùng kiểm tra trước khi lưu.
+  const parsed = parseGitHubRepo(url);
+
   const handleSubmit = async () => {
     if (!name.trim() || !url.trim()) {
       setError('Điền đầy đủ tên và GitHub URL');
+      return;
+    }
+    const repo = parseGitHubRepo(url);
+    if (!repo) {
+      setError('GitHub URL không hợp lệ — cần dạng https://github.com/owner/repo');
+      return;
+    }
+    if (!token.trim()) {
+      setError(
+        'Cần GitHub token (PAT có quyền actions:read + contents:read) để kéo SARIF ' +
+          'của repo này; thiếu token MCP sẽ rớt về repo trong .env và ingest 0 finding.',
+      );
       return;
     }
     setLoading(true);
@@ -125,11 +152,17 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
       const p = await api.projects.create({
         name: name.trim(),
         github_url: url.trim(),
+        github_owner: repo.owner,
+        github_repo: repo.repo,
+        github_token: token.trim(),
+        gemini_api_key: gemini.trim() || undefined,
         staging_url: staging.trim() || undefined,
       });
       onAdded(p);
       setName('');
       setUrl('');
+      setToken('');
+      setGemini('');
       setStaging('');
       setOpen(false);
     } catch (e) {
@@ -181,9 +214,47 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
         placeholder="https://github.com/owner/repo"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') handleSubmit();
+      />
+      {url.trim() && (
+        <div style={{ fontSize: 11, color: parsed ? 'var(--fg-3)' : 'var(--danger)', paddingLeft: 2 }}>
+          {parsed
+            ? `→ owner: ${parsed.owner}  ·  repo: ${parsed.repo}`
+            : 'URL chưa hợp lệ — cần dạng https://github.com/owner/repo'}
+        </div>
+      )}
+      <input
+        className="mono"
+        type="password"
+        autoComplete="off"
+        style={{
+          padding: '6px 10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          color: 'var(--fg)',
+          fontSize: 12,
+          outline: 'none',
         }}
+        placeholder="GitHub token (ghp_…) — bắt buộc, quyền actions:read + contents:read"
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+      />
+      <input
+        className="mono"
+        type="password"
+        autoComplete="off"
+        style={{
+          padding: '6px 10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          color: 'var(--fg)',
+          fontSize: 12,
+          outline: 'none',
+        }}
+        placeholder="Gemini API key (tuỳ chọn) — bỏ trống dùng key trong .env"
+        value={gemini}
+        onChange={(e) => setGemini(e.target.value)}
       />
       <input
         className="mono"
