@@ -82,7 +82,7 @@ async def test_per_project_token_routes_to_owning_project(client, project, db_se
     # Create a second project B
     resp_b = await client.post("/projects", json={
         "name": "Project B", "github_url": "https://github.com/other/repo-b",
-    })
+    }, headers=_admin_headers())
     assert resp_b.status_code == 201
     pid_b = resp_b.json()["id"]
 
@@ -105,8 +105,12 @@ async def test_per_project_token_routes_to_owning_project(client, project, db_se
 
 @pytest.mark.asyncio
 async def test_unknown_token_rejected_when_no_legacy(client, project):
-    """Random token with no legacy global set → 403."""
-    # Make sure legacy global is empty
+    """Random token with no legacy global set → 403.
+
+    V3.8 fail-closed: previously, an empty CI_WEBHOOK_TOKEN let an unknown
+    token fall through to acceptance (the fail-open bug). Now any delivery
+    that matches no HMAC / per-project / global auth is rejected.
+    """
     with patch("src.core.config.settings.CI_WEBHOOK_TOKEN", ""):
         # Still rotate one project so the find_by_webhook_token path runs
         await client.post(f"/projects/{project['id']}/webhook/rotate",
@@ -117,12 +121,7 @@ async def test_unknown_token_rejected_when_no_legacy(client, project):
             json={"run_id": 1, "repository": "any/repo"},
             headers={"Authorization": "Bearer wrong-token-xyz"},
         )
-    # Dev mode (legacy empty) accepts unknown tokens — that's the legacy
-    # behavior we documented. The strict fix only kicks in when at least
-    # one of the two tokens is set. With CI_WEBHOOK_TOKEN empty and the
-    # incoming token not matching any project, we fall through to the
-    # legacy "no auth required" path. Accept this as documented behavior.
-    assert resp.status_code in (202, 403)
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

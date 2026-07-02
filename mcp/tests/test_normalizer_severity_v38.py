@@ -11,7 +11,7 @@ to `info`, using SARIF shapes verified against live CodeQL/Semgrep output:
   3. An unresolved level must default to `medium`, never `info`.
 Plus CWE parsing for Semgrep's "CWE-89: ..." tag format.
 """
-from src.services.normalizer import SarifNormalizer
+from src.services.normalizers import SarifNormalizer
 
 
 def _norm(sarif: dict) -> list:

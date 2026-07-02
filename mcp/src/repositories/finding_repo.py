@@ -199,9 +199,15 @@ class FindingRepository:
         q: str | None = None,
         run_id: int | None = None,
         exclude_revoked: bool = False,
+        exclude_approved: bool = False,
         latest_run_only: bool = False,
     ) -> int:
-        """Count rows match filter — dùng cho pagination total + stats."""
+        """Count rows match filter — dùng cho pagination total + stats.
+
+        exclude_approved (§4.2.3): loại finding APPROVED khỏi count. Dùng cho
+        Security Gate — /approve là "chấp nhận rủi ro có kiểm toán" nên finding
+        đã APPROVED không còn chặn PR merge (giống REVOKED = false-positive).
+        """
         query = select(sql_func.count(Finding.id)).select_from(Finding).join(Artifact)
         if project_id is not None:
             query = query.where(Artifact.project_id == project_id)
@@ -223,6 +229,8 @@ class FindingRepository:
             query = query.where(Finding.status == status)
         if exclude_revoked:
             query = query.where(Finding.status != "REVOKED")
+        if exclude_approved:
+            query = query.where(Finding.status != "APPROVED")
         if category is not None:
             cat = category.lower()
             if cat == "deps":

@@ -2,33 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { Icon } from '../../components/Icon';
 import { RevokeDialog } from '../../components/modals/RevokeDialog';
+import { ApprovalDialog } from '../../components/modals/ApprovalDialog';
 import type { AnalysisResult, Finding } from '../../types';
+import { pkgMeta } from '../../lib/cveUtils';
 import { SevChip, isDepScan } from './sast';
-
-// Extract package metadata from raw_data (field names vary by tool)
-function pkgMeta(f: Finding) {
-  const d = f.raw_data ?? {};
-  const name = (d.PkgName ??
-    d.pkg_name ??
-    d.package_name ??
-    d.packageName ??
-    d.component ??
-    '') as string;
-  const current = (d.InstalledVersion ??
-    d.installed_version ??
-    d.current_version ??
-    d.version ??
-    '') as string;
-  const fixed = (d.FixedVersion ??
-    d.fixed_version ??
-    d.fix_version ??
-    d.patchedVersions ??
-    '') as string;
-  const cveId =
-    ((d.VulnerabilityID ?? d.vulnerability_id ?? '') as string) ||
-    (f.rule_id.match(/^(CVE|GHSA|PRISMA|SNYK)-/i) ? f.rule_id : '');
-  return { name, current, fixed, cveId };
-}
 
 function DiffView({ diff }: { diff: string }) {
   const lines = diff.split('\n');
@@ -97,12 +74,23 @@ function CveUpdateCard({ finding }: { finding: Finding }) {
   );
 }
 
-function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }) {
+function AiPanel({
+  finding,
+  onClose,
+  onChanged,
+}: {
+  finding: Finding;
+  onClose: () => void;
+  onChanged?: () => void;
+}) {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
+  // ChatOps trong panel: /approve và /revoke cần justification nên mở dialog.
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -128,9 +116,76 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
     }
   };
 
+  // ChatOps confirm cho /approve và /revoke (security_lead+). Mặc định áp dụng
+  // cho chính finding đang mở. Báo lỗi (vd 403 RBAC) lại cho dialog để giữ mở.
+  const handleApprove = async (justification: string) => {
+    try {
+      const res = await api.chat.command({
+        command: '/approve',
+        finding_id: finding.id,
+        justification,
+      });
+      setMessages((m) => [...m, { role: 'ai', text: res.message }]);
+      onChanged?.();
+    } catch (e) {
+      setMessages((m) => [...m, { role: 'ai', text: `Lỗi: ${e}` }]);
+      throw e;
+    }
+  };
+
+  const handleRevoke = async (justification: string) => {
+    try {
+      const res = await api.chat.command({
+        command: '/revoke',
+        finding_id: finding.id,
+        justification,
+      });
+      setMessages((m) => [...m, { role: 'ai', text: res.message }]);
+      onChanged?.();
+    } catch (e) {
+      setMessages((m) => [...m, { role: 'ai', text: `Lỗi: ${e}` }]);
+      throw e;
+    }
+  };
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text) return;
+
+    // Slash command? Thực thi qua ChatOps thay vì gửi tới LLM như văn bản.
+    // (Trước đây mọi input đều rơi vào api.chat.message nên /approve bị "nuốt".)
+    if (text.startsWith('/')) {
+      const parts = text.slice(1).split(/\s+/);
+      const cmd = parts[0].toLowerCase();
+      setInput('');
+
+      if (cmd === 'approve') {
+        setApprovalOpen(true);
+        return;
+      }
+      if (cmd === 'revoke') {
+        setRevokeOpen(true);
+        return;
+      }
+      if (cmd === 'explain') {
+        await runAnalysis();
+        return;
+      }
+
+      // Các lệnh còn lại (fix, scan, rerun, report, status, results, help…)
+      // gắn ngữ cảnh finding hiện tại.
+      const argId = parseInt(parts[1]);
+      const fid = Number.isNaN(argId) ? finding.id : argId;
+      setMessages((m) => [...m, { role: 'user', text }]);
+      try {
+        const res = await api.chat.command({ command: `/${cmd}`, finding_id: fid });
+        setMessages((m) => [...m, { role: 'ai', text: res.message || 'OK' }]);
+      } catch (e) {
+        setMessages((m) => [...m, { role: 'ai', text: `Lỗi: ${e}` }]);
+      }
+      return;
+    }
+
     setMessages((m) => [...m, { role: 'user', text }]);
     setInput('');
     try {
@@ -274,7 +329,7 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
 
       <div style={{ padding: '0 14px 6px', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {['/explain', '/fix', '/scan'].map((cmd) => (
+          {['/explain', '/fix', '/approve', '/revoke', '/scan'].map((cmd) => (
             <span key={cmd} className="suggestion-chip" onClick={() => setInput(cmd)}>
               {cmd}
             </span>
@@ -305,6 +360,19 @@ function AiPanel({ finding, onClose }: { finding: Finding; onClose: () => void }
           </div>
         </div>
       </div>
+
+      <ApprovalDialog
+        open={approvalOpen}
+        findingId={finding.id}
+        onClose={() => setApprovalOpen(false)}
+        onConfirm={handleApprove}
+      />
+      <RevokeDialog
+        open={revokeOpen}
+        findingId={finding.id}
+        onClose={() => setRevokeOpen(false)}
+        onConfirm={handleRevoke}
+      />
     </div>
   );
 }
@@ -729,7 +797,7 @@ export function FindingDetail({
         </div>
       </div>
 
-      {showAI && <AiPanel finding={finding} onClose={onToggleAI} />}
+      {showAI && <AiPanel finding={finding} onClose={onToggleAI} onChanged={onRevoked} />}
     </div>
   );
 }

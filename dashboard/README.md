@@ -46,7 +46,7 @@ src/
 ├── components/    # Component dùng chung (Badge, Icon, OverviewAiSummary, ...)
 ├── contexts/      # React Context (AuthContext, ProjectContext)
 ├── features/      # Domain feature (auth, findings, pipelines, config)
-├── hooks/         # Custom hook (usePolling, useAsyncAction, useRuns, useStats)
+├── hooks/         # Custom hook (usePolling, useResizableSplit)
 ├── lib/           # Constants
 ├── pages/         # Top-level page component (Overview, Vulns, Pipelines, ...)
 ├── types/         # Shared type

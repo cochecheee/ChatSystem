@@ -1,7 +1,7 @@
 import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, Text
 
 # Timezone-aware DateTime singleton — passed to every `mapped_column(DT_TZ, ...)`
 # so Postgres column type is TIMESTAMP WITH TIME ZONE. asyncpg refuses to
@@ -125,6 +125,14 @@ class Finding(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     artifact_id: Mapped[int] = mapped_column(Integer, ForeignKey("artifacts.id"), nullable=False)
+    # V3.8 §4.4.1 Stage 4 — denormalized project_id (backfilled from the owning
+    # artifact at ingest) so the report's composite indexes (project_id, status,
+    # severity) and (dedup_hash, project_id) are real column-level indexes, not a
+    # runtime join. Nullable so rows created before ingest-time backfill still
+    # insert; SecurityProcessor always sets it for real findings.
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=True,
+    )
     tool: Mapped[str] = mapped_column(String(100), nullable=False)
     rule_id: Mapped[str] = mapped_column(String(255), nullable=False)
     severity: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -135,7 +143,7 @@ class Finding(Base):
     normalized_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
     cwe_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cvss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    dedup_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    dedup_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="pending_review", nullable=False)
     ai_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
@@ -151,17 +159,13 @@ class Finding(Base):
 
     artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="findings")
 
-    @property
-    def project_id(self) -> int | None:
-        """Pydantic FindingOut reads this for V3.2 SMELL-6 — surface the
-        finding's owning project without forcing every caller to do a
-        Finding -> Artifact -> Project join in their head. Returns None if
-        the artifact relationship isn't loaded (lazy access in async code
-        would otherwise raise MissingGreenlet)."""
-        try:
-            return self.artifact.project_id if self.artifact else None
-        except Exception:
-            return None
+    # V3.8 §4.4.1 Stage 4 — the four indexes the report specifies.
+    __table_args__ = (
+        Index("ix_findings_project_status_sev", "project_id", "status", "severity"),
+        Index("ix_findings_artifact", "artifact_id"),
+        Index("ix_findings_dedup_project", "dedup_hash", "project_id"),
+        Index("ix_findings_normalized", "normalized_at"),
+    )
 
 
 class AppConfig(Base):
@@ -222,6 +226,33 @@ class CommandFeedback(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DT_TZ, default=lambda: datetime.now(UTC), nullable=False,
+    )
+
+
+class FindingAction(Base):
+    """§4.3.3 — append-only log of state-changing ChatOps actions.
+
+    Every /approve, /revoke, /unrevoke, /scan, /rerun writes one row. The
+    actor is captured in `submitted_by` with a source prefix so provenance is
+    explicit: dashboard:<username> (UI), mcp:<role> (MCP tool),
+    webhook:<token-id> (CI/CD). Rows are never edited or deleted — undoing an
+    action (e.g. /revoke) appends a new row instead of mutating history.
+
+    `finding_id` is nullable because /scan and /rerun act on a workflow run,
+    not a single finding.
+    """
+
+    __tablename__ = "finding_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    finding_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("findings.id"), nullable=True, index=True,
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    submitted_by: Mapped[str] = mapped_column(String(300), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DT_TZ, default=lambda: datetime.now(UTC), nullable=False, index=True,
     )
 
 

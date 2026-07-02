@@ -36,20 +36,21 @@ async def test_gather_targets_picks_active_projects_with_staging_url(client, db_
 
 
 @pytest.mark.asyncio
-async def test_create_project_with_staging_url(client):
+async def test_create_project_with_staging_url(client, admin_headers):
     resp = await client.post("/projects", json={
         "name": "P", "github_url": "https://github.com/t/create",
         "staging_url": "https://p.example.com/health",
-    })
+    }, headers=admin_headers)
     assert resp.status_code == 201, resp.text
     assert resp.json()["staging_url"] == "https://p.example.com/health"
 
 
 @pytest.mark.asyncio
 async def test_patch_monitor_target(client):
-    proj = (await client.post("/projects", json={
-        "name": "P2", "github_url": "https://github.com/t/patch"})).json()
     tok = create_access_token("root", "admin")
+    proj = (await client.post("/projects", json={
+        "name": "P2", "github_url": "https://github.com/t/patch"},
+        headers={"Authorization": f"Bearer {tok}"})).json()
 
     r = await client.patch(
         f"/projects/{proj['id']}/monitor",
@@ -74,9 +75,10 @@ async def test_patch_monitor_target(client):
 
 @pytest.mark.asyncio
 async def test_patch_monitor_rejects_bad_url(client):
-    proj = (await client.post("/projects", json={
-        "name": "P3", "github_url": "https://github.com/t/badurl"})).json()
     tok = create_access_token("root", "admin")
+    proj = (await client.post("/projects", json={
+        "name": "P3", "github_url": "https://github.com/t/badurl"},
+        headers={"Authorization": f"Bearer {tok}"})).json()
     r = await client.patch(
         f"/projects/{proj['id']}/monitor", json={"staging_url": "not-a-url"},
         headers={"Authorization": f"Bearer {tok}"},

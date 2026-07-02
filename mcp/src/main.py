@@ -132,12 +132,12 @@ app.include_router(projects_router, tags=["projects"])
 app.include_router(artifacts_router, tags=["core"])
 app.include_router(findings_router, tags=["findings"])
 app.include_router(analysis_router, tags=["ai"])
-app.include_router(chat_router)
-app.include_router(config_router)
+app.include_router(chat_router, tags=["chat"])
+app.include_router(config_router, tags=["config"])
 # Monitor (Uptime/DAST-adjacent) router — re-mounted (V2.4 re-enabled).
 from .api.monitor import router as monitor_router  # noqa: E402
-app.include_router(monitor_router)
-app.include_router(stats_router)
+app.include_router(monitor_router, tags=["monitor"])
+app.include_router(stats_router, tags=["stats"])
 
 
 @app.get("/")

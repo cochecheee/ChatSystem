@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import User, enforce_finding_project_access
 from ..core.config import settings
-from ..models.entities import Artifact, CommandFeedback, Finding
+from ..models.entities import Artifact, CommandFeedback, Finding, FindingAction
 from ..models.schemas import CommandRequest, CommandResponse
 from ..services.github_client import GitHubClient
 from ..services.llm.service import LLMAnalysisService
@@ -54,6 +54,26 @@ class CommandService:
         }
         return await dispatch[cmd](request, user, db)
 
+    @staticmethod
+    async def _log_action(
+        db: AsyncSession, *, action: str, user: User,
+        finding_id: int | None = None, detail: str | None = None,
+    ) -> None:
+        """§4.3.3 — append a finding_actions row. submitted_by carries a source
+        prefix; commands routed through /api/chat/command are dashboard/UI
+        actions, so prefix `dashboard:`. Best-effort: never let audit logging
+        break the primary action."""
+        try:
+            db.add(FindingAction(
+                finding_id=finding_id,
+                action=action,
+                submitted_by=f"dashboard:{user.username}",
+                detail=detail,
+            ))
+            await db.commit()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("finding_actions log failed (%s): %s", action, exc)
+
     # ------------------------------------------------------------------
     # /explain and /fix
     # ------------------------------------------------------------------
@@ -91,6 +111,7 @@ class CommandService:
         try:
             await self._github.dispatch_workflow("ci.yml")
             log.info("Workflow dispatched by %s", user.username)
+            await self._log_action(db, action="scan", user=user)
             return CommandResponse(
                 status="ok",
                 message="Đã kích hoạt Security Scan mới trên nhánh main.",
@@ -113,6 +134,7 @@ class CommandService:
             raise HTTPException(status_code=422, detail="/rerun cần cung cấp run_id")
         try:
             await self._github.rerun_workflow(request.run_id)
+            await self._log_action(db, action="rerun", user=user, detail=f"run_id={request.run_id}")
             return CommandResponse(
                 status="ok",
                 message=f"Đã re-run workflow #{request.run_id}.",
@@ -155,6 +177,7 @@ class CommandService:
         finding.approved_by = user.username
         finding.approved_at = datetime.now(UTC)
         await db.commit()
+        await self._log_action(db, action="approve", user=user, finding_id=finding.id, detail=justification)
 
         log.info("finding %d approved by %s", finding.id, user.username)
         return CommandResponse(
@@ -198,6 +221,7 @@ class CommandService:
         finding.revoked_by = user.username
         finding.revoked_at = datetime.now(UTC)
         await db.commit()
+        await self._log_action(db, action="revoke", user=user, finding_id=finding.id, detail=justification)
 
         log.info("finding %d revoked by %s", finding.id, user.username)
         return CommandResponse(
@@ -244,6 +268,7 @@ class CommandService:
         finding.revoked_by = None
         finding.revoked_at = None
         await db.commit()
+        await self._log_action(db, action="unrevoke", user=user, finding_id=finding.id)
 
         log.info("finding %d unrevoked by %s (was revoked by %s)", finding.id, user.username, was)
         note = ""

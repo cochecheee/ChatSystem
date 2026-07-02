@@ -71,6 +71,42 @@ def allowed_project_ids(user: User | None) -> list[int] | None:
     return list(user.memberships.keys())
 
 
+def ensure_project_in_scope(user: User | None, project_id: int | None) -> None:
+    """Raise 403 when a specific ``project_id`` is requested but lies outside the
+    caller's membership scope.
+
+    No-op for admins, the anonymous-read bypass, RBAC off (``allowed_project_ids``
+    returns ``None``), or when no ``project_id`` is supplied. Shared by the
+    findings / stats / monitor read endpoints so the cross-tenant guard is
+    enforced identically.
+    """
+    scope = allowed_project_ids(user)
+    if scope is not None and project_id is not None and project_id not in scope:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Project {project_id} not in your memberships",
+        )
+
+
+async def _membership_role(
+    user: User,
+    project_id: int,
+    session: AsyncSession,
+) -> str | None:
+    """Resolve a user's role on a project for the per-project RBAC checks.
+
+    Trusts the JWT membership snapshot when it is present (even if that yields
+    ``None`` for this project) and only queries the DB when the token predates
+    V3.0 and carries no snapshot. Shared by ``require_project_access``,
+    ``enforce_finding_project_access`` and ``enforce_run_project_access`` so they
+    all resolve roles the same way.
+    """
+    if user.memberships is not None:
+        return user.memberships.get(project_id)
+    from ..repositories import ProjectMemberRepository
+    return await ProjectMemberRepository(session).get_role(project_id, user.username)
+
+
 async def require_read_access(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> User | None:
@@ -111,7 +147,7 @@ def require_project_access(min_role: str = "viewer"):
     """
     from fastapi import Request
 
-    from ..repositories import ProjectMemberRepository, role_satisfies
+    from ..repositories import role_satisfies
 
     async def _dep(
         request: Request,
@@ -140,12 +176,7 @@ def require_project_access(min_role: str = "viewer"):
             raise HTTPException(status_code=400, detail="Invalid project_id")
 
         # Trust JWT membership snapshot if present; else hit DB.
-        actual_role: str | None
-        if current.memberships is not None:
-            actual_role = current.memberships.get(project_id)
-        else:
-            repo = ProjectMemberRepository(session)
-            actual_role = await repo.get_role(project_id, current.username)
+        actual_role = await _membership_role(current, project_id, session)
 
         if actual_role is None or not role_satisfies(actual_role, min_role):
             raise HTTPException(
@@ -180,7 +211,7 @@ async def enforce_finding_project_access(
         return
 
     from ..models.entities import Artifact, Finding
-    from ..repositories import ProjectMemberRepository, role_satisfies
+    from ..repositories import role_satisfies
 
     finding = await session.get(Finding, finding_id)
     if finding is None:
@@ -190,13 +221,7 @@ async def enforce_finding_project_access(
         return
     project_id = artifact.project_id
 
-    actual_role: str | None
-    if user.memberships is not None:
-        actual_role = user.memberships.get(project_id)
-    else:
-        actual_role = await ProjectMemberRepository(session).get_role(
-            project_id, user.username,
-        )
+    actual_role = await _membership_role(user, project_id, session)
 
     if actual_role is None or not role_satisfies(actual_role, min_role):
         raise HTTPException(
@@ -234,7 +259,7 @@ async def enforce_run_project_access(
     from sqlalchemy import select
 
     from ..models.entities import Artifact
-    from ..repositories import ProjectMemberRepository, role_satisfies
+    from ..repositories import role_satisfies
 
     rows = await session.execute(
         select(Artifact.project_id)
@@ -246,10 +271,7 @@ async def enforce_run_project_access(
         return  # run not ingested → nothing to scope against
 
     for pid in project_ids:
-        if user.memberships is not None:
-            role = user.memberships.get(pid)
-        else:
-            role = await ProjectMemberRepository(session).get_role(pid, user.username)
+        role = await _membership_role(user, pid, session)
         if role is not None and role_satisfies(role, min_role):
             return
 

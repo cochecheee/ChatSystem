@@ -2,10 +2,12 @@ import json
 
 import pytest
 
-from src.services.normalizer import (
+from src.services.normalizers import (
     DepCheckNormalizer,
     ESLintNormalizer,
     NormalizerFactory,
+    NpmAuditNormalizer,
+    SafetyJsonNormalizer,
     SarifNormalizer,
     SpotBugsXMLNormalizer,
     TrivyJsonNormalizer,
@@ -747,3 +749,116 @@ def test_depcheck_missing_purl_graceful():
     assert len(findings) >= 1
     assert findings[0].raw_data.get("installed_version") is None
     assert "fixed_version" in findings[0].raw_data
+
+
+# ---------------------------------------------------------------------------
+# npm audit (Node SCA) — V3.8: previously dropped, now normalized
+# ---------------------------------------------------------------------------
+
+NPM_AUDIT_V2 = json.dumps({
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+        "adm-zip": {
+            "name": "adm-zip", "severity": "moderate", "isDirect": False,
+            "range": "<0.4.11", "nodes": ["node_modules/adm-zip"],
+            "fixAvailable": {"name": "adm-zip", "version": "0.4.11"},
+            "via": [{
+                "title": "Arbitrary File Write in adm-zip",
+                "url": "https://github.com/advisories/GHSA-3v6h-hqm4-2rg6",
+                "cwe": ["CWE-22"], "cvss": {"score": 5.5}, "source": 1093814,
+                "name": "adm-zip", "range": "<0.4.11", "severity": "moderate",
+            }],
+        },
+        "minimist": {
+            "name": "minimist", "severity": "critical", "range": "<1.2.6",
+            "fixAvailable": True,
+            "via": [{
+                "title": "Prototype Pollution in minimist",
+                "url": "https://github.com/advisories/GHSA-xvch-5gv4-984h",
+                "cwe": ["CWE-1321"], "cvss": {"score": 9.8}, "source": 1097677,
+                "severity": "critical", "range": "<1.2.6",
+            }],
+        },
+        "anymatch": {  # transitive-only: via is a string
+            "name": "anymatch", "severity": "high", "range": "1.2.0 - 2.0.0",
+            "via": ["micromatch"], "fixAvailable": True,
+        },
+    },
+    "metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 1,
+                                     "high": 1, "critical": 1, "total": 3}},
+})
+
+
+def test_npm_audit_factory_detects():
+    n = NormalizerFactory.get("npm-audit.json", content=NPM_AUDIT_V2)
+    assert isinstance(n, NpmAuditNormalizer)
+
+
+def test_npm_audit_normalizes_advisories():
+    findings = NpmAuditNormalizer().normalize(NPM_AUDIT_V2, artifact_id=7)
+    by_pkg = {f.raw_data["pkg_name"]: f for f in findings}
+    assert {"adm-zip", "minimist", "anymatch"} <= set(by_pkg)
+    # moderate -> medium mapping; GHSA id + CWE + CVSS captured
+    adm = by_pkg["adm-zip"]
+    assert adm.severity == "medium"
+    assert adm.rule_id == "GHSA-3v6h-hqm4-2rg6"
+    assert adm.cwe_id == "CWE-22"
+    assert adm.cvss_score == 5.5
+    assert adm.tool == "npm-audit"
+    assert adm.raw_data["fixed_version"] == "0.4.11"
+    # critical passes through
+    assert by_pkg["minimist"].severity == "critical"
+    # transitive-only entry still surfaces as a rollup finding
+    assert by_pkg["anymatch"].severity == "high"
+    assert "micromatch" in by_pkg["anymatch"].message
+
+
+# ---------------------------------------------------------------------------
+# safety (Python SCA) — V3.8
+# ---------------------------------------------------------------------------
+
+SAFETY_MODERN = json.dumps({
+    "report_meta": {"scan_target": "requirements.txt"},
+    "vulnerabilities": [{
+        "package_name": "flask", "analyzed_version": "0.12.2",
+        "vulnerable_spec": "<1.0", "advisory": "XSS in Flask debugger",
+        "vulnerability_id": "PYSEC-2019-1", "CVE": "CVE-2019-1010083",
+        "severity": "high",
+    }],
+})
+
+SAFETY_LEGACY = json.dumps([
+    ["django", "<2.2.28", "2.0.0", "SQL injection in QuerySet", "CVE-2022-28346"],
+])
+
+
+def test_safety_factory_detects_modern_and_legacy():
+    assert isinstance(NormalizerFactory.get("safety.json", content=SAFETY_MODERN),
+                      SafetyJsonNormalizer)
+    assert isinstance(NormalizerFactory.get("safety.json", content=SAFETY_LEGACY),
+                      SafetyJsonNormalizer)
+
+
+def test_safety_modern_normalizes():
+    findings = SafetyJsonNormalizer().normalize(SAFETY_MODERN, artifact_id=8)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.tool == "safety"
+    assert f.rule_id == "PYSEC-2019-1"
+    assert f.severity == "high"
+    assert f.raw_data["pkg_name"] == "flask"
+    assert f.raw_data["installed_version"] == "0.12.2"
+
+
+def test_safety_legacy_list_normalizes():
+    findings = SafetyJsonNormalizer().normalize(SAFETY_LEGACY, artifact_id=8)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "CVE-2022-28346"
+    assert findings[0].raw_data["pkg_name"] == "django"
+
+
+def test_eslint_list_of_dicts_still_routes_to_eslint():
+    # Regression guard: safety list-detection must not steal ESLint reports.
+    eslint = json.dumps([{"filePath": "a.js", "messages": []}])
+    assert isinstance(NormalizerFactory.get("eslint.json", content=eslint),
+                      ESLintNormalizer)

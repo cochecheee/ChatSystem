@@ -139,12 +139,16 @@ class LLMAnalysisService:
         # "analyze" (vốn đòi unified diff sửa mã nguồn → vô nghĩa với CVE).
         prompt_id = "cve" if _is_dependency_finding(finding) else "analyze"
 
-        safe_message, reason_msg = self._guardrail.check(finding.message or "")
-        if not safe_message:
-            log.warning(
-                "Injection guardrail blocked finding %d: msg=%r", finding.id, reason_msg,
-            )
-            raise ValueError("Finding content rejected by injection guardrail")
+        # Layer 4 (injection) — chỉ áp khi GUARDRAIL_LAYERS bật "injection".
+        # Tắt (GUARDRAIL_LAYERS=none) → bỏ qua, payload tới thẳng LLM (demo rủi ro).
+        from ...core.guardrails import layer_on
+        if layer_on("injection"):
+            safe_message, reason_msg = self._guardrail.check(finding.message or "")
+            if not safe_message:
+                log.warning(
+                    "Injection guardrail blocked finding %d: msg=%r", finding.id, reason_msg,
+                )
+                raise ValueError("Finding content rejected by injection guardrail")
 
         if prompt_id == "cve":
             meta = _dep_meta(finding)
@@ -169,8 +173,11 @@ class LLMAnalysisService:
                 try:
                     fetched = await github_client.fetch_file_content(finding.file_path)
                     if fetched:
-                        # Scrub for PII/secrets before storing or passing to Gemini
-                        source_code = self._scrubber.scrub_content(fetched)
+                        # Layer 3 (scrub) — chỉ áp khi bật "scrubbing".
+                        source_code = (
+                            self._scrubber.scrub_content(fetched)
+                            if layer_on("scrubbing") else fetched
+                        )
                         raw = dict(finding.raw_data or {})
                         raw["source_code"] = source_code
                         finding.raw_data = raw
@@ -182,12 +189,13 @@ class LLMAnalysisService:
 
             # Defend against indirect prompt injection: code context comes from
             # untrusted sources (open-source repos). Reject obvious injection.
-            safe_context, reason_ctx = self._guardrail.check(code_context)
-            if not safe_context:
-                log.warning(
-                    "Injection guardrail blocked finding %d: ctx=%r", finding.id, reason_ctx,
-                )
-                raise ValueError("Finding content rejected by injection guardrail")
+            if layer_on("injection"):
+                safe_context, reason_ctx = self._guardrail.check(code_context)
+                if not safe_context:
+                    log.warning(
+                        "Injection guardrail blocked finding %d: ctx=%r", finding.id, reason_ctx,
+                    )
+                    raise ValueError("Finding content rejected by injection guardrail")
 
             rendered = get_registry().render(
                 "analyze",

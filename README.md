@@ -364,7 +364,7 @@ chat-system/
 │   │   │   └── schemas.py          # Pydantic: FindingOut, CommandRequest, ...
 │   │   └── services/
 │   │       ├── llm/                # Gemini client, prompt builder, response schema
-│   │       ├── normalizer.py       # SARIF/XML/JSON → FindingCreate
+│   │       ├── normalizers/        # SARIF/XML/JSON → FindingCreate (one module per tool + factory)
 │   │       ├── enricher.py         # CWE/CVSS/OWASP enrichment
 │   │       ├── processor.py        # End-to-end artifact pipeline
 │   │       ├── poller.py           # GitHub artifacts background polling

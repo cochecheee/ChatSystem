@@ -694,7 +694,7 @@ async def test_finding_response_includes_project_id(client, db_session):
     db_session.add(a)
     await db_session.flush()
     db_session.add(Finding(
-        artifact_id=a.id, tool="t", rule_id="r", severity="high",
+        artifact_id=a.id, project_id=p.id, tool="t", rule_id="r", severity="high",
         message="m", file_path="x.py", status="pending_review",
         dedup_hash="prov-test",
     ))

@@ -25,6 +25,7 @@ from ..core.auth import (
     User,
     allowed_project_ids,
     enforce_run_project_access,
+    ensure_project_in_scope,
     get_current_user,
     require_read_access,
 )
@@ -74,12 +75,8 @@ async def list_findings(
     - X-Total-Count: tổng số findings match filter (trước khi apply skip/limit)
     """
     repo = FindingRepository(session)
+    ensure_project_in_scope(user, project_id)
     scope_ids = allowed_project_ids(user)
-    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
     filter_kwargs = dict(
         project_id=project_id,
         project_ids=scope_ids if project_id is None else None,
@@ -118,17 +115,12 @@ async def findings_ai_summary(
     """
     from ..services.llm.summary import SummaryService
 
-    scope_ids = allowed_project_ids(user)
-    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
+    ensure_project_in_scope(user, project_id)
 
     svc = SummaryService()
     # V3.7 — khi không chỉ định project_id, scope briefing theo membership
     # (non-admin) để không lộ số liệu tổng hợp của project khác.
-    summary_scope = scope_ids if project_id is None else None
+    summary_scope = allowed_project_ids(user) if project_id is None else None
     result = await svc.generate(
         session,
         project_id=project_id,
@@ -235,7 +227,14 @@ async def findings_gate_count(
             await get_current_user(credentials)
 
     repo = FindingRepository(session)
-    common = dict(project_id=project_id, run_id=run_id, exclude_revoked=True)
+    # §4.2.3 — gate counts ACTIVE risk only: exclude REVOKED (false-positive)
+    # AND APPROVED (accepted-risk, audited). So an /approve on a critical lets
+    # the PR merge on the next run, exactly like /revoke — both are recorded in
+    # the audit trail, neither blocks the gate.
+    common = dict(
+        project_id=project_id, run_id=run_id,
+        exclude_revoked=True, exclude_approved=True,
+    )
     critical = await repo.count_with_filters(severity="critical", **common)
     high = await repo.count_with_filters(severity="high", **common)
     medium = await repo.count_with_filters(severity="medium", **common)
@@ -274,6 +273,7 @@ async def findings_gate_count(
         "project_id": project_id,
         "run_id": run_id,
         "exclude_revoked": True,
+        "exclude_approved": True,
         "critical": critical,
         "high": high,
         "medium": medium,

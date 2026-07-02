@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.auth import User, allowed_project_ids, require_read_access
+from ..core.auth import User, allowed_project_ids, ensure_project_in_scope, require_read_access
 from ..core.db import get_session
 from ..models.entities import Alert, UptimeCheck
 from ..services.monitor import run_monitor_cycle
@@ -34,12 +34,7 @@ async def list_uptime(
     membership; without project_id, results are silently scoped to the
     caller's memberships (admin sees all).
     """
-    scope = allowed_project_ids(user)
-    if scope is not None and project_id is not None and project_id not in scope:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
+    ensure_project_in_scope(user, project_id)
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
     q = select(UptimeCheck).where(UptimeCheck.checked_at >= cutoff)
     if project_id is not None:

@@ -48,6 +48,25 @@ async def get_current_user_required(
     return await get_current_user(credentials)
 
 
+async def _project_role(
+    current: User,
+    project_id: int,
+    session: AsyncSession,
+) -> str | None:
+    """Resolve the caller's role on a project for the owner/admin gates.
+
+    Trusts the JWT membership snapshot first, then falls back to a DB lookup
+    when the snapshot is absent or doesn't include this project. Shared by the
+    integration / rotate-token / gate-policy / monitor-target / archive / delete
+    handlers so they all resolve the project role identically.
+    """
+    role = current.memberships.get(project_id) if current.memberships else None
+    if role is None:
+        from ..repositories import ProjectMemberRepository
+        role = await ProjectMemberRepository(session).get_role(project_id, current.username)
+    return role
+
+
 class MemberUpsert(BaseModel):
     username: str
     role: str  # viewer | developer | security_lead | owner
@@ -70,23 +89,31 @@ class SuppressionCreate(BaseModel):
 async def create_project(
     body: ProjectCreate,
     session: AsyncSession = Depends(get_session),
+    current: User = Depends(get_current_user_required),
 ) -> Project:
     """Tạo project với full credentials (V2.8 P7).
 
-    Trước đây chỉ persist name + github_url; các field credentials
-    (github_owner/repo/token, gemini_*) bị drop silent → POST /projects
-    không bao giờ wire multi-tenant đúng. Giờ persist tất cả 9 field.
+    V3.8 — yêu cầu xác thực: trước đây endpoint KHÔNG gate auth nên bất kỳ ai
+    cũng tạo được project và nhét credentials (`github_token`/`gemini_api_key`).
+    Nay phải có JWT hợp lệ; khi RBAC bật, người tạo trở thành `owner` của
+    project (để sau đó có quyền archive/delete/quản lý thành viên).
 
-    Secrets (`github_token`, `gemini_api_key`) sẽ được Fernet-encrypt khi
-    `FERNET_KEY` set ở Phase A1 — hiện vẫn plaintext (single-tenant
-    deployment chấp nhận theo decision log [.planning/REQUIREMENTS.md]).
-    `active=False` map sang INTEGER 0 — Postgres asyncpg không tự coerce.
+    Secrets (`github_token`, `gemini_api_key`) được Fernet-encrypt khi
+    `FERNET_KEY` set; `active=False` map sang INTEGER 0 — Postgres asyncpg
+    không tự coerce.
     """
     repo = ProjectRepository(session)
     fields = body.model_dump(exclude_unset=False)
     # Bool -> int để khớp Mapped[int] cột active
     fields["active"] = 1 if fields.get("active", True) else 0
-    return await repo.create(**fields)
+    project = await repo.create(**fields)
+    # Creator becomes owner so per-project RBAC has an accountable owner.
+    if settings.RBAC_PER_PROJECT:
+        from ..repositories import ProjectMemberRepository
+        await ProjectMemberRepository(session).upsert(
+            project_id=project.id, username=current.username, role="owner",
+        )
+    return project
 
 
 @router.get("/projects", response_model=list[ProjectOut])
@@ -328,16 +355,8 @@ async def project_integration_snippet(
         if current.role == "admin":
             can_reveal = True
         else:
-            role = None
-            # JWT carries a membership snapshot (V3.0) — trust it first.
-            if current.memberships is not None:
-                role = current.memberships.get(project_id)
-            if role is None:
-                from ..repositories import ProjectMemberRepository
-                role = await ProjectMemberRepository(session).get_role(
-                    project_id, current.username,
-                )
-            can_reveal = role == "owner"
+            # JWT carries a membership snapshot (V3.0); fall back to DB.
+            can_reveal = await _project_role(current, project_id, session) == "owner"
 
     # Build base URL từ request — phù hợp cả local dev (localhost:8000)
     # lẫn deploy qua tunnel/proxy (Host header).
@@ -427,15 +446,7 @@ async def rotate_webhook_token(
 
     # owner / admin gate
     if current.role != "admin":
-        role = None
-        if current.memberships is not None:
-            role = current.memberships.get(project_id)
-        if role is None:
-            from ..repositories import ProjectMemberRepository
-            role = await ProjectMemberRepository(session).get_role(
-                project_id, current.username,
-            )
-        if role != "owner":
+        if await _project_role(current, project_id, session) != "owner":
             raise HTTPException(
                 status_code=403,
                 detail="Only project owner (or global admin) can rotate the webhook token",
@@ -476,15 +487,7 @@ async def update_gate_policy(
         raise HTTPException(status_code=404, detail="Project not found")
 
     if current.role != "admin":
-        role = None
-        if current.memberships is not None:
-            role = current.memberships.get(project_id)
-        if role is None:
-            from ..repositories import ProjectMemberRepository
-            role = await ProjectMemberRepository(session).get_role(
-                project_id, current.username,
-            )
-        if role != "owner":
+        if await _project_role(current, project_id, session) != "owner":
             raise HTTPException(
                 status_code=403,
                 detail="Only project owner (or global admin) can change gate policy",
@@ -543,11 +546,7 @@ async def update_monitor_target(
         raise HTTPException(status_code=404, detail="Project not found")
 
     if current.role != "admin":
-        role = current.memberships.get(project_id) if current.memberships else None
-        if role is None:
-            from ..repositories import ProjectMemberRepository
-            role = await ProjectMemberRepository(session).get_role(project_id, current.username)
-        if role != "owner":
+        if await _project_role(current, project_id, session) != "owner":
             raise HTTPException(
                 status_code=403,
                 detail="Only project owner (or global admin) can change the monitor target",
@@ -586,11 +585,7 @@ async def archive_project(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     if current.role != "admin":
-        role = current.memberships.get(project_id) if current.memberships else None
-        if role is None:
-            from ..repositories import ProjectMemberRepository
-            role = await ProjectMemberRepository(session).get_role(project_id, current.username)
-        if role != "owner":
+        if await _project_role(current, project_id, session) != "owner":
             raise HTTPException(status_code=403, detail="Only owner/admin may archive")
     if project.archived_at is None:
         await ProjectRepository(session).update(project, {"archived_at": _dt.now(_UTC)})
@@ -607,6 +602,7 @@ async def archive_project(
 async def delete_project(
     project_id: int,
     session: AsyncSession = Depends(get_session),
+    current: User = Depends(get_current_user_required),
 ) -> Response:
     """Xoá project + cascade toàn bộ dữ liệu con.
 
@@ -616,14 +612,10 @@ async def delete_project(
     khi xoá project. `audit_log` dùng ON DELETE SET NULL nên DB tự xử lý
     (giữ lại log lịch sử).
 
-    Trước đây handler chỉ xoá findings + artifacts -> vướng FK của
-    pipeline_runs / webhook_deliveries / project_members trên MySQL (InnoDB)
-    -> HTTP 500. Nay xoá đủ con nên DELETE chạy được trên cả MySQL lẫn
-    Postgres. Flow "remove" thông thường vẫn nên dùng POST .../archive
-    (V3.6 soft delete) để giữ dữ liệu cho trend/audit.
-
-    Không gate auth ở đây vì test suite + cleanup tooling legacy dựa vào
-    contract unauthenticated.
+    V3.8 — yêu cầu `owner` của project hoặc global `admin` (giống endpoint
+    archive). Trước đây handler KHÔNG gate auth → bất kỳ ai cũng xoá sạch
+    project + toàn bộ dữ liệu con. Flow "remove" thông thường vẫn nên dùng
+    POST .../archive (V3.6 soft delete) để giữ dữ liệu cho trend/audit.
     """
     from sqlalchemy import delete as _delete
 
@@ -643,6 +635,11 @@ async def delete_project(
     project = await project_repo.get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Authorization: global admin OR project owner (same as archive).
+    if current.role != "admin":
+        if await _project_role(current, project_id, session) != "owner":
+            raise HTTPException(status_code=403, detail="Only owner/admin may delete a project")
 
     artifacts = await artifact_repo.list_for_project(project_id)
     artifact_ids = [a.id for a in artifacts]

@@ -15,11 +15,11 @@ from src.services.processor import SecurityProcessor
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_create_project(client):
+async def test_create_project(client, admin_headers):
     resp = await client.post("/projects", json={
         "name": "Test Project",
         "github_url": f"https://github.com/test/{uuid.uuid4().hex}",
-    })
+    }, headers=admin_headers)
     assert resp.status_code == 201
     data = resp.json()
     assert data["id"] is not None
@@ -144,16 +144,36 @@ async def test_webhook_pipeline_complete_accepted(client):
         "sha": "abc123",
         "pipeline_status": "success",
     }
+    # V3.8 — webhook is fail-closed: a valid global token must be presented.
     with patch("src.api.artifacts.settings") as mock_settings, \
          patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
-        mock_settings.CI_WEBHOOK_TOKEN = ""  # auth disabled
+        mock_settings.CI_WEBHOOK_TOKEN = "ci-secret"
         mock_settings.GITHUB_OWNER = "cochecheee"
         mock_settings.GITHUB_REPO = "SAST_CICD"
-        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+        resp = await client.post(
+            "/webhook/pipeline-complete", json=metadata,
+            headers={"Authorization": "Bearer ci-secret"},
+        )
     assert resp.status_code == 202
     data = resp.json()
     assert data["status"] == "accepted"
     assert data["run_id"] == 99001
+
+
+@pytest.mark.asyncio
+async def test_webhook_rejected_when_no_token_configured(client):
+    """V3.8 fail-closed: empty CI_WEBHOOK_TOKEN + no per-project/HMAC auth →
+    403 (previously fell through to acceptance — the fail-open bug)."""
+    metadata = {"run_id": 99003, "repository": "cochecheee/SAST_CICD",
+                "pipeline_status": "success"}
+    with patch("src.api.artifacts.settings") as mock_settings, \
+         patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
+        mock_settings.CI_WEBHOOK_TOKEN = ""  # no auth configured
+        mock_settings.MULTI_TENANT_ENABLED = True
+        mock_settings.GITHUB_OWNER = "cochecheee"
+        mock_settings.GITHUB_REPO = "SAST_CICD"
+        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -197,13 +217,13 @@ async def test_webhook_pipeline_complete_requires_token_when_configured(client):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_webhook_multi_tenant_routes_by_repository(client):
+async def test_webhook_multi_tenant_routes_by_repository(client, admin_headers):
     """MULTI_TENANT_ENABLED=true + repository khớp existing project → dùng project đó."""
     # Seed project tương ứng repository payload
     create_resp = await client.post("/projects", json={
         "name": "Multi-tenant test",
         "github_url": "https://github.com/cochecheee/SAST_CICD",
-    })
+    }, headers=admin_headers)
     assert create_resp.status_code == 201
     expected_id = create_resp.json()["id"]
 
@@ -214,11 +234,14 @@ async def test_webhook_multi_tenant_routes_by_repository(client):
     }
     with patch("src.api.artifacts.settings") as mock_settings, \
          patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
-        mock_settings.CI_WEBHOOK_TOKEN = ""
+        mock_settings.CI_WEBHOOK_TOKEN = "ci-secret"
         mock_settings.MULTI_TENANT_ENABLED = True
         mock_settings.GITHUB_OWNER = "other"
         mock_settings.GITHUB_REPO = "fallback"
-        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+        resp = await client.post(
+            "/webhook/pipeline-complete", json=metadata,
+            headers={"Authorization": "Bearer ci-secret"},
+        )
 
     assert resp.status_code == 202
     data = resp.json()
@@ -235,11 +258,14 @@ async def test_webhook_multi_tenant_falls_back_when_no_match(client):
     }
     with patch("src.api.artifacts.settings") as mock_settings, \
          patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
-        mock_settings.CI_WEBHOOK_TOKEN = ""
+        mock_settings.CI_WEBHOOK_TOKEN = "ci-secret"
         mock_settings.MULTI_TENANT_ENABLED = True
         mock_settings.GITHUB_OWNER = "fallback-owner"
         mock_settings.GITHUB_REPO = "fallback-repo"
-        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+        resp = await client.post(
+            "/webhook/pipeline-complete", json=metadata,
+            headers={"Authorization": "Bearer ci-secret"},
+        )
 
     assert resp.status_code == 202
     # Project created from fallback env values
@@ -249,13 +275,13 @@ async def test_webhook_multi_tenant_falls_back_when_no_match(client):
 
 
 @pytest.mark.asyncio
-async def test_webhook_legacy_ignores_repository_when_flag_off(client):
+async def test_webhook_legacy_ignores_repository_when_flag_off(client, admin_headers):
     """MULTI_TENANT_ENABLED=false → ignore payload.repository, always env path."""
     # Seed project that WOULD match repository nếu flag on
     await client.post("/projects", json={
         "name": "Would-match",
         "github_url": "https://github.com/cochecheee/different",
-    })
+    }, headers=admin_headers)
 
     metadata = {
         "run_id": 99102,
@@ -264,11 +290,14 @@ async def test_webhook_legacy_ignores_repository_when_flag_off(client):
     }
     with patch("src.api.artifacts.settings") as mock_settings, \
          patch.object(SecurityProcessor, "process_run", new_callable=AsyncMock):
-        mock_settings.CI_WEBHOOK_TOKEN = ""
+        mock_settings.CI_WEBHOOK_TOKEN = "ci-secret"
         mock_settings.MULTI_TENANT_ENABLED = False
         mock_settings.GITHUB_OWNER = "legacy-owner"
         mock_settings.GITHUB_REPO = "legacy-repo"
-        resp = await client.post("/webhook/pipeline-complete", json=metadata)
+        resp = await client.post(
+            "/webhook/pipeline-complete", json=metadata,
+            headers={"Authorization": "Bearer ci-secret"},
+        )
 
     assert resp.status_code == 202
     # Phải create project mới từ env, không dùng "Would-match"
@@ -282,7 +311,7 @@ async def test_webhook_legacy_ignores_repository_when_flag_off(client):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_create_project_persists_all_fields(client):
+async def test_create_project_persists_all_fields(client, admin_headers):
     payload = {
         "name": "Full Test",
         "github_url": f"https://github.com/test/{uuid.uuid4().hex}",
@@ -295,7 +324,7 @@ async def test_create_project_persists_all_fields(client):
         "polling_branch": "main",
         "active": True,
     }
-    resp = await client.post("/projects", json=payload)
+    resp = await client.post("/projects", json=payload, headers=admin_headers)
     assert resp.status_code == 201
     data = resp.json()
     assert data["github_owner"] == "test"

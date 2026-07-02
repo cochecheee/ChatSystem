@@ -21,11 +21,24 @@ os.environ["SKIP_ALEMBIC"] = "1"
 # setting locally via patch().
 os.environ.setdefault("ANONYMOUS_READ_ENABLED", "true")
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from src.core.auth import create_access_token
 from src.core.db import Base, engine, init_db
 from src.main import app
+
+
+@pytest.fixture
+def admin_headers() -> dict:
+    """Auth header carrying an admin JWT.
+
+    V3.8 — POST/DELETE /projects now require authentication. `get_current_user`
+    only decodes the token (no DB user row needed), so a freshly-minted admin
+    token is enough for tests that create/delete projects.
+    """
+    return {"Authorization": f"Bearer {create_access_token('admin', 'admin')}"}
 
 
 # V3.8 — /auth/token now requires a password + a row in the `users` table.
@@ -73,10 +86,10 @@ async def db_session(client):
 
 
 @pytest_asyncio.fixture
-async def project(client):
+async def project(client, admin_headers):
     resp = await client.post("/projects", json={
         "name": f"Java App {uuid.uuid4().hex[:8]}",
         "github_url": f"https://github.com/test/{uuid.uuid4().hex}",
-    })
+    }, headers=admin_headers)
     assert resp.status_code == 201
     return resp.json()

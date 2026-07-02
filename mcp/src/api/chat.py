@@ -186,6 +186,18 @@ async def _build_context(db: AsyncSession, finding_id: int | None) -> str:
     return "\n\n".join(parts)
 
 
+# §4.3.2 — free-form chat state. Conversation history is kept PER (user, finding)
+# with a cap of MAX_TURNS exchanges; older turns are dropped so the prompt never
+# grows unbounded. In-memory (single-process dev server) — not persisted across
+# restarts, which is acceptable for the free-form clarification use case.
+_CHAT_HISTORY: dict[tuple[str, int | None], list[dict[str, str]]] = {}
+_MAX_TURNS = 10
+
+
+def _history_key(username: str, finding_id: int | None) -> tuple[str, int | None]:
+    return (username, finding_id)
+
+
 @router.post("/message", response_model=ChatMessageResponse)
 async def chat_message(
     request: ChatMessageRequest,
@@ -196,14 +208,57 @@ async def chat_message(
     if not text:
         raise HTTPException(status_code=422, detail="Tin nhắn không được để trống.")
 
+    # Layer 4 guardrail trên CHÍNH input chat — chat là nơi người dùng có thể
+    # chèn lệnh trực tiếp (direct prompt injection). Tôn trọng công tắc
+    # GUARDRAIL_LAYERS: tắt "injection" (vd GUARDRAIL_LAYERS=none) → bỏ qua,
+    # tin nhắn tới thẳng Gemini (demo rủi ro). Khi chặn, trả lời lịch sự (200)
+    # thay vì lỗi để UI hiển thị gọn.
+    from ..core.guardrails import InjectionGuardrail, layer_on
+    if layer_on("injection"):
+        safe, reason = InjectionGuardrail().check(text)
+        if not safe:
+            log.warning("Chat input blocked by guardrail: %s", reason)
+            return ChatMessageResponse(
+                reply=(
+                    "⚠️ Tin nhắn bị guardrail từ chối (nghi prompt injection) nên KHÔNG "
+                    "được gửi tới AI. Tôi chỉ hỗ trợ câu hỏi bảo mật hợp lệ — ví dụ: "
+                    "“Giải thích CVE-2022-1471” hoặc dùng lệnh /explain <id>."
+                ),
+                suggested_command=None,
+            )
+
     suggested = _suggested_command(text)
+
+    # §4.3.2 — pull recent conversation for this (user, finding) and fold it into
+    # the prompt context so follow-up questions keep continuity.
+    key = _history_key(current_user.username, request.finding_id)
+    history = _CHAT_HISTORY.get(key, [])
 
     try:
         context = await _build_context(db, request.finding_id)
+        if history:
+            convo = "\n".join(
+                f"Người dùng: {h['user']}\nTrợ lý: {h['ai']}" for h in history
+            )
+            prefix = (context + "\n\n") if context else ""
+            context = f"{prefix}Lịch sử hội thoại gần đây (tối đa {_MAX_TURNS} lượt):\n{convo}"
         reply = await _get_gemini().chat(text, context=context)
+        # Only record genuine AI turns (not the error fallbacks below), then
+        # trim to the last MAX_TURNS exchanges.
+        history = [*history, {"user": text, "ai": reply}][-_MAX_TURNS:]
+        _CHAT_HISTORY[key] = history
     except Exception as exc:
         log.warning("Gemini chat failed: %s", exc)
-        if suggested:
+        err = str(exc).lower()
+        if "429" in err or "resource_exhausted" in err or "quota" in err or "rate" in err:
+            # Phân biệt rõ lỗi quá quota/tần suất với lỗi mất kết nối — Gemini
+            # free-tier ~20 request/phút; chờ ~1 phút là gọi lại được.
+            reply = (
+                "AI đang bị giới hạn tần suất (quota miễn phí của Gemini, ~20 yêu cầu/phút). "
+                "Vui lòng đợi khoảng 1 phút rồi gửi lại. Trong lúc đó bạn có thể dùng lệnh nhanh: "
+                "/explain [id], /fix [id], /scan, /report."
+            )
+        elif suggested:
             reply = f"Tôi nghĩ bạn muốn chạy lệnh `{suggested}`. Nhấn vào gợi ý bên dưới để thực thi."
         else:
             reply = (

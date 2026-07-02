@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.auth import User, allowed_project_ids, require_read_access
+from ..core.auth import User, allowed_project_ids, ensure_project_in_scope, require_read_access
 from ..core.db import get_session
 from ..services.stats_service import StatsService
 
@@ -14,22 +14,6 @@ router = APIRouter(
     prefix="/stats", tags=["stats"],
     # V3.3 — every stats endpoint goes through the read kill-switch.
 )
-
-
-def _check_project_scope(user: User | None, project_id: int | None) -> None:
-    """V3.5 RBAC audit: when RBAC is on and the caller asks for a specific
-    project, they must have a membership on it. Without this, a developer
-    with access only to project A could read project B's KPIs via
-    /stats/overview?project_id=B.
-    """
-    scope = allowed_project_ids(user)
-    if scope is None:
-        return  # admin or RBAC off → no restriction
-    if project_id is not None and project_id not in scope:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
 
 
 @router.get("/overview", summary="Aggregated KPI cho Overview page")
@@ -44,7 +28,7 @@ async def stats_overview(
     Bỏ qua → aggregate global (frontend tự gắn ProjectSelector để khỏi
     lộ data — cross-project global numbers chỉ ý nghĩa cho admin).
     """
-    _check_project_scope(user, project_id)
+    ensure_project_in_scope(user, project_id)
     # V3.7 — khi không chỉ định project_id, scope global theo membership của
     # caller (non-admin). allowed_project_ids trả None cho admin/RBAC-off → global thật.
     scope = allowed_project_ids(user) if project_id is None else None
@@ -58,7 +42,7 @@ async def stats_latest_scan(
     user: User | None = Depends(require_read_access),
 ) -> dict[str, Any]:
     """Stats của scan mới nhất. Caller phải có membership trên project_id."""
-    _check_project_scope(user, project_id)
+    ensure_project_in_scope(user, project_id)
     scope = allowed_project_ids(user) if project_id is None else None
     return await StatsService(session).latest_scan(project_id=project_id, project_ids=scope)
 

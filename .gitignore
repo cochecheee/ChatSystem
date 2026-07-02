@@ -21,6 +21,8 @@ mcp/.pytest_cache/
 mcp/findings.db
 mcp/mcp.db
 mcp/test.db
+# any local/experiment SQLite dump (mcp_aloute.db, mcp_clean.db, _exp_*.db, ...)
+*.db
 mcp/**/__pycache__/
 
 # Node.js (dashboard/)

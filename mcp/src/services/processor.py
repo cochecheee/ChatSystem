@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, func as sql_func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.db import AsyncSessionLocal
@@ -13,7 +13,7 @@ from ..models.entities import Artifact, Finding
 from ..models.schemas import compute_dedup_hash
 from .enricher import DataEnricher
 from .github_client import GitHubClient
-from .normalizer import NormalizerFactory
+from .normalizers import NormalizerFactory
 
 log = logging.getLogger(__name__)
 
@@ -200,10 +200,93 @@ class SecurityProcessor:
                         db_proj.last_processed_run_id = github_run_id
                         await session.commit()
 
+        # V3.8 Option A — current-state storage. After ingesting the newest
+        # run, drop findings from OLDER runs of this project so the DB holds
+        # only the latest scan per project (no per-run duplication → stored
+        # data, dashboard KPIs, and the Vulns/SCA/DAST lists all agree at the
+        # source, not just via query-time latest_run_only scoping). Guarded to
+        # skip when reprocessing an OLD run so we never wipe newer data.
+        if processed_count > 0:
+            await self._prune_superseded_findings(project_id, github_run_id)
+
         log.info(
             "process_run %d done — %d processed, %d failed (out of %d security artifacts)",
             github_run_id, processed_count, failed_count, len(security_artifacts),
         )
+
+    async def _prune_superseded_findings(
+        self, project_id: int, keep_github_run_id: int,
+    ) -> int:
+        """Delete findings belonging to runs OLDER than keep_github_run_id for
+        this project — current-state storage (V3.8 Option A).
+
+        Guard: only prune when keep_github_run_id is the newest run for the
+        project (GitHub run ids increase monotonically). Reprocessing an old
+        run must NOT delete the newer run's findings.
+
+        Keeps Artifact + PipelineRun rows (run metadata / history) intact —
+        only the duplicated Finding rows (and any CommandFeedback pointing at
+        them) are removed. Returns the number of findings deleted.
+        """
+        from ..models.entities import Artifact as ArtifactModel
+        from ..models.entities import CommandFeedback as FeedbackModel
+        from ..models.entities import Finding as FindingModel
+
+        async with self.session_factory() as session:
+            newest = (await session.execute(
+                select(sql_func.max(ArtifactModel.github_run_id)).where(
+                    ArtifactModel.project_id == project_id,
+                    ArtifactModel.github_run_id.is_not(None),
+                )
+            )).scalar_one_or_none() or 0
+            if keep_github_run_id < newest:
+                log.info(
+                    "Prune skipped: run %d is older than newest %d for project %d",
+                    keep_github_run_id, newest, project_id,
+                )
+                return 0
+
+            old_artifact_ids = [
+                r[0] for r in (await session.execute(
+                    select(ArtifactModel.id).where(
+                        ArtifactModel.project_id == project_id,
+                        ArtifactModel.github_run_id.is_not(None),
+                        ArtifactModel.github_run_id != keep_github_run_id,
+                    )
+                )).all()
+            ]
+            if not old_artifact_ids:
+                return 0
+
+            old_finding_ids = [
+                r[0] for r in (await session.execute(
+                    select(FindingModel.id).where(
+                        FindingModel.artifact_id.in_(old_artifact_ids)
+                    )
+                )).all()
+            ]
+            if not old_finding_ids:
+                return 0
+
+            # FK order: feedback (finding_id, no cascade) → findings.
+            await session.execute(
+                delete(FeedbackModel).where(
+                    FeedbackModel.finding_id.in_(old_finding_ids)
+                )
+            )
+            result = await session.execute(
+                delete(FindingModel).where(
+                    FindingModel.id.in_(old_finding_ids)
+                )
+            )
+            await session.commit()
+            deleted = result.rowcount or len(old_finding_ids)
+            log.info(
+                "Pruned %d superseded findings from %d older-run artifact(s) "
+                "(project %d, kept run %d)",
+                deleted, len(old_artifact_ids), project_id, keep_github_run_id,
+            )
+            return deleted
 
     # ------------------------------------------------------------------
     # Internal pipeline
@@ -223,7 +306,7 @@ class SecurityProcessor:
         client = gh or self.github_client
         try:
             files = await client.fetch_artifact(github_artifact_id)
-            db_findings = self._build_findings(files, db_artifact_id)
+            db_findings = self._build_findings(files, db_artifact_id, artifact.project_id)
 
             # V3.1 Tier 1 — cross-run auto-revoke by dedup_hash match.
             # V3.1 Tier 2 — pattern-based auto-revoke from suppression_rules.
@@ -292,6 +375,7 @@ class SecurityProcessor:
         self,
         files: list[dict[str, str]],
         db_artifact_id: int,
+        project_id: int | None = None,
     ) -> list[Finding]:
         batch_hashes: set[str] = set()
         results: list[Finding] = []
@@ -334,6 +418,7 @@ class SecurityProcessor:
                 results.append(
                     Finding(
                         artifact_id=db_artifact_id,
+                        project_id=project_id,
                         tool=enriched.tool,
                         rule_id=enriched.rule_id,
                         severity=enriched.severity,

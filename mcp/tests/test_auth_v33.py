@@ -124,9 +124,9 @@ async def test_findings_filtered_by_user_memberships(client, db_session):
     db_session.add_all([a1, a2])
     await db_session.flush()
     db_session.add_all([
-        Finding(artifact_id=a1.id, tool="t", rule_id="r1", severity="high",
+        Finding(artifact_id=a1.id, project_id=p1.id, tool="t", rule_id="r1", severity="high",
                 message="m", file_path="x.py", status="pending_review", dedup_hash="ph1"),
-        Finding(artifact_id=a2.id, tool="t", rule_id="r2", severity="high",
+        Finding(artifact_id=a2.id, project_id=p2.id, tool="t", rule_id="r2", severity="high",
                 message="m", file_path="y.py", status="pending_review", dedup_hash="ph2"),
     ])
     await db_session.commit()

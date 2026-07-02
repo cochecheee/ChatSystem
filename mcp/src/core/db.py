@@ -38,27 +38,32 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 
 async def init_db() -> None:
     async with engine.begin() as conn:
-        # Auto-drop hatch: drop+recreate Postgres tables when an older schema
-        # is detected. Two known migrations:
-        #   1. TIMESTAMP -> TIMESTAMP WITH TIME ZONE (DT_TZ migration)
-        #   2. INTEGER  -> BIGINT  on github run-id columns (INT4 overflow)
-        # SQLite stores integers/timestamps dynamically so skips both checks.
-        force_drop = os.environ.get("INIT_DB_DROP_ALL") == "1"
-        if force_drop:
-            reason = "INIT_DB_DROP_ALL"
-        elif await conn.run_sync(_needs_tz_migration):
-            reason = "TZ migration detected"
-        elif await conn.run_sync(_needs_bigint_migration):
-            reason = "BIGINT migration detected"
-        else:
-            reason = None
-
-        if reason is not None:
+        # DESTRUCTIVE reset is now EXPLICIT, opt-in only. Previously a tz/bigint
+        # heuristic could auto-`drop_all` a production Postgres DB on a schema
+        # misread (total data loss on boot, no backup). That auto-drop is
+        # removed: type migrations go through Alembic; legacy schema is only
+        # logged loudly here, never dropped automatically.
+        if os.environ.get("INIT_DB_DROP_ALL") == "1":
             log.warning(
-                "Dropping all tables (reason=%s) — recreating with current schema",
-                reason,
+                "INIT_DB_DROP_ALL=1 — dropping ALL tables and recreating "
+                "(DESTRUCTIVE; explicit opt-in only)",
             )
             await conn.run_sync(Base.metadata.drop_all)
+        else:
+            for check, label in (
+                (_needs_tz_migration,
+                 "projects.created_at is 'timestamp WITHOUT time zone' (needs DT_TZ migration)"),
+                (_needs_bigint_migration,
+                 "artifacts.github_run_id is INTEGER not BIGINT (INT4 overflow risk)"),
+            ):
+                try:
+                    if await conn.run_sync(check):
+                        log.error(
+                            "Legacy schema detected: %s. Run an Alembic migration to "
+                            "fix it — NOT auto-dropping (would destroy data).", label,
+                        )
+                except Exception:  # pragma: no cover - detection is best-effort
+                    pass
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_schema)
 
@@ -71,7 +76,11 @@ async def init_db() -> None:
         try:
             await _run_alembic_upgrade()
         except Exception:
-            log.exception("Alembic upgrade failed — continuing without migration")
+            # Fail-fast in production: serving on a half-migrated schema causes
+            # silent runtime insert errors later. In dev, log and continue.
+            log.exception("Alembic upgrade failed")
+            if settings.APP_ENV == "production":
+                raise
 
 
 def _pg_column_data_type(sync_conn, table: str, column: str) -> str | None:

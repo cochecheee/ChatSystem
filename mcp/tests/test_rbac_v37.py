@@ -34,10 +34,11 @@ def _rbac_on():
 @pytest.fixture
 async def run_in_b(client, db_session):
     """Two projects; an ingested run (id 999001) with a finding under project B."""
+    _h = {"Authorization": f"Bearer {_tok('root', 'admin')}"}
     a = (await client.post("/projects", json={
-        "name": "A", "github_url": "https://github.com/t/a"})).json()
+        "name": "A", "github_url": "https://github.com/t/a"}, headers=_h)).json()
     b = (await client.post("/projects", json={
-        "name": "B", "github_url": "https://github.com/t/b"})).json()
+        "name": "B", "github_url": "https://github.com/t/b"}, headers=_h)).json()
     from src.models.entities import Artifact, Finding
 
     art = Artifact(
@@ -118,10 +119,11 @@ async def test_reprocess_unauthenticated_blocked_when_anon_off(client, run_in_b)
 async def test_stats_overview_global_scoped_to_memberships(client, db_session):
     """Non-admin with no project_id must see only their projects' aggregate,
     not the whole system."""
+    _h = {"Authorization": f"Bearer {_tok('root', 'admin')}"}
     a = (await client.post("/projects", json={
-        "name": "A", "github_url": "https://github.com/t/a2"})).json()
+        "name": "A", "github_url": "https://github.com/t/a2"}, headers=_h)).json()
     b = (await client.post("/projects", json={
-        "name": "B", "github_url": "https://github.com/t/b2"})).json()
+        "name": "B", "github_url": "https://github.com/t/b2"}, headers=_h)).json()
     from src.models.entities import Artifact, Finding
 
     arta = Artifact(github_artifact_id="aa", project_id=a["id"], github_run_id=1, status="processed")

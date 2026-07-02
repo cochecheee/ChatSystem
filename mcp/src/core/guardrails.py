@@ -13,6 +13,34 @@ import tempfile
 from detect_secrets import SecretsCollection
 
 # ---------------------------------------------------------------------------
+# Runtime toggle — bật/tắt từng lớp guardrail qua biến môi trường
+# GUARDRAIL_LAYERS (mặc định "full" = bật cả Layer 3 + Layer 4). Dùng cho demo
+# bật/tắt và cho ma trận C0..C4 trong báo cáo. Giá trị:
+#   "full"               → {scrubbing, injection}  (mặc định an toàn)
+#   "none" hoặc rỗng     → tắt cả hai
+#   "scrubbing"          → chỉ Layer 3
+#   "injection"          → chỉ Layer 4
+#   "scrubbing,injection"→ cả hai
+# Đọc os.environ tại call-time để đổi mà không cần sửa code (chỉ cần restart
+# tiến trình với biến mới).
+# ---------------------------------------------------------------------------
+
+_ALL_LAYERS = {"scrubbing", "injection"}
+
+
+def enabled_layers() -> set[str]:
+    raw = os.environ.get("GUARDRAIL_LAYERS", "full").strip().lower()
+    if raw in ("", "none"):
+        return set()
+    if raw == "full":
+        return set(_ALL_LAYERS)
+    return {p.strip() for p in raw.split(",") if p.strip() in _ALL_LAYERS}
+
+
+def layer_on(name: str) -> bool:
+    return name in enabled_layers()
+
+# ---------------------------------------------------------------------------
 # Layer 3 — PII & Secret Scrubbing
 # ---------------------------------------------------------------------------
 

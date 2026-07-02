@@ -3,10 +3,6 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-
-log = logging.getLogger(__name__)
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import User, enforce_finding_project_access, get_current_user
@@ -15,8 +11,9 @@ from ..models.entities import Finding
 from ..models.schemas import AnalysisResult
 from ..services.llm.service import LLMAnalysisService
 
+log = logging.getLogger(__name__)
+
 router = APIRouter()
-limiter = Limiter(key_func=get_remote_address)
 
 
 def get_llm_service() -> LLMAnalysisService:
@@ -53,6 +50,14 @@ async def explain_finding(
 
     try:
         return await service.analyze_finding(finding, session)
+    except ValueError as exc:
+        # Layer 4 (InjectionGuardrail) từ chối nội dung nghi prompt injection
+        # trước khi gọi LLM → trả 422 rõ ràng để UI hiển thị thay vì 500.
+        log.warning("Guardrail blocked finding %d: %s", finding_id, exc)
+        raise HTTPException(
+            status_code=422,
+            detail="Nội dung finding bị guardrail từ chối (nghi prompt injection) — không gửi tới AI.",
+        )
     except RuntimeError as exc:
         log.error("Gemini failed for finding %d: %s", finding_id, exc)
         raise HTTPException(status_code=503, detail=f"AI service unavailable: {exc}")

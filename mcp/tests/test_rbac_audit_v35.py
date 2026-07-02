@@ -27,12 +27,13 @@ def _user_token(username: str, role: str, memberships: dict | None = None) -> st
 
 @pytest.fixture
 async def two_projects(client):
+    h = {"Authorization": f"Bearer {create_access_token('root', 'admin')}"}
     a = await client.post("/projects", json={
         "name": "Project A", "github_url": "https://github.com/test/repo-a",
-    })
+    }, headers=h)
     b = await client.post("/projects", json={
         "name": "Project B", "github_url": "https://github.com/test/repo-b",
-    })
+    }, headers=h)
     assert a.status_code == 201 and b.status_code == 201
     return a.json(), b.json()
 

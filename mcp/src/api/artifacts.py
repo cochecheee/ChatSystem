@@ -257,35 +257,42 @@ async def webhook_pipeline_complete(
                     "(project_id=%d, delivery=%s)", project.id, delivery_id,
                 )
 
-    # --- Auth path 3: legacy global ---
-    if project is None:
+    # --- Auth path 3: legacy global token ---
+    # Only runs when a global token is actually configured. An empty
+    # CI_WEBHOOK_TOKEN no longer falls through to acceptance (see fail-closed
+    # guard below).
+    if project is None and settings.CI_WEBHOOK_TOKEN:
         webhook_token = credentials.credentials if credentials else None
-        if settings.CI_WEBHOOK_TOKEN:
-            if webhook_token != settings.CI_WEBHOOK_TOKEN:
-                await record_delivery(
-                    session, delivery_id=delivery_id, project_id=None,
-                    github_run_id=body.run_id, body=raw_body,
-                    outcome="rejected_signature",
-                    detail="No valid auth (HMAC/bearer/global)",
-                )
-                await session.commit()
-                raise HTTPException(
-                    status_code=403, detail="Invalid or missing webhook auth",
-                )
+        if webhook_token == settings.CI_WEBHOOK_TOKEN:
             auth_mode = "bearer_global"
             log.info("Webhook authenticated via legacy global token "
                      "(delivery=%s)", delivery_id)
+            # Route by repository (multi-tenant) or fall back to the env project.
+            if settings.MULTI_TENANT_ENABLED and body.repository:
+                github_url = f"https://github.com/{body.repository}"
+                project = await project_repo.get_by_github_url(github_url)
+            if project is None:
+                fallback_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
+                project = await project_repo.get_or_create_by_github_url(
+                    name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
+                    github_url=fallback_url,
+                )
 
-        if settings.MULTI_TENANT_ENABLED and body.repository:
-            github_url = f"https://github.com/{body.repository}"
-            project = await project_repo.get_by_github_url(github_url)
-
-        if project is None:
-            fallback_url = f"https://github.com/{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}"
-            project = await project_repo.get_or_create_by_github_url(
-                name=f"{settings.GITHUB_OWNER}/{settings.GITHUB_REPO}",
-                github_url=fallback_url,
-            )
+    # --- Fail-closed guard ---
+    # Previously, an empty CI_WEBHOOK_TOKEN (the default) skipped the global
+    # check and fell straight through to auto-creating the fallback project,
+    # accepting UNAUTHENTICATED webhooks (only blocked in production by the
+    # startup guard). Now any delivery that didn't pass HMAC / per-project /
+    # global auth is rejected, regardless of APP_ENV.
+    if auth_mode is None or project is None:
+        await record_delivery(
+            session, delivery_id=delivery_id, project_id=None,
+            github_run_id=body.run_id, body=raw_body,
+            outcome="rejected_signature",
+            detail="No valid webhook auth (HMAC/per-project/global)",
+        )
+        await session.commit()
+        raise HTTPException(status_code=403, detail="Invalid or missing webhook auth")
 
     # --- Record delivery (accepted) + process ---
     await record_delivery(

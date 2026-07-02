@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { POLL_INTERVAL_MS } from '../lib/constants';
+import { timeAgo } from '../lib/dateUtils';
 import { Donut } from '../components/Charts';
 import { OverviewAiSummary } from '../components/OverviewAiSummary';
 import { Icon } from '../components/Icon';
@@ -34,15 +35,6 @@ function statusLabel(run: WorkflowRun) {
   return run.conclusion ?? run.status;
 }
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
 
 export function PageOverview({ onNav, onOpenVuln }: Props) {
   const { runs } = useRuns(undefined, POLL_INTERVAL_MS);
@@ -66,14 +58,21 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
   } | null>(null);
   const [latestFindings, setLatestFindings] = useState<Finding[]>([]);
   const [loadingFindings, setLoadingFindings] = useState(false);
+  const [overviewStats, setOverviewStats] =
+    useState<Awaited<ReturnType<typeof api.stats.overview>> | null>(null);
 
   const { project_id } = useActiveProjectParam();
+  const allProjects = project_id === undefined;
 
-  // Poll latest scan stats every 60s — scoped to active project when set.
+  // 1 project → KPI/donut lấy theo LẦN QUÉT MỚI NHẤT (1 run). Poll 15s.
   useEffect(() => {
+    if (project_id === undefined) {
+      setLatestStats(null);
+      return;
+    }
     const fetch = () => {
       api.stats
-        .latestScan(project_id !== undefined ? { project_id } : undefined)
+        .latestScan({ project_id })
         .then(setLatestStats)
         .catch(() => {});
     };
@@ -82,8 +81,40 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
     return () => clearInterval(id);
   }, [project_id]);
 
-  // Lazy-load full findings list của latest run (cho recent crit/high + top rules).
+  // All projects → KPI/donut lấy từ /stats/overview (current-state = run mới
+  // nhất MỖI project), khớp với thẻ AI và các trang Vulns/SCA/DAST. Tránh lệch
+  // "board (1 run) vs list (mọi project)" khi xem tổng nhiều dự án.
   useEffect(() => {
+    if (project_id !== undefined) {
+      setOverviewStats(null);
+      return;
+    }
+    const fetch = () => {
+      api.stats
+        .overview()
+        .then(setOverviewStats)
+        .catch(() => {});
+    };
+    fetch();
+    const id = setInterval(fetch, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [project_id]);
+
+  // Findings cho Recent crit/high + Top rules.
+  //  - 1 project: theo run mới nhất (run_id của latest-scan).
+  //  - All projects: gộp run mới nhất MỖI project (khớp KPI overview + lists).
+  useEffect(() => {
+    if (project_id === undefined) {
+      setLoadingFindings(true);
+      api.findings
+        .list({ latest_run_only: true, exclude_revoked: true, limit: 1000 })
+        .then((f) => {
+          setLatestFindings(f);
+          setLoadingFindings(false);
+        })
+        .catch(() => setLoadingFindings(false));
+      return;
+    }
     if (!latestStats?.run_id) {
       setLatestFindings([]);
       return;
@@ -96,7 +127,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
         setLoadingFindings(false);
       })
       .catch(() => setLoadingFindings(false));
-  }, [latestStats?.run_id]);
+  }, [project_id, latestStats?.run_id]);
 
   usePolling(() => {
     api
@@ -112,11 +143,26 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
       .catch(() => {});
   }, []);
 
-  const counts = latestStats?.by_severity ?? {};
-  const total = latestStats?.total ?? 0;
-  const critHigh = latestStats?.critical_high ?? 0;
-  const aiAnalyzed = latestStats?.ai_analyzed ?? 0;
-  const aiAnalyzedPct = latestStats?.ai_analyzed_pct ?? 0;
+  // KPI source: latest-scan (1 run) khi chọn 1 project; overview
+  // (per-project-latest, active = total − revoked) khi xem All projects — để
+  // KPI/donut khớp thẻ AI và các trang Vulns/SCA/DAST.
+  const counts = allProjects
+    ? (overviewStats?.by_severity ?? {})
+    : (latestStats?.by_severity ?? {});
+  const total = allProjects
+    ? overviewStats
+      ? overviewStats.total - overviewStats.revoked
+      : 0
+    : (latestStats?.total ?? 0);
+  const critHigh = allProjects
+    ? (overviewStats?.critical_high ?? 0)
+    : (latestStats?.critical_high ?? 0);
+  const aiAnalyzed = allProjects
+    ? (overviewStats?.ai_analyzed ?? 0)
+    : (latestStats?.ai_analyzed ?? 0);
+  const aiAnalyzedPct = allProjects
+    ? (overviewStats?.ai_analyzed_pct ?? 0)
+    : (latestStats?.ai_analyzed_pct ?? 0);
   const passRate = runs.length
     ? Math.round((runs.filter((r) => r.conclusion === 'success').length / runs.length) * 100)
     : 0;
@@ -168,7 +214,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
               }}
             />
             {projects.length > 0 ? projects.map((p) => p.name).join(', ') : 'No projects connected'}
-            {latestStats?.run_id && (
+            {!allProjects && latestStats?.run_id && (
               <>
                 <span className="muted">·</span>
                 <span>
@@ -212,7 +258,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
       <div className="kpi-grid">
         {[
           {
-            label: 'Findings (latest scan)',
+            label: allProjects ? 'Findings (current state)' : 'Findings (latest scan)',
             value: loadingFindings ? '…' : total,
             delta: `${critHigh} critical/high`,
             cls: critHigh > 0 ? 'kpi-delta-up' : 'muted',
