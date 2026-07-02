@@ -411,6 +411,34 @@ class FindingRepository:
                 }
         return out
 
+    async def find_approved_hashes(
+        self, hashes: set[str], *, project_id: int | None = None,
+    ) -> dict[str, dict]:
+        """Return {dedup_hash: {approved_by, justification, approved_at}} for
+        prior Finding rows currently APPROVED. Mirror of find_revoked_hashes:
+        an /approve (accepted-risk) must also carry forward across runs so the
+        gate does NOT re-flag the same finding on the next scan — matching
+        revoke's Tier-1 behaviour. Scoped by project."""
+        if not hashes:
+            return {}
+        query = select(
+            Finding.dedup_hash,
+            Finding.approved_by,
+            Finding.justification,
+            Finding.approved_at,
+        ).where(
+            Finding.status == "APPROVED",
+            Finding.dedup_hash.in_(hashes),
+        )
+        if project_id is not None:
+            query = query.join(Artifact).where(Artifact.project_id == project_id)
+        result = await self.session.execute(query)
+        out: dict[str, dict] = {}
+        for h, by, just, at in result.all():
+            if h not in out:  # first approval wins (canonical decision)
+                out[h] = {"approved_by": by, "justification": just, "approved_at": at}
+        return out
+
     async def count_total(
         self, *, project_id: int | None = None, project_ids: list[int] | None = None,
         latest_run_only: bool = False,

@@ -1,5 +1,7 @@
+import asyncio
 import base64
 import io
+import logging
 import zipfile
 from pathlib import Path
 
@@ -7,10 +9,14 @@ import httpx
 
 from ..core.config import settings
 
+log = logging.getLogger(__name__)
+
 _ALLOWED_EXTENSIONS = {".sarif", ".xml", ".json"}
 _MAX_ZIP_BYTES = 50 * 1024 * 1024   # 50 MB
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB per file
 _GITHUB_API = "https://api.github.com"
+_ARTIFACT_RETRIES = 3               # download attempts before giving up
+_RETRY_STATUS = {429, 500, 502, 503, 504}  # transient — worth retrying
 
 
 class GitHubClient:
@@ -107,18 +113,44 @@ class GitHubClient:
 
         Returns list of {"filename": str, "content": str} for security-relevant
         file types (.sarif, .xml, .json) only.
-        """
-        async with httpx.AsyncClient(
-            headers=self._headers,
-            follow_redirects=True,
-            timeout=60,
-        ) as client:
-            resp = await client.get(
-                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/artifacts/{artifact_id}/zip"
-            )
-            resp.raise_for_status()
 
-        zip_bytes = resp.content
+        Downloads are retried up to 3 times with exponential backoff (1s, 2s)
+        on transient failures (network errors or 429/5xx). GitHub artifact
+        downloads redirect to short-lived blob-store URLs that occasionally
+        502/503 under load, so a bounded retry keeps ingest from dropping a
+        whole run on a single flaky fetch. Non-transient errors (401/403/404)
+        raise immediately — retrying them is pointless.
+        """
+        url = f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/artifacts/{artifact_id}/zip"
+        zip_bytes: bytes | None = None
+        for attempt in range(1, _ARTIFACT_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(
+                    headers=self._headers,
+                    follow_redirects=True,
+                    timeout=60,
+                ) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                zip_bytes = resp.content
+                break
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in _RETRY_STATUS or attempt == _ARTIFACT_RETRIES:
+                    raise
+                log.warning(
+                    "fetch_artifact %s: HTTP %d (attempt %d/%d), retrying in %ds",
+                    artifact_id, exc.response.status_code, attempt, _ARTIFACT_RETRIES, 2 ** (attempt - 1),
+                )
+            except httpx.TransportError as exc:
+                if attempt == _ARTIFACT_RETRIES:
+                    raise
+                log.warning(
+                    "fetch_artifact %s: %s (attempt %d/%d), retrying in %ds",
+                    artifact_id, exc, attempt, _ARTIFACT_RETRIES, 2 ** (attempt - 1),
+                )
+            await asyncio.sleep(2 ** (attempt - 1))  # 1s, 2s
+
+        assert zip_bytes is not None  # loop either set it or raised
         if len(zip_bytes) > _MAX_ZIP_BYTES:
             raise ValueError(
                 f"Artifact ZIP too large: {len(zip_bytes)} bytes (limit {_MAX_ZIP_BYTES})"

@@ -321,9 +321,11 @@ class SecurityProcessor:
             hashes = {f.dedup_hash for f in db_findings if f.dedup_hash}
             project_id = artifact.project_id
             prior = await repo.find_revoked_hashes(hashes, project_id=project_id)
+            prior_appr = await repo.find_approved_hashes(hashes, project_id=project_id)
             active_rules = await sup_repo.list_active_for_project(project_id)
             auto_count_t1 = 0
             auto_count_t2 = 0
+            auto_count_appr = 0
             for f in db_findings:
                 if f.dedup_hash and f.dedup_hash in prior:
                     p = prior[f.dedup_hash]
@@ -335,6 +337,19 @@ class SecurityProcessor:
                     )
                     f.revoked_at = datetime.now(UTC)
                     auto_count_t1 += 1
+                    continue
+                # Tier 1 (approve) — carry forward an accepted-risk APPROVE so
+                # the gate does NOT re-flag it next run. §5.2.5 / §4.2.3.
+                if f.dedup_hash and f.dedup_hash in prior_appr:
+                    p = prior_appr[f.dedup_hash]
+                    f.status = "APPROVED"
+                    f.approved_by = p["approved_by"] or "auto-approve"
+                    f.justification = (
+                        f"Auto-carried approval (V3.1 Tier 1): inherited APPROVE "
+                        f"from {p['approved_by']!r} — {p['justification']}"
+                    )
+                    f.approved_at = datetime.now(UTC)
+                    auto_count_appr += 1
                     continue
                 for rule in active_rules:
                     if rule_matches(
@@ -353,21 +368,53 @@ class SecurityProcessor:
                         f.revoked_at = datetime.now(UTC)
                         auto_count_t2 += 1
                         break
-            auto_count = auto_count_t1 + auto_count_t2
+            auto_count = auto_count_t1 + auto_count_t2 + auto_count_appr
 
             session.add_all(db_findings)
+            await session.flush()  # assign finding PKs before writing audit rows
+
+            # §4.3.3 audit trail — the CI/CD pipeline (webhook → process_run) is
+            # a state-changing source. Every auto-carried REVOKE/APPROVE decision
+            # is recorded in finding_actions with submitted_by=webhook:<token-id>
+            # so pipeline-driven triage is distinguishable from dashboard:/mcp:
+            # actions in the immutable audit log.
+            from ..models.entities import FindingAction
+            for f in db_findings:
+                if f.status == "REVOKED" and str(f.revoked_by or "").startswith("auto-suppress"):
+                    session.add(FindingAction(
+                        finding_id=f.id, action="revoke",
+                        submitted_by="webhook:auto-triage",
+                        detail=(f.revoke_justification or "")[:1000],
+                    ))
+                elif f.status == "APPROVED" and (f.justification or "").startswith("Auto-carried approval"):
+                    session.add(FindingAction(
+                        finding_id=f.id, action="approve",
+                        submitted_by="webhook:auto-triage",
+                        detail=(f.justification or "")[:1000],
+                    ))
+
             artifact.status = "processed"
             await session.commit()
 
             log.info(
-                "Stored %d findings for artifact %d (auto-revoked %d: %d by dedup_hash, %d by rule)",
-                len(db_findings), db_artifact_id, auto_count, auto_count_t1, auto_count_t2,
+                "Stored %d findings for artifact %d (auto-triaged %d: %d revoke-hash, %d rule, %d approve-hash)",
+                len(db_findings), db_artifact_id, auto_count, auto_count_t1, auto_count_t2, auto_count_appr,
             )
             return len(db_findings)
 
         except Exception as exc:
-            artifact.status = "failed"
-            await session.commit()
+            # Transactional ingest — any failure mid-pipeline (fetch, normalize,
+            # or the findings commit itself) rolls the whole unit of work back so
+            # NO half-written findings are persisted. Then mark the artifact
+            # 'failed' in a fresh, clean transaction. Without the rollback, a
+            # failure during commit() could leave the session in a poisoned
+            # state and the subsequent status write would raise (or worse,
+            # partially commit).
+            await session.rollback()
+            stale = await session.get(Artifact, db_artifact_id)
+            if stale is not None:
+                stale.status = "failed"
+                await session.commit()
             log.error("Failed to process artifact %d: %s", db_artifact_id, exc)
             raise
 

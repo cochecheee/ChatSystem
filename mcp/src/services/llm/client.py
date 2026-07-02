@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 
 from google import genai
 from google.genai import types
@@ -60,6 +61,33 @@ class GeminiClient:
                     raise
 
         raise RuntimeError(f"Gemini API không phản hồi sau {self._max_retries} lần thử: {last_exc}")
+
+    async def stream_analyze(
+        self, prompt: str, system_prompt_id: str = "analyze",
+    ) -> AsyncIterator[str]:
+        """Stream the analysis text chunk-by-chunk for the SSE /explain endpoint.
+
+        Yields text deltas as Gemini generates them (report §4.3.4, Mã A.10).
+        Unlike `analyze()`, this does NOT enforce the AnalysisOutput JSON schema
+        — it streams the free-form Vietnamese explanation so the frontend can
+        render it progressively via EventSource. The structured POST /explain
+        remains the canonical path for the machine-readable AnalysisResult.
+        """
+        try:
+            stream = await self._client.aio.models.generate_content_stream(
+                model=self._model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=get_registry().system_for(system_prompt_id),
+                ),
+            )
+            async for chunk in stream:
+                text = getattr(chunk, "text", None)
+                if text:
+                    yield text
+        except Exception as exc:
+            log.error("Gemini stream error: %s", exc)
+            raise RuntimeError(f"Gemini streaming failed: {exc}")
 
     async def chat(self, prompt: str, context: str = "") -> str:
         """Free-form Vietnamese chat for the Shiftwall assistant.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,11 +105,16 @@ class LLMAnalysisService:
             self._gemini_cache[cache_key] = client
         return client
 
-    async def analyze_finding(
+    async def _prepare_analysis(
         self,
         finding: Finding,
         session: AsyncSession,
-    ) -> AnalysisResult:
+    ) -> tuple[GeminiClient, str, str]:
+        """Resolve per-project Gemini/GitHub clients, run the input guardrails,
+        and render the prompt for a finding. Shared by `analyze_finding`
+        (structured JSON output) and `stream_explain` (SSE streaming). Returns
+        `(gemini, prompt, prompt_id)`. Raises ValueError if a guardrail blocks
+        the content."""
         # B4 — resolve project để chọn credentials Gemini + GitHub fetch
         project = None
         if not self._injected_client or not self._injected_github:
@@ -210,6 +216,14 @@ class LLMAnalysisService:
             )
 
         prompt = rendered.user or ""
+        return gemini, prompt, prompt_id
+
+    async def analyze_finding(
+        self,
+        finding: Finding,
+        session: AsyncSession,
+    ) -> AnalysisResult:
+        gemini, prompt, prompt_id = await self._prepare_analysis(finding, session)
 
         output: AnalysisOutput = await gemini.analyze(prompt, system_prompt_id=prompt_id)
 
@@ -230,3 +244,27 @@ class LLMAnalysisService:
 
         log.info("finding %d analyzed by Gemini (confidence=%s)", finding.id, output.confidence)
         return result
+
+    async def stream_explain(
+        self,
+        finding: Finding,
+        session: AsyncSession,
+    ) -> AsyncIterator[str]:
+        """Stream the Vietnamese explanation for a finding chunk-by-chunk
+        (SSE backend for GET /findings/{id}/explain/stream, report §4.3.4).
+
+        If the finding was already analyzed, the cached explanation is replayed
+        as a single chunk (no second LLM call). Otherwise the prompt is built
+        exactly like `analyze_finding` and streamed via `GeminiClient.
+        stream_analyze`. This path streams the prose only; the structured
+        AnalysisResult (with remediation_diff etc.) stays with the POST endpoint,
+        so no partial/degraded result is written to the cache here."""
+        if finding.status == "ai_analyzed" and finding.ai_analysis:
+            cached = finding.ai_analysis.get("explanation_vi") or ""
+            if cached:
+                yield cached
+            return
+
+        gemini, prompt, prompt_id = await self._prepare_analysis(finding, session)
+        async for chunk in gemini.stream_analyze(prompt, system_prompt_id=prompt_id):
+            yield chunk

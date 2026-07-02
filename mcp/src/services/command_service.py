@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import desc, select
@@ -37,22 +36,34 @@ class CommandService:
         user: User,
         db: AsyncSession,
     ) -> CommandResponse:
-        dispatch: dict[str, Any] = {
-            "explain":  self._handle_explain,
-            "fix":      self._handle_explain,   # same analysis, different framing
-            "scan":     self._handle_scan,
-            "rerun":    self._handle_rerun,
-            "approve":  self._handle_approve,
-            "revoke":   self._handle_revoke,
-            "unrevoke": self._handle_unrevoke,
-            "report":   self._handle_report,
-            # Báo cáo tiến độ docx ch.4.3 — 4 lệnh còn lại
-            "status":   self._handle_status,
-            "results":  self._handle_results,
-            "help":     self._handle_help,
-            "feedback": self._handle_feedback,
-        }
-        return await dispatch[cmd](request, user, db)
+        # §4.3.1 — dispatch dựa trên match-case (Python 3.13). Quyền thực thi
+        # theo vai trò được kiểm ở tầng API (COMMAND_ROLES) trước khi tới đây,
+        # nên routing chỉ ánh xạ lệnh → handler.
+        match cmd:
+            case "explain" | "fix":  # same analysis, different framing
+                return await self._handle_explain(request, user, db)
+            case "scan":
+                return await self._handle_scan(request, user, db)
+            case "rerun":
+                return await self._handle_rerun(request, user, db)
+            case "approve":
+                return await self._handle_approve(request, user, db)
+            case "revoke":
+                return await self._handle_revoke(request, user, db)
+            case "unrevoke":
+                return await self._handle_unrevoke(request, user, db)
+            case "report":
+                return await self._handle_report(request, user, db)
+            case "status":
+                return await self._handle_status(request, user, db)
+            case "results":
+                return await self._handle_results(request, user, db)
+            case "help":
+                return await self._handle_help(request, user, db)
+            case "feedback":
+                return await self._handle_feedback(request, user, db)
+            case _:
+                raise HTTPException(status_code=400, detail=f"Lệnh không hỗ trợ: /{cmd}")
 
     @staticmethod
     async def _log_action(
@@ -60,14 +71,22 @@ class CommandService:
         finding_id: int | None = None, detail: str | None = None,
     ) -> None:
         """§4.3.3 — append a finding_actions row. submitted_by carries a source
-        prefix; commands routed through /api/chat/command are dashboard/UI
-        actions, so prefix `dashboard:`. Best-effort: never let audit logging
-        break the primary action."""
+        prefix so the audit log distinguishes callers:
+          - `dashboard:<username>` — UI action via /api/chat/command
+          - `mcp:<role>`           — AI-agent action via the MCP server
+          - `webhook:<token-id>`   — CI/CD-pipeline auto-triage (see processor)
+
+        MCP callers arrive with a `User` whose username is already namespaced
+        (`mcp:<role>`), so we keep it verbatim rather than double-prefixing it;
+        plain dashboard usernames get the `dashboard:` prefix. Best-effort —
+        never let audit logging break the primary action."""
+        username = user.username or "unknown"
+        submitted_by = username if ":" in username else f"dashboard:{username}"
         try:
             db.add(FindingAction(
                 finding_id=finding_id,
                 action=action,
-                submitted_by=f"dashboard:{user.username}",
+                submitted_by=submitted_by,
                 detail=detail,
             ))
             await db.commit()
