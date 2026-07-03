@@ -109,11 +109,14 @@ const AI_TOGGLES: {
 // Tách owner/repo từ URL GitHub để wire multi-tenant đúng. Chấp nhận cả
 // https://github.com/owner/repo(.git)(/), git@github.com:owner/repo.git.
 function parseGitHubRepo(url: string): { owner: string; repo: string } | null {
-  const m = url
-    .trim()
-    .match(/github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i);
-  if (!m) return null;
-  return { owner: m[1], repo: m[2] };
+  const s = url.trim();
+  // 1) URL đầy đủ / thiếu scheme / dạng SSH git@github.com:owner/repo(.git)
+  let m = s.match(/github\.com[/:]([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i);
+  if (m) return { owner: m[1], repo: m[2] };
+  // 2) dạng rút gọn "owner/repo" (không cần host / scheme)
+  m = s.replace(/^\/+|\/+$/g, '').match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/);
+  if (m) return { owner: m[1], repo: m[2] };
+  return null;
 }
 
 function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
@@ -136,7 +139,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
     }
     const repo = parseGitHubRepo(url);
     if (!repo) {
-      setError('GitHub URL không hợp lệ — cần dạng https://github.com/owner/repo');
+      setError('GitHub URL không hợp lệ — nhập https://github.com/owner/repo hoặc owner/repo');
       return;
     }
     if (!token.trim()) {
@@ -151,7 +154,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
     try {
       const p = await api.projects.create({
         name: name.trim(),
-        github_url: url.trim(),
+        github_url: `https://github.com/${repo.owner}/${repo.repo}`,
         github_owner: repo.owner,
         github_repo: repo.repo,
         github_token: token.trim(),
@@ -219,7 +222,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
         <div style={{ fontSize: 11, color: parsed ? 'var(--fg-3)' : 'var(--danger)', paddingLeft: 2 }}>
           {parsed
             ? `→ owner: ${parsed.owner}  ·  repo: ${parsed.repo}`
-            : 'URL chưa hợp lệ — cần dạng https://github.com/owner/repo'}
+            : 'URL chưa hợp lệ — nhập https://github.com/owner/repo hoặc owner/repo'}
         </div>
       )}
       <input
