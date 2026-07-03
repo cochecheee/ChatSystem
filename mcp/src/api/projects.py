@@ -618,9 +618,14 @@ async def delete_project(
     POST .../archive (V3.6 soft delete) để giữ dữ liệu cho trend/audit.
     """
     from sqlalchemy import delete as _delete
+    from sqlalchemy import or_ as _or
+    from sqlalchemy import select as _select
 
     from ..models.entities import (
         Alert,
+        CommandFeedback,
+        Finding,
+        FindingAction,
         PipelineRun,
         ProjectMember,
         SuppressionRule,
@@ -644,6 +649,21 @@ async def delete_project(
     artifacts = await artifact_repo.list_for_project(project_id)
     artifact_ids = [a.id for a in artifacts]
     # Con trước, cha sau — tránh vi phạm khoá ngoại trên InnoDB.
+    # finding_actions.finding_id VÀ command_feedback.finding_id đều là FK non-cascade
+    # -> findings.id (nullable): phải xoá TRƯỚC findings, nếu không MySQL 1451 khi
+    # project có finding đã /approve|/revoke (action row) hoặc /feedback (feedback row).
+    finding_ids_subq = _select(Finding.id).where(
+        _or(
+            Finding.project_id == project_id,
+            Finding.artifact_id.in_(artifact_ids),
+        ),
+    )
+    await session.execute(
+        _delete(FindingAction).where(FindingAction.finding_id.in_(finding_ids_subq)),
+    )
+    await session.execute(
+        _delete(CommandFeedback).where(CommandFeedback.finding_id.in_(finding_ids_subq)),
+    )
     await finding_repo.delete_by_artifact_ids(artifact_ids)
     await artifact_repo.delete_by_ids(artifact_ids)
     for _model in (

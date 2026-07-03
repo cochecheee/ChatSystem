@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func as sql_func, select
+from sqlalchemy import delete, func as sql_func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.db import AsyncSessionLocal
@@ -208,6 +208,10 @@ class SecurityProcessor:
         # skip when reprocessing an OLD run so we never wipe newer data.
         if processed_count > 0:
             await self._prune_superseded_findings(project_id, github_run_id)
+            # V3.9 — collapse merged-vs-per-tool duplicates WITHIN the kept run so
+            # gate-count, KPIs, the Vulns/SCA/DAST lists and the AI summary all
+            # count the same de-duplicated rows (one source of truth).
+            await self._dedup_run_findings(project_id, github_run_id)
 
         log.info(
             "process_run %d done — %d processed, %d failed (out of %d security artifacts)",
@@ -285,6 +289,130 @@ class SecurityProcessor:
                 "Pruned %d superseded findings from %d older-run artifact(s) "
                 "(project %d, kept run %d)",
                 deleted, len(old_artifact_ids), project_id, keep_github_run_id,
+            )
+            return deleted
+
+    async def _dedup_run_findings(
+        self, project_id: int, keep_github_run_id: int,
+    ) -> int:
+        """Collapse findings duplicated WITHIN one run to a single row per
+        dedup_hash — current-state storage (V3.9).
+
+        Root cause of CI↔dashboard number mismatch: a run publishes BOTH a
+        merged artifact (`sast-reports-<run>`) AND per-tool artifacts
+        (`sast-reports-<run>-<tool>`). process_run ingests every security
+        artifact, so the SAME finding is stored once per artifact (raw ≈ 2×
+        unique, ~3× when the poller re-ingests). `_prune_superseded_findings`
+        only drops OLDER runs, never this within-run duplication — so
+        `/findings/gate-count`, the latest-scan KPIs, the Vulns/SCA/DAST lists
+        and the AI summary each counted inflated, disagreeing numbers.
+        De-duping at the storage layer makes every surface agree at the source.
+
+        For each dedup_hash group in the kept run, keep ONE row by priority —
+        a decided triage status (APPROVED/REVOKED) first so audited decisions
+        survive, then ai_analyzed (keeps the AI write-up), else the lowest id —
+        re-point the audit children (finding_actions, command_feedback) of the
+        dropped duplicates onto the keeper, then delete the duplicates. Returns
+        the number of findings deleted.
+
+        Guarded like _prune: only runs when keep_github_run_id is the project's
+        newest run, so reprocessing an old run never disturbs newer data.
+        """
+        from collections import defaultdict
+
+        from ..models.entities import Artifact as ArtifactModel
+        from ..models.entities import CommandFeedback as FeedbackModel
+        from ..models.entities import Finding as FindingModel
+        from ..models.entities import FindingAction as ActionModel
+
+        # Keeper priority (higher wins): audited decision > AI write-up > default.
+        # Status strings match the app's constants (APPROVED/REVOKED are UPPER).
+        _STATUS_PRIORITY = {"REVOKED": 3, "APPROVED": 3, "ai_analyzed": 2}
+
+        async with self.session_factory() as session:
+            newest = (await session.execute(
+                select(sql_func.max(ArtifactModel.github_run_id)).where(
+                    ArtifactModel.project_id == project_id,
+                    ArtifactModel.github_run_id.is_not(None),
+                )
+            )).scalar_one_or_none() or 0
+            if keep_github_run_id < newest:
+                log.info(
+                    "Dedup skipped: run %d is older than newest %d for project %d",
+                    keep_github_run_id, newest, project_id,
+                )
+                return 0
+
+            run_artifact_ids = [
+                r[0] for r in (await session.execute(
+                    select(ArtifactModel.id).where(
+                        ArtifactModel.project_id == project_id,
+                        ArtifactModel.github_run_id == keep_github_run_id,
+                    )
+                )).all()
+            ]
+            if not run_artifact_ids:
+                return 0
+
+            rows = (await session.execute(
+                select(
+                    FindingModel.id, FindingModel.dedup_hash, FindingModel.status,
+                ).where(
+                    FindingModel.artifact_id.in_(run_artifact_ids),
+                    FindingModel.dedup_hash.is_not(None),
+                )
+            )).all()
+
+            groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
+            for fid, dhash, status in rows:
+                groups[dhash].append((fid, status))
+
+            loser_ids: list[int] = []
+            remap: dict[int, int] = {}
+            for members in groups.values():
+                if len(members) < 2:
+                    continue
+                # keeper: highest status priority, then lowest id (stable).
+                keeper = max(
+                    members,
+                    key=lambda m: (_STATUS_PRIORITY.get(m[1], 1), -m[0]),
+                )[0]
+                for fid, _status in members:
+                    if fid != keeper:
+                        loser_ids.append(fid)
+                        remap[fid] = keeper
+
+            if not loser_ids:
+                return 0
+
+            # Re-point audit children of dropped duplicates so no history is lost.
+            # At ingest time losers are brand-new (no children) → the SELECTs come
+            # back empty and this is a no-op; for one-time cleanup of already-
+            # triaged data it preserves the approve/revoke/feedback trail.
+            for child in (ActionModel, FeedbackModel):
+                referenced = {
+                    r[0] for r in (await session.execute(
+                        select(child.finding_id).where(
+                            child.finding_id.in_(loser_ids),
+                        )
+                    )).all()
+                }
+                for loser in referenced:
+                    await session.execute(
+                        update(child).where(child.finding_id == loser).values(
+                            finding_id=remap[loser],
+                        )
+                    )
+
+            result = await session.execute(
+                delete(FindingModel).where(FindingModel.id.in_(loser_ids))
+            )
+            await session.commit()
+            deleted = result.rowcount or len(loser_ids)
+            log.info(
+                "Deduped %d within-run duplicate findings "
+                "(project %d, run %d, %d unique kept)",
+                deleted, project_id, keep_github_run_id, len(groups),
             )
             return deleted
 
