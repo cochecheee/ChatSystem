@@ -42,6 +42,8 @@ class CommandService:
         match cmd:
             case "explain" | "fix":  # same analysis, different framing
                 return await self._handle_explain(request, user, db)
+            case "verify":  # V4.3 — investigate whether a finding is a false positive
+                return await self._handle_verify(request, user, db)
             case "scan":
                 return await self._handle_scan(request, user, db)
             case "rerun":
@@ -115,6 +117,26 @@ class CommandService:
             status="ok",
             message=f"Phân tích finding #{finding.id} hoàn tất.",
             data=data,
+        )
+
+    # ------------------------------------------------------------------
+    # /verify — V4.3 "có thật không?" investigation (data-flow + evidence)
+    # ------------------------------------------------------------------
+
+    async def _handle_verify(
+        self,
+        request: CommandRequest,
+        user: User,
+        db: AsyncSession,
+    ) -> CommandResponse:
+        finding = await self._get_finding(request.finding_id, db)
+        # Read-only advisory — developer+ (same as /explain access).
+        await enforce_finding_project_access(finding.id, user, db, min_role="developer")
+        inv = await self._llm.investigate_finding(finding, db)
+        return CommandResponse(
+            status="ok",
+            message=inv.summary_vi or f"Đã kiểm chứng finding #{finding.id}.",
+            data=inv.model_dump(),
         )
 
     # ------------------------------------------------------------------
@@ -477,6 +499,7 @@ class CommandService:
             {"name": "/results",  "group": "Monitoring", "args": "[run_id]",         "roles": ["developer", "security_lead", "admin"], "desc": "Tóm tắt kết quả scan."},
             {"name": "/explain",  "group": "Analysis",   "args": "finding_id",       "roles": ["developer", "security_lead", "admin"], "desc": "AI giải thích lỗ hổng (tiếng Việt)."},
             {"name": "/fix",      "group": "Analysis",   "args": "finding_id",       "roles": ["developer", "security_lead", "admin"], "desc": "AI đề xuất diff khắc phục."},
+            {"name": "/verify",   "group": "Analysis",   "args": "finding_id",       "roles": ["developer", "security_lead", "admin"], "desc": "AI kiểm chứng finding có phải false positive (lần theo luồng + trích dẫn code)."},
             {"name": "/rerun",    "group": "Action",     "args": "run_id",           "roles": ["security_lead", "admin"],                "desc": "Re-run workflow."},
             {"name": "/approve",  "group": "Action",     "args": "finding_id, justification", "roles": ["security_lead", "admin"],       "desc": "Phê duyệt bypass (≥20 ký tự)."},
             {"name": "/revoke",   "group": "Action",     "args": "finding_id, justification", "roles": ["security_lead", "admin"],       "desc": "Thu hồi finding (đánh dấu không phải lỗi)."},

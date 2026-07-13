@@ -6,7 +6,7 @@ import re
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _sca_severity
+from .severity import resolve_severity
 
 
 def _parse_purl_version(purl: str) -> str | None:
@@ -42,12 +42,14 @@ class DepCheckNormalizer(BaseNormalizer):
                 cwe_id = cwes[0] if cwes else None
 
                 cvss_score: float | None = None
+                score_kind: str | None = None
                 if cvssv3 := vuln.get("cvssv3"):
-                    cvss_score = cvssv3.get("baseScore")
+                    cvss_score, score_kind = cvssv3.get("baseScore"), "v3"
                 elif cvssv2 := vuln.get("cvssv2"):
-                    cvss_score = cvssv2.get("score")
+                    cvss_score, score_kind = cvssv2.get("score"), "v2"
 
-                severity = _sca_severity(sev_raw, cvss_score)
+                res = resolve_severity(raw_label=sev_raw, score=cvss_score, score_kind=score_kind)
+                severity = res.severity
 
                 dedup = compute_dedup_hash(rule_id, file_path, message)
                 findings.append(
@@ -60,13 +62,14 @@ class DepCheckNormalizer(BaseNormalizer):
                         file_path=file_path,
                         line_number=None,
                         cwe_id=cwe_id,
-                        cvss_score=cvss_score,
+                        cvss_score=res.cvss_score,
                         raw_data={
                             "source": vuln.get("source"),
                             "pkg_name": pkg_name,
                             "installed_version": installed_version,
                             "fixed_version": None,  # DepCheck JSON does not include a fixed version
                             "dedup_hash": dedup,
+                            "_severity": res.provenance(),
                         },
                     )
                 )

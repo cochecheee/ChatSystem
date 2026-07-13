@@ -96,6 +96,7 @@ class DataEnricher:
         cwe_num = self._parse_cwe_number(finding.cwe_id)
         cwe_name = self._get_cwe_name(cwe_num)
         owasp = _OWASP_2021.get(cwe_num) if cwe_num else None
+        had_real_cvss = finding.cvss_score is not None
         cvss = self._resolve_cvss(finding.severity, finding.cvss_score)
 
         enriched_raw = dict(finding.raw_data or {})
@@ -103,6 +104,22 @@ class DataEnricher:
             enriched_raw["cwe_name"] = cwe_name
         if owasp:
             enriched_raw["owasp_category"] = owasp
+
+        # V4.1 — mark whether the stored CVSS is a real tool score or one
+        # derived from the severity label (so the dashboard doesn't present a
+        # synthetic "7.5" as if the scanner reported it). The normalizer's
+        # provenance block (raw_data["_severity"]) already carries cvss_kind
+        # (v3/v2/security-severity) for real scores.
+        sev_prov = dict(enriched_raw.get("_severity") or {})
+        if had_real_cvss:
+            sev_prov.setdefault("cvss_source", "tool")
+        elif cvss is not None:
+            sev_prov["cvss_source"] = "derived-from-label"
+            sev_prov.setdefault("cvss", cvss)
+        else:
+            sev_prov.setdefault("cvss_source", "none")
+        if sev_prov:
+            enriched_raw["_severity"] = sev_prov
 
         return FindingCreate(
             artifact_id=finding.artifact_id,

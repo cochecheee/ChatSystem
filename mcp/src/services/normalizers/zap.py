@@ -5,7 +5,7 @@ import json
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _CRITICAL_CWE_IDS
+from .severity import _CRITICAL_CWE_IDS, resolve_severity
 
 
 class ZapJsonNormalizer(BaseNormalizer):
@@ -33,9 +33,13 @@ class ZapJsonNormalizer(BaseNormalizer):
             site_url = site.get("@name", "")
             for alert in site.get("alerts") or []:
                 rule_id = alert.get("pluginid") or alert.get("alertRef") or "zap-unknown"
-                severity = self._RISK_TO_SEVERITY.get(
-                    str(alert.get("riskcode", "")), "medium"
+                riskcode = str(alert.get("riskcode", ""))
+                res = resolve_severity(
+                    label_band=self._RISK_TO_SEVERITY.get(riskcode),
+                    raw_label=f"riskcode={riskcode}",
                 )
+                severity = res.severity
+                prov = res.provenance()
                 title = alert.get("alert") or alert.get("name") or rule_id
                 description = alert.get("desc", "")
                 solution = alert.get("solution", "")
@@ -51,6 +55,8 @@ class ZapJsonNormalizer(BaseNormalizer):
                     and str(alert.get("confidence", "")) in {"3", "high", "High"}
                 ):
                     severity = "critical"
+                    prov["normalized"] = "critical"
+                    prov["source"] = "promoted-dast"
 
                 instances = alert.get("instances") or [{}]
                 for inst in instances:
@@ -83,6 +89,7 @@ class ZapJsonNormalizer(BaseNormalizer):
                                 "confidence": alert.get("confidence", ""),
                                 "wascid": alert.get("wascid", ""),
                                 "dedup_hash": dedup,
+                                "_severity": prov,
                             },
                         )
                     )

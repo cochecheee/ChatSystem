@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 _ALLOWED_EXTENSIONS = {".sarif", ".xml", ".json"}
 _MAX_ZIP_BYTES = 50 * 1024 * 1024   # 50 MB
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB per file
+_MAX_LOG_BYTES = 2 * 1024 * 1024    # 2 MB per job log (tail kept on overflow)
 _GITHUB_API = "https://api.github.com"
 _ARTIFACT_RETRIES = 3               # download attempts before giving up
 _RETRY_STATUS = {429, 500, 502, 503, 504}  # transient — worth retrying
@@ -84,6 +85,63 @@ class GitHubClient:
                 return None
             resp.raise_for_status()
             return resp.json()
+
+    async def list_run_jobs(self, run_id: int) -> list[dict]:
+        """List jobs (with per-step status/timing) for a workflow run.
+
+        `filter=latest` returns only the most recent attempt — matches what
+        the GitHub UI shows. Works while the run is still in progress, so
+        the dashboard can render live step-by-step CI progress.
+        """
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/runs/{run_id}/jobs",
+                params={"per_page": 100, "filter": "latest"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("jobs", [])
+
+    async def get_job(self, job_id: int) -> dict | None:
+        """Fetch metadata cho 1 job cụ thể. Trả None nếu 404."""
+        async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/jobs/{job_id}"
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+
+    async def fetch_job_logs(self, job_id: int) -> str | None:
+        """Download the plain-text log of a completed job.
+
+        GitHub redirects to a short-lived blob-store URL, hence
+        follow_redirects. Returns None on 404 — GitHub answers 404 both for
+        unknown jobs and for jobs still running (logs only exist once the
+        job finishes). Oversized logs keep only the tail, cut at a line
+        boundary, so failure output (which sits at the end) survives.
+        """
+        async with httpx.AsyncClient(
+            headers=self._headers, follow_redirects=True, timeout=60
+        ) as client:
+            resp = await client.get(
+                f"{_GITHUB_API}/repos/{self.owner}/{self.repo}/actions/jobs/{job_id}/logs"
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            raw = resp.content
+        if len(raw) > _MAX_LOG_BYTES:
+            tail = raw[-_MAX_LOG_BYTES:]
+            newline = tail.find(b"\n")
+            if newline != -1:
+                tail = tail[newline + 1:]
+            return (
+                f"[... truncated — showing last {_MAX_LOG_BYTES // (1024 * 1024)} MB "
+                f"of {len(raw) // (1024 * 1024)} MB ...]\n"
+                + tail.decode("utf-8", errors="replace")
+            )
+        return raw.decode("utf-8", errors="replace")
 
     async def dispatch_workflow(self, workflow_filename: str, ref: str = "main") -> None:
         async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:

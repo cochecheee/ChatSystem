@@ -9,6 +9,7 @@ import { flagFalsePositive } from '../features/findings/flagFalsePositive';
 import { useResizableSplit } from '../hooks/useResizableSplit';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import type { Finding } from '../types';
+import { getCorrelation } from '../types';
 
 export function PageVulns({ initialId }: { initialId?: number }) {
   // Vulns page = SAST findings only. Dependencies → SCA page.
@@ -326,10 +327,27 @@ export function PageVulns({ initialId }: { initialId?: number }) {
               >
                 <div className="vuln-row-title">{f.message.split('\n')[0]}</div>
                 <div className="vuln-row-meta">
-                  <SevChip sev={f.severity} />
+                  <SevChip sev={f.severity} finding={f} />
                   <span className="tool-tag" style={{ flexShrink: 0 }}>
                     {f.tool}
                   </span>
+                  {(() => {
+                    const corr = getCorrelation(f);
+                    return corr ? (
+                      <span
+                        className="tool-tag"
+                        style={{
+                          flexShrink: 0,
+                          color: 'var(--accent)',
+                          borderColor: 'var(--accent)',
+                          fontWeight: 600,
+                        }}
+                        title={`${corr.tools.length} tool cùng phát hiện (gộp ${corr.size} findings): ${corr.tools.join(', ')}`}
+                      >
+                        🔗 {corr.size}
+                      </span>
+                    ) : null;
+                  })()}
                   <span
                     className="mono"
                     style={{

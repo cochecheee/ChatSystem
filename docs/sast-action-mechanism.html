@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sast-action — Cơ chế chạy (chat-system)</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dde3;
+    --text: #1c2128; --text-dim: #5b6673;
+    --accent: #7c3aed; --accent-soft: #ede9fe;
+    --blue: #2563eb; --blue-soft: #dbeafe;
+    --green: #16a34a; --green-soft: #dcfce7;
+    --amber: #d97706; --amber-soft: #fef3c7;
+    --red: #dc2626; --red-soft: #fee2e2;
+    --teal: #0d9488; --teal-soft: #ccfbf1;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --surface: #161b22; --surface-2: #1c2230; --border: #2d333b;
+      --text: #e6edf3; --text-dim: #9098a3;
+      --accent: #a371f7; --accent-soft: #21182f;
+      --blue: #58a6ff; --blue-soft: #12283f;
+      --green: #3fb950; --green-soft: #10251a;
+      --amber: #d29922; --amber-soft: #2b2410;
+      --red: #f85149; --red-soft: #2d1618;
+      --teal: #2dd4bf; --teal-soft: #0c2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.6; font-size: 16px; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.hero { border-left: 4px solid var(--accent); padding: 4px 0 4px 18px; margin-bottom: 8px; }
+  h1 { font-size: 1.9rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--text-dim); font-size: 1rem; margin: 0; }
+  .meta { color: var(--text-dim); font-size: 0.82rem; margin-top: 10px; }
+  h2 { font-size: 1.35rem; margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -0.01em; }
+  h3 { font-size: 1.05rem; margin: 22px 0 8px; }
+  p { margin: 10px 0; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 0.82rem; line-height: 1.5; }
+  pre code { background: none; border: none; padding: 0; }
+  .ref { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .callout { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.tldr { border-left-color: var(--green); background: var(--green-soft); }
+  .callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.88rem; background: var(--surface); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+  .tbl-scroll { overflow-x: auto; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+
+  .cards { display: grid; gap: 14px; margin: 18px 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; border-top: 3px solid var(--accent); }
+  .card .tag { display: inline-block; font-family: var(--mono); font-size: 0.72rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; margin-bottom: 6px; letter-spacing: 0.03em; }
+  .card h3 { margin: 4px 0 8px; font-size: 1.02rem; }
+  .card p { margin: 6px 0; font-size: 0.92rem; }
+  .c-sast  { border-top-color: var(--blue); }  .c-sast  .tag { background: var(--blue-soft); color: var(--blue); }
+  .c-dast  { border-top-color: var(--teal); }  .c-dast  .tag { background: var(--teal-soft); color: var(--teal); }
+  .c-gate  { border-top-color: var(--accent); } .c-gate .tag { background: var(--accent-soft); color: var(--accent); }
+
+  .step { display: flex; align-items: stretch; }
+  .step .num { flex: 0 0 34px; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; font-size: 0.85rem; color: #fff; background: var(--accent); border-radius: 8px 0 0 8px; }
+  .step .body { flex: 1; background: var(--surface); border: 1px solid var(--border); border-left: none; border-radius: 0 8px 8px 0; padding: 12px 16px; }
+  .step .body .title { font-weight: 600; }
+  .step .body .desc { font-size: 0.86rem; color: var(--text-dim); margin-top: 2px; }
+  .arrow { text-align: center; color: var(--text-dim); font-size: 1.1rem; padding: 5px 0; }
+  .flow { display: flex; flex-direction: column; margin: 22px 0; }
+  .pill { display:inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 1px 7px; border-radius: 999px; border:1px solid var(--border); background: var(--surface-2); color: var(--text-dim); }
+
+  .arch-scroll { overflow-x: auto; margin: 20px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+  svg.arch { display: block; width: 100%; min-width: 700px; height: auto; }
+  svg.arch text { font-family: var(--sans); fill: var(--text); }
+  svg.arch .repo { fill: none; stroke: var(--border); stroke-width: 1.5; }
+  svg.arch .repo-lbl { font-size: 12px; font-weight: 700; fill: var(--text-dim); font-family: var(--mono); }
+  svg.arch .box { stroke-width: 1.2; }
+  svg.arch .b-sast { fill: var(--blue-soft); stroke: var(--blue); }
+  svg.arch .b-dast { fill: var(--teal-soft); stroke: var(--teal); }
+  svg.arch .b-gate { fill: var(--accent-soft); stroke: var(--accent); }
+  svg.arch .b-art  { fill: var(--surface-2); stroke: var(--border); }
+  svg.arch .b-cs   { fill: var(--green-soft); stroke: var(--green); }
+  svg.arch .bt { font-size: 11.5px; font-weight: 600; text-anchor: middle; }
+  svg.arch .bs { font-size: 9.5px; fill: var(--text-dim); text-anchor: middle; }
+  svg.arch .conn { stroke: var(--text-dim); stroke-width: 1.4; fill: none; }
+  svg.arch .conn-lbl { font-size: 9.5px; fill: var(--text-dim); font-family: var(--mono); }
+
+  footer { margin-top: 50px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.82rem; }
+  footer code { font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>sast-action — Cơ chế chạy</h1>
+  <p class="subtitle">GitHub composite Action ở repo target, và contract nó phải khớp với chat-system</p>
+</header>
+<p class="meta">Module liên quan: <code>mcp/</code> (backend contract) · SAST/SCA DevSecOps · Tài liệu kỹ thuật nội bộ</p>
+
+<div class="callout warn">
+  <strong>Phạm vi tài liệu.</strong> <code>sast-action</code> là một <strong>GitHub composite Action nằm ở repo <em>target</em></strong>
+  (theo quy ước <code>ALOUTE_Spring_Thymeleaf_RCE</code>) — <strong>không</strong> nằm trong repo <code>chat-system</code> này.
+  Tài liệu mô tả cơ chế chạy dựa trên: (a) 3 composite được ghi trong comment của repo này
+  (<span class="ref">config/profiles/github-actions-default.yml</span>, <span class="ref">api/findings.py</span>);
+  (b) <strong>contract</strong> mà action buộc phải khớp để chat-system nhận diện được — tên artifact, payload webhook, query gate.
+  Phần YAML nội bộ của action nằm ở repo target.
+</div>
+
+<div class="callout tldr">
+  <strong>TL;DR —</strong> <code>sast-action</code> là <strong>client mỏng &amp; stateless</strong>. Nó chỉ làm 3 việc:
+  (1) chạy scanner &amp; <strong>upload artifact</strong> đúng tên; (2) <strong>bắn webhook</strong> báo run xong;
+  (3) <strong>hỏi gate</strong> pass/fail rồi cho CI xanh/đỏ. Mọi "trí tuệ" — normalize, dedup, chính sách threshold —
+  nằm ở <strong>server (chat-system)</strong>, không nằm trong action. Nhờ vậy đổi ngưỡng gate trong dashboard không cần
+  redeploy action.
+</div>
+
+<h2>1. Vị trí &amp; vai trò — 2 repo</h2>
+<p>
+  Một bên là <strong>repo target</strong> chứa <code>sast-action</code> (chạy trong GitHub Actions).
+  Bên kia là <strong>chat-system</strong> (MCP Gateway / FastAPI + DB + dashboard). Chúng nối nhau qua Artifact API + Webhook + Gate API.
+</p>
+
+<div class="arch-scroll">
+<svg viewBox="0 0 880 430" class="arch" role="img" aria-label="Kiến trúc 2 repo: sast-action và chat-system">
+  <!-- target repo box -->
+  <rect x="20" y="30" width="420" height="380" rx="10" class="repo"/>
+  <text x="34" y="22" class="repo-lbl">REPO TARGET · GitHub Actions</text>
+
+  <!-- composites -->
+  <rect x="45" y="55" width="170" height="56" rx="7" class="box b-sast"/>
+  <text x="130" y="80" class="bt">sast-suite (composite)</text>
+  <text x="130" y="97" class="bs">semgrep · codeql · trivy · …</text>
+
+  <rect x="245" y="55" width="170" height="56" rx="7" class="box b-dast"/>
+  <text x="330" y="80" class="bt">run-dast (composite)</text>
+  <text x="330" y="97" class="bs">OWASP ZAP (V2.3)</text>
+
+  <!-- artifacts -->
+  <rect x="45" y="140" width="370" height="70" rx="7" class="box b-art"/>
+  <text x="230" y="162" class="bt">Artifacts (SARIF / XML / JSON)</text>
+  <text x="230" y="180" class="bs">sast-reports-* · dast-reports-* · semgrep-report · codeql-report</text>
+  <text x="230" y="195" class="bs">spotbugs-report · dep-check-report · trivy-report · trivy-image-scan-*</text>
+
+  <!-- gate -->
+  <rect x="45" y="235" width="370" height="60" rx="7" class="box b-gate"/>
+  <text x="230" y="259" class="bt">security-gate (composite)</text>
+  <text x="230" y="276" class="bs">bắn webhook → poll gate-count → pass/fail → CI xanh/đỏ</text>
+
+  <!-- arrows within target -->
+  <path d="M130,111 L130,140" class="conn" marker-end="url(#a-dim)"/>
+  <path d="M330,111 L330,140" class="conn" marker-end="url(#a-dim)"/>
+  <path d="M230,210 L230,235" class="conn" marker-end="url(#a-dim)"/>
+
+  <text x="60" y="325" class="conn-lbl">workflow_dispatch / push trigger</text>
+  <rect x="45" y="330" width="370" height="30" rx="6" class="box b-art"/>
+  <text x="230" y="349" class="bs">chat-system có thể DISPATCH action: trigger_scan → security.yml</text>
+
+  <!-- chat-system box -->
+  <rect x="580" y="55" width="280" height="300" rx="10" class="repo"/>
+  <text x="594" y="47" class="repo-lbl">CHAT-SYSTEM · MCP Gateway</text>
+  <rect x="605" y="80" width="230" height="46" rx="7" class="box b-cs"/>
+  <text x="720" y="100" class="bt">POST /webhook/pipeline-complete</text>
+  <text x="720" y="116" class="bs">nhận báo run xong → 202</text>
+  <rect x="605" y="140" width="230" height="46" rx="7" class="box b-cs"/>
+  <text x="720" y="160" class="bt">process_run (background)</text>
+  <text x="720" y="176" class="bs">fetch · normalize · dedup · store</text>
+  <rect x="605" y="200" width="230" height="46" rx="7" class="box b-cs"/>
+  <text x="720" y="220" class="bt">GET /findings/gate-count</text>
+  <text x="720" y="236" class="bs">trả pass/fail + run_ingested</text>
+  <rect x="605" y="260" width="230" height="46" rx="7" class="box b-art"/>
+  <text x="720" y="280" class="bt">GitHub REST API</text>
+  <text x="720" y="296" class="bs">list_artifacts · fetch zip · dispatch</text>
+
+  <!-- cross-repo arrows -->
+  <path d="M415,255 C500,255 520,103 605,103" class="conn" marker-end="url(#a-dim)"/>
+  <text x="470" y="150" class="conn-lbl">webhook</text>
+  <path d="M835,283 C870,283 460,400 230,360" class="conn" marker-end="url(#a-dim)" opacity="0.6"/>
+  <text x="500" y="392" class="conn-lbl">pull artifacts (REST)</text>
+  <path d="M605,223 C520,223 500,270 415,272" class="conn" marker-end="url(#a-dim)"/>
+  <text x="470" y="250" class="conn-lbl">gate poll ↕</text>
+
+  <defs>
+    <marker id="a-dim" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" style="fill:var(--text-dim)"/></marker>
+  </defs>
+</svg>
+</div>
+
+<h2>2. Ba composite của sast-action</h2>
+<div class="cards">
+  <div class="card c-sast">
+    <span class="tag">sast-suite</span>
+    <h3>Chạy SAST/SCA song song</h3>
+    <p>Chạy các scanner tĩnh song song: Semgrep, CodeQL, ESLint (SARIF), SpotBugs, OWASP Dependency-Check, Trivy (filesystem + container image).</p>
+    <p>Kết quả upload thành: artifact gộp <code>sast-reports-&lt;run&gt;</code> <strong>và</strong> các artifact per-tool (<code>semgrep-report</code>, <code>codeql-report</code>, …). → Chính sự tồn tại <em>song song</em> của bản gộp + per-tool là nguồn gây trùng mà Tầng 3 dedup xử lý ở phía server.</p>
+    <p><span class="ref">profiles/github-actions-default.yml (comment "sast-reports-* = bundled multi-tool từ sast-suite")</span></p>
+  </div>
+  <div class="card c-dast">
+    <span class="tag">run-dast</span>
+    <h3>Quét động (DAST) — OWASP ZAP</h3>
+    <p>Quét app đang chạy bằng OWASP ZAP (V2.3), upload <code>dast-reports-&lt;run&gt;</code>. Webhook DAST land riêng nhưng gọi <code>process_run</code> với <strong>cùng <code>run_id</code></strong> → idempotency guard ở server tránh nhân đôi.</p>
+    <p><span class="ref">profiles/github-actions-default.yml</span> · <span class="ref">processor.py:129-133</span></p>
+  </div>
+  <div class="card c-gate">
+    <span class="tag">security-gate</span>
+    <h3>Cổng chặn merge</h3>
+    <p>Sau khi scan xong: (1) bắn webhook báo run hoàn tất; (2) poll <code>gate-count</code> tới khi <code>run_ingested=true</code>; (3) đọc <code>pass</code> do server tính theo threshold của project; (4) <code>pass=false</code> → fail job, chặn merge.</p>
+    <p><span class="ref">api/findings.py:185</span> · vì sao gate ở server: <span class="ref">docs/fix_bugs.md:373</span></p>
+  </div>
+</div>
+
+<h2>3. Cơ chế chạy end-to-end</h2>
+<div class="flow">
+  <div class="step"><div class="num">0</div><div class="body">
+    <div class="title">Trigger</div>
+    <div class="desc">Developer push code → workflow chạy. Hoặc chat-system chủ động dispatch: MCP tool <code>trigger_scan</code> → <code>dispatch_workflow("security.yml", ref="main")</code> → GitHub <code>workflow_dispatch</code>. <span class="ref">mcp_server.py:259</span> · <span class="ref">github_client.py:88</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">1</div><div class="body">
+    <div class="title">sast-suite + run-dast chạy — <span class="pill">trong action</span></div>
+    <div class="desc">Scanner chạy song song → upload artifact đúng tên profile (SARIF/XML/JSON, ≤ 50 MB/zip, ≤ 10 MB/file).</div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">2</div><div class="body">
+    <div class="title">security-gate bắn webhook</div>
+    <div class="desc"><code>POST /webhook/pipeline-complete</code> body <code>{run_id, repository}</code>, header HMAC <code>X-Hub-Signature-256</code> + <code>X-GitHub-Delivery</code>. Server trả <code>202</code> ngay, ingest sang nền. <span class="ref">artifacts.py:161</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">3</div><div class="body">
+    <div class="title">chat-system pull &amp; xử lý (nền)</div>
+    <div class="desc"><code>process_run</code>: <code>list_artifacts(run_id)</code> → lọc theo profile → <code>fetch_artifact</code> (download + unzip, chống Zip-Slip/Zip-Bomb) → normalize → <strong>dedup 4 tầng</strong> → store. Xem doc <em>dedup-ci-local-flow.html</em>. <span class="ref">processor.py:process_run</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">4</div><div class="body">
+    <div class="title">security-gate poll gate-count</div>
+    <div class="desc"><code>GET /findings/gate-count?project_id&amp;run_id</code>, lặp tới khi <code>run_ingested=true</code>. Server đếm active risk (loại REVOKED + APPROVED) rồi so threshold → <code>pass</code>. <span class="ref">findings.py:185-288</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">5</div><div class="body">
+    <div class="title">Verdict</div>
+    <div class="desc"><code>pass=true</code> → CI xanh, cho merge. <code>pass=false</code> → CI đỏ, chặn merge (kèm <code>blocking_reasons</code>).</div>
+  </div></div>
+</div>
+
+<div class="callout">
+  <strong>Đường pull dự phòng (poller).</strong> Ngoài webhook (push, tức thời), chat-system còn có <strong>MCP Poller</strong>
+  quét GitHub mỗi ~5 phút để kéo artifact của run mới — phòng khi webhook bị miss. Cả hai đường đều gọi cùng
+  <code>process_run</code> nên kết quả dedup như nhau. <span class="ref">services/poller.py</span> · <span class="ref">README §Luồng dữ liệu bước 3</span>
+</div>
+
+<h2>4. Contract chi tiết (action phải khớp)</h2>
+
+<h3>4.1 — Tên artifact (server lọc theo profile)</h3>
+<p>Chỉ artifact có tên khớp <code>github-actions-default.yml</code> mới được coi là "security" và đem ingest:</p>
+<div class="tbl-scroll"><table>
+  <tr><th>Loại khớp</th><th>Tên</th><th>Ghi chú</th></tr>
+  <tr><td>Exact</td><td><code>spotbugs-report</code>, <code>semgrep-report</code>, <code>codeql-report</code>, <code>dep-check-report</code>, <code>trivy-report</code>, <code>eslint-report</code></td><td>Per-tool report</td></tr>
+  <tr><td>Prefix</td><td><code>sast-reports-*</code>, <code>dast-reports-*</code>, <code>trivy-image-scan-*</code></td><td>Gộp / DAST / Trivy container (append run number)</td></tr>
+  <tr><td>File trong zip</td><td><code>.sarif</code> · <code>.xml</code> · <code>.json</code></td><td>Chỉ 3 đuôi này được extract. Zip ≤ 50 MB, mỗi file ≤ 10 MB. <span class="ref">github_client.py:14-16</span></td></tr>
+</table></div>
+<p>Muốn hỗ trợ layout CI khác → copy profile này, trỏ qua env <code>ARTIFACT_PROFILE</code> (hoặc per-project setting).</p>
+
+<h3>4.2 — Webhook <code>POST /webhook/pipeline-complete</code></h3>
+<div class="tbl-scroll"><table>
+  <tr><th>Thành phần</th><th>Giá trị</th></tr>
+  <tr><td>Body</td><td><code>{ "run_id": int (bắt buộc), "pipeline_status"?: str, "repository"?: "owner/repo" }</code> — <code>extra: ignore</code>. <span class="ref">schemas.py:142</span></td></tr>
+  <tr><td>Auth (ưu tiên giảm dần)</td><td>1. HMAC <code>X-Hub-Signature-256: sha256=&lt;hex&gt;</code> ký body bằng <code>Project.webhook_token</code> · 2. Bearer per-project token · 3. global <code>CI_WEBHOOK_TOKEN</code>. Không path nào hợp lệ → <code>403</code> (fail-closed). <span class="ref">artifacts.py:222-295</span></td></tr>
+  <tr><td>Replay dedup</td><td><code>X-GitHub-Delivery: &lt;uuid&gt;</code>; delivery đã thấy → <code>200 outcome=duplicate</code>, bỏ qua. <span class="ref">artifacts.py:201-216</span></td></tr>
+  <tr><td>Response</td><td><code>202 { status, outcome, run_id, project_id, delivery_id, auth_mode }</code></td></tr>
+</table></div>
+
+<h3>4.3 — Gate <code>GET /findings/gate-count</code></h3>
+<div class="tbl-scroll"><table>
+  <tr><th>Thành phần</th><th>Giá trị</th></tr>
+  <tr><td>Query</td><td><code>?project_id=&amp;run_id=</code> (khuyến nghị truyền cả hai để server tự quyết theo policy)</td></tr>
+  <tr><td>Auth</td><td>Webhook token (per-project/global) · JWT · anonymous (khi bật <code>ANONYMOUS_READ_ENABLED</code>). <span class="ref">findings.py:213-227</span></td></tr>
+  <tr><td>Trả về</td><td><code>{ critical, high, medium, low, run_total, run_ingested, policy, pass, blocking_reasons }</code></td></tr>
+  <tr><td>Ngữ nghĩa đếm</td><td>Active risk = <code>exclude_revoked</code> + <code>exclude_approved</code>. REVOKED (false-positive) &amp; APPROVED (accepted-risk) <strong>không</strong> chặn gate. <span class="ref">findings.py:230-241</span></td></tr>
+  <tr><td>Chống race</td><td>Ingest async → poll tới khi <code>run_ingested=true</code> rồi mới tin số. <span class="ref">findings.py:243-250</span></td></tr>
+  <tr><td>Policy</td><td>Server so <code>critical/high</code> với <code>gate_critical_threshold / gate_high_threshold</code> của project (owner đổi trong dashboard). <span class="ref">findings.py:256-270</span></td></tr>
+</table></div>
+
+<h2>5. Vì sao gate verdict tính ở server, không ở action</h2>
+<ul>
+  <li><strong>CI runner stateless:</strong> action không giữ dữ liệu finding, không biết lịch sử triage/approve/revoke. Chỉ server mới biết finding nào đã bị REVOKE/APPROVE để loại khỏi đếm.</li>
+  <li><strong>Đổi policy không cần redeploy:</strong> threshold nằm trong DB per-project; owner chỉnh qua <code>PATCH /projects/{id}/gate-policy</code> mà không phải sửa YAML rồi phát hành lại <code>sast-action</code>. <span class="ref">docs/fix_bugs.md:373</span></li>
+  <li><strong>Một nguồn sự thật:</strong> gate, dashboard KPI, list, AI summary đều đọc cùng số đã dedup ở server → CI ↔ dashboard luôn khớp.</li>
+</ul>
+
+<footer>
+  <strong>File nguồn tham chiếu (repo chat-system)</strong><br>
+  <code>mcp/config/profiles/github-actions-default.yml</code> — tên artifact + 3 composite (comment)<br>
+  <code>mcp/src/api/artifacts.py</code> — <code>/webhook/pipeline-complete</code>, replay dedup, auth 3 tầng, reprocess<br>
+  <code>mcp/src/api/findings.py</code> — <code>/findings/gate-count</code> (verdict + run_ingested)<br>
+  <code>mcp/src/models/schemas.py</code> — <code>WebhookRunPayload</code><br>
+  <code>mcp/src/services/github_client.py</code> — <code>dispatch_workflow · list_artifacts · fetch_artifact</code> (giới hạn zip/file)<br>
+  <code>mcp/src/services/processor.py</code> — <code>process_run</code>, <code>_is_security_artifact</code>, idempotency<br>
+  <code>mcp/src/mcp_server.py</code> — tool <code>trigger_scan</code><br>
+  <br>
+  Xem kèm: <code>docs/dedup-ci-local-flow.html</code> (chi tiết 4 tầng dedup + map CI↔local).<br>
+  <em>Lưu ý:</em> YAML nội bộ của <code>sast-action</code> nằm ở repo target, không có trong repo này — tài liệu mô tả theo contract phía server.
+</footer>
+
+</div>
+</body>
+</html>

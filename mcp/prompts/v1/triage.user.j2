@@ -1,6 +1,12 @@
 Classify each finding below as TRUE_POSITIVE / FALSE_POSITIVE / NEEDS_REVIEW.
 Respond with JSON {items: [{finding_id, classification, confidence, reason}, ...]}.
 
-{% for f in findings -%}
-- id={{ f.id }}, tool={{ f.tool }}, rule={{ f.rule_id }}, severity={{ f.severity }}, file={{ f.file_path }}:{{ f.line_number or "?" }}, msg={{ (f.message or "")[:300] }}
+{% for it in items -%}
+- id={{ it.id }}, tool={{ it.tool }}, rule={{ it.rule_id }}, severity={{ it.severity }}, file={{ it.file_path }}:{{ it.line_number or "?" }}, msg={{ it.message }}
+{% if it.code %}  code:
+```
+{{ it.code }}
+```
+{% else %}  code: (không có ngữ cảnh — thiếu mã nguồn)
+{% endif -%}
 {% endfor %}

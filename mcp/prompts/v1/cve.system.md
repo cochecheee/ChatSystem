@@ -21,3 +21,4 @@ Quy tắc:
 4. `confidence`: HIGH nếu có fixed_version rõ ràng; MEDIUM nếu suy luận được; LOW nếu thiếu thông tin.
 5. `severity` giữ theo CVSS nếu có; `cwe_reference` điền CWE nếu biết, nếu không thì để mã CVE/GHSA.
 6. Không tiết lộ thông tin nhạy cảm trong phản hồi.
+7. Điền `false_positive_likelihood` = HIGH | MEDIUM | LOW và `false_positive_reason` (1 câu tiếng Việt). Lỗ hổng phụ thuộc thường LOW; chỉ đặt HIGH khi có dấu hiệu gói KHÔNG thực sự được dùng, phiên bản KHÔNG nằm trong range bị ảnh hưởng, hoặc chỉ là dev/test dependency.

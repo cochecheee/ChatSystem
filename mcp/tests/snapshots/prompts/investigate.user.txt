@@ -1,0 +1,15 @@
+### Finding cần kiểm chứng (có thật không?)
+- Công cụ: codeql
+- Rule ID: py/sql-injection
+- Mô tả: SQL query built from user input
+- File: app/views.py, dòng 42
+- CWE: CWE-89
+- CVSS Score: 9.1
+
+### Mã nguồn thật (đã đánh số dòng)
+```
+  40 | def search(request):
+  42 | cursor.execute(f"...{request.GET['q']}")
+```
+
+Hãy lần theo luồng dữ liệu trên ĐÚNG mã nguồn trên để xác định finding này là lỗi thật hay false positive. Trả về theo JSON schema: verdict, confidence, summary_vi, và reasoning_steps (mỗi bước trích dẫn dòng code thật qua code_ref + quote).

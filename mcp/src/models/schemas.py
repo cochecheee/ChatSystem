@@ -166,6 +166,43 @@ class AnalysisResult(BaseModel):
     severity: str
     cwe_reference: str
     confidence: str
+    # V4.2 — false-positive verdict (from the model, grounded in code) +
+    # grounding of the fix diff (computed post-hoc, not model-reported).
+    false_positive_likelihood: str = "LOW"
+    false_positive_reason: str = ""
+    grounded: bool = True
+    grounded_note: str = ""
+
+
+# ---------------------------------------------------------------------------
+# V4.3 — false-positive investigation ("lỗi này có thật không?"). Persisted in
+# finding.raw_data['fp_investigation'] and returned by the chat / /verify path.
+# Each step carries a per-step grounding flag computed post-hoc against the real
+# source (the model does not report `grounded`), mirroring AnalysisResult.
+# ---------------------------------------------------------------------------
+
+class InvestigationStep(BaseModel):
+    claim_vi: str
+    kind: str = ""
+    file: str = ""
+    line_start: int = 0
+    line_end: int = 0
+    quote: str = ""
+    grounded: bool = False
+    grounded_note: str = ""
+
+
+class FPInvestigation(BaseModel):
+    finding_id: int
+    verdict: str                        # TRUE_POSITIVE | FALSE_POSITIVE | UNCERTAIN
+    confidence: str = "LOW"
+    summary_vi: str = ""
+    steps: list[InvestigationStep] = []
+    false_positive_likelihood: str = "LOW"
+    grounded: bool = True               # overall (>=60% steps grounded)
+    grounded_note: str = ""
+    source_available: bool = True
+    suggested_command: str | None = None   # "/revoke N" (FP) | "/fix N" (TP)
 
 
 # ---------------------------------------------------------------------------

@@ -8,11 +8,7 @@ from typing import Any
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import (
-    _SARIF_LEVEL_TO_SEVERITY,
-    _UPPERCASE_TO_SEVERITY,
-    _security_severity_to_label,
-)
+from .severity import SeverityResult, band_from_label, band_from_score
 
 log = logging.getLogger(__name__)
 
@@ -157,7 +153,8 @@ class SarifNormalizer(BaseNormalizer):
         # SARIF effective level (§3.27.10): explicit result.level wins, else
         # inherit the rule's defaultConfiguration.level, else spec default.
         level = self._effective_level(result, rule_def)
-        severity = self._extract_severity(result, rule_def, level)
+        sev_res = self._extract_severity(result, rule_def, level)
+        severity = sev_res.severity
 
         msg_obj = result.get("message") or {}
         message = msg_obj.get("text") if isinstance(msg_obj, dict) else ""
@@ -186,9 +183,11 @@ class SarifNormalizer(BaseNormalizer):
             file_path=file_path,
             line_number=line_number,
             cwe_id=cwe_id,
+            cvss_score=sev_res.cvss_score,
             raw_data={
                 "level": level,
                 "dedup_hash": dedup,
+                "_severity": sev_res.provenance(),
             },
         )
 
@@ -217,41 +216,56 @@ class SarifNormalizer(BaseNormalizer):
         result: dict[str, Any],
         rule_def: dict[str, Any],
         level: str,
-    ) -> str:
-        """Resolve severity using rule properties before falling back to SARIF `level`.
+    ) -> SeverityResult:
+        """Resolve severity + provenance using rule properties before SARIF `level`.
 
         CodeQL and Semgrep emit `level=error` for most security rules regardless
-        of actual risk; the real severity lives in rule `properties`. Order:
-          1. `security-severity` numeric (CVSS-style, GitHub-aligned thresholds)
-          2. `problem.severity` (CodeQL: error|warning|recommendation)
-          3. `properties.severity` (Semgrep: ERROR|WARNING|INFO, or CRITICAL/HIGH/...)
-          4. SARIF `level` (error|warning|note|none)
+        of actual risk; the real severity lives in rule `properties`. Unlike the
+        SCA path, the numeric `security-severity` here is AUTHORITATIVE (not
+        combined more-severe with the coarse error/warning level, which is an
+        issue-kind, not a genuine severity — combining would re-inflate every
+        CodeQL `error` to high). Precedence:
+          1. `security-severity` numeric (CVSS-style, GitHub thresholds) — wins
+          2. `problem.severity` (CodeQL) / `properties.severity` (Semgrep) label
+          3. SARIF effective `level` (error|warning|note|none), else `medium`.
         """
-        # Result-level properties win over rule-level (some emitters override per finding)
+        score: float | None = None
+        label: str | None = None
+        # Result-level properties win over rule-level (some emitters override).
         for src in (result.get("properties") or {}, rule_def.get("properties") or {}):
             if not isinstance(src, dict):
                 continue
-            raw_score = src.get("security-severity")
-            if raw_score is not None:
+            if score is None and src.get("security-severity") is not None:
                 try:
-                    return _security_severity_to_label(float(raw_score))
+                    score = float(src["security-severity"])
                 except (TypeError, ValueError):
                     pass
-            problem_sev = src.get("problem.severity")
-            if isinstance(problem_sev, str) and problem_sev.strip():
-                mapped = _UPPERCASE_TO_SEVERITY.get(problem_sev.strip().upper())
-                if mapped:
-                    return mapped
-            prop_sev = src.get("severity")
-            if isinstance(prop_sev, str) and prop_sev.strip():
-                mapped = _UPPERCASE_TO_SEVERITY.get(prop_sev.strip().upper())
-                if mapped:
-                    return mapped
-        # `level` is the resolved effective level (error/warning/note/none).
-        # An unrecognised level defaults to "medium" (pending triage), NOT
-        # "info" — mirroring _sca_severity. Defaulting unknowns to the lowest
-        # bucket silently under-rated real issues whose level didn't resolve.
-        return _SARIF_LEVEL_TO_SEVERITY.get(level, "medium")
+            if label is None:
+                cand = src.get("problem.severity") or src.get("severity")
+                if isinstance(cand, str) and cand.strip():
+                    label = cand.strip()
+
+        band_score = band_from_score(score, "security-severity")
+        band_label = band_from_label(label)
+        band_level = band_from_label(level)
+        if band_score:
+            severity, source = band_score, "score"
+        elif band_label:
+            severity, source = band_label, "label"
+        elif band_level:
+            severity, source = band_level, "sarif-level"
+        else:
+            severity, source = "medium", "default"
+        return SeverityResult(
+            severity=severity,
+            cvss_score=score if score not in (None, 0, 0.0) else None,
+            cvss_kind="security-severity" if score else None,
+            original_label=label or level,
+            band_label=band_label,
+            band_score=band_score,
+            source=source,
+            disagreement=bool(band_score and band_label and band_score != band_label),
+        )
 
     @staticmethod
     def _extract_location(result: dict[str, Any]) -> tuple[str, int | None]:

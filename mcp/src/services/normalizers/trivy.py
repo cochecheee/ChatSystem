@@ -5,7 +5,7 @@ import json
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _sca_severity
+from .severity import resolve_severity
 
 
 class TrivyJsonNormalizer(BaseNormalizer):
@@ -26,11 +26,16 @@ class TrivyJsonNormalizer(BaseNormalizer):
                 cwe_id = cwe_ids[0] if cwe_ids else None
 
                 cvss_score: float | None = None
+                score_kind: str | None = None
                 cvss = vuln.get("CVSS") or {}
                 if nvd := cvss.get("nvd"):
-                    cvss_score = nvd.get("V3Score") or nvd.get("V2Score")
+                    if nvd.get("V3Score") is not None:
+                        cvss_score, score_kind = nvd.get("V3Score"), "v3"
+                    elif nvd.get("V2Score") is not None:
+                        cvss_score, score_kind = nvd.get("V2Score"), "v2"
 
-                severity = _sca_severity(sev_raw, cvss_score)
+                res = resolve_severity(raw_label=sev_raw, score=cvss_score, score_kind=score_kind)
+                severity = res.severity
 
                 pkg_name = vuln.get("PkgName", "")
                 file_path = f"{target}:{pkg_name}" if pkg_name else target
@@ -46,12 +51,13 @@ class TrivyJsonNormalizer(BaseNormalizer):
                         file_path=file_path,
                         line_number=None,
                         cwe_id=cwe_id,
-                        cvss_score=cvss_score,
+                        cvss_score=res.cvss_score,
                         raw_data={
                             "pkg_name": pkg_name,
                             "installed_version": vuln.get("InstalledVersion"),
                             "fixed_version": vuln.get("FixedVersion"),
                             "dedup_hash": dedup,
+                            "_severity": res.provenance(),
                         },
                     )
                 )

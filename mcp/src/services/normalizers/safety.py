@@ -5,7 +5,7 @@ import json
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _sca_severity
+from .severity import resolve_severity
 
 
 class SafetyJsonNormalizer(BaseNormalizer):
@@ -48,7 +48,8 @@ class SafetyJsonNormalizer(BaseNormalizer):
                 continue
 
             rule_id = str(vid)
-            severity = _sca_severity(str(sev_raw), None)
+            res = resolve_severity(raw_label=str(sev_raw) or None)
+            severity = res.severity
             message = (str(advisory).strip() or rule_id)[:2000]
             file_path = f"requirements.txt:{pkg}"
             dedup = compute_dedup_hash(rule_id, file_path, message)
@@ -58,7 +59,8 @@ class SafetyJsonNormalizer(BaseNormalizer):
                 line_number=None, cwe_id=None, cvss_score=None,
                 raw_data={"pkg_name": pkg, "installed_version": installed,
                           "fixed_version": None, "vulnerable_spec": spec,
-                          "cve": cve, "dedup_hash": dedup},
+                          "cve": cve, "dedup_hash": dedup,
+                          "_severity": res.provenance()},
             ))
 
         return findings

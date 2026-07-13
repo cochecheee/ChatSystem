@@ -3,9 +3,11 @@ import { api } from '../../api/client';
 import { Icon } from '../../components/Icon';
 import { RevokeDialog } from '../../components/modals/RevokeDialog';
 import { ApprovalDialog } from '../../components/modals/ApprovalDialog';
-import type { AnalysisResult, Finding } from '../../types';
+import type { AnalysisResult, Finding, FPInvestigation } from '../../types';
+import { getCorrelation, getSeverityInfo } from '../../types';
 import { pkgMeta } from '../../lib/cveUtils';
 import { SevChip, isDepScan } from './sast';
+import { InvestigationCard } from './InvestigationCard';
 
 function DiffView({ diff }: { diff: string }) {
   const lines = diff.split('\n');
@@ -87,7 +89,9 @@ function AiPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
+  const [messages, setMessages] = useState<
+    { role: 'user' | 'ai'; text: string; investigation?: FPInvestigation | null }[]
+  >([]);
   // ChatOps trong panel: /approve và /revoke cần justification nên mở dialog.
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
@@ -179,7 +183,13 @@ function AiPanel({
       setMessages((m) => [...m, { role: 'user', text }]);
       try {
         const res = await api.chat.command({ command: `/${cmd}`, finding_id: fid });
-        setMessages((m) => [...m, { role: 'ai', text: res.message || 'OK' }]);
+        // /verify returns an FPInvestigation payload → render as a card.
+        const inv =
+          res.data && 'verdict' in res.data ? (res.data as unknown as FPInvestigation) : null;
+        setMessages((m) => [
+          ...m,
+          { role: 'ai', text: inv ? inv.summary_vi || res.message : res.message || 'OK', investigation: inv },
+        ]);
       } catch (e) {
         setMessages((m) => [...m, { role: 'ai', text: `Lỗi: ${e}` }]);
       }
@@ -190,7 +200,10 @@ function AiPanel({
     setInput('');
     try {
       const res = await api.chat.message(text, finding.id);
-      setMessages((m) => [...m, { role: 'ai', text: res.reply }]);
+      setMessages((m) => [
+        ...m,
+        { role: 'ai', text: res.reply, investigation: res.investigation ?? null },
+      ]);
     } catch (e) {
       setMessages((m) => [...m, { role: 'ai', text: `Lỗi: ${e}` }]);
     }
@@ -280,6 +293,21 @@ function AiPanel({
                 confidence: {analysis.confidence}
               </span>
             </div>
+            {(analysis.false_positive_likelihood || '').toUpperCase() === 'HIGH' && (
+              <div
+                style={{
+                  margin: '8px 0',
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  background: 'var(--sev-med-bg, rgba(240,192,56,0.12))',
+                  borderLeft: '3px solid var(--sev-med-fg, #f0c038)',
+                }}
+              >
+                ⚠️ <b>Khả năng là false positive: CAO.</b>{' '}
+                {analysis.false_positive_reason || 'Cân nhắc kỹ trước khi đào sâu để sửa.'}
+              </div>
+            )}
             <div className="msg-body">
               <p>
                 <strong>Giải thích:</strong> {analysis.explanation_vi}
@@ -295,6 +323,21 @@ function AiPanel({
             </div>
             {analysis.remediation_diff && (
               <div style={{ marginTop: 8 }}>
+                {analysis.grounded === false ? (
+                  <div
+                    style={{ fontSize: 11, marginBottom: 4, color: 'var(--sev-high-fg, #ff7e36)' }}
+                    title={analysis.grounded_note || ''}
+                  >
+                    ⚠ Bản vá chưa neo được vào mã nguồn thật — độ tin cậy thấp, cần kiểm tra tay.
+                  </div>
+                ) : analysis.grounded === true ? (
+                  <div
+                    style={{ fontSize: 11, marginBottom: 4, color: 'var(--sev-low-fg, #35c07a)' }}
+                    title={analysis.grounded_note || ''}
+                  >
+                    ✓ Bản vá đã đối chiếu với mã nguồn thật.
+                  </div>
+                ) : null}
                 <DiffView diff={analysis.remediation_diff} />
               </div>
             )}
@@ -323,13 +366,14 @@ function AiPanel({
             <div className="msg-body">
               <p>{m.text}</p>
             </div>
+            {m.investigation && <InvestigationCard inv={m.investigation} />}
           </div>
         ))}
       </div>
 
       <div style={{ padding: '0 14px 6px', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {['/explain', '/fix', '/approve', '/revoke', '/scan'].map((cmd) => (
+          {['/explain', '/verify', '/fix', '/approve', '/revoke', '/scan'].map((cmd) => (
             <span key={cmd} className="suggestion-chip" onClick={() => setInput(cmd)}>
               {cmd}
             </span>
@@ -681,6 +725,62 @@ export function FindingDetail({
           {/* CVE update card — replaces metadata clutter for dep-scan findings */}
           {depScan && <CveUpdateCard finding={finding} />}
 
+          {(() => {
+            const sv = getSeverityInfo(finding);
+            if (!sv) return null;
+            const promoted = sv.source === 'promoted-dast';
+            const disagree = sv.disagreement === true;
+            return (
+              <div className="card card-pad" style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--fg-3)',
+                    marginBottom: 8,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                  }}
+                >
+                  Đánh giá mức độ
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  {sv.original_label && (
+                    <span>
+                      Tool báo: <b>{sv.original_label}</b>
+                    </span>
+                  )}
+                  {sv.cvss != null && (
+                    <span>
+                      · CVSS <b>{sv.cvss}</b>
+                      {sv.cvss_kind ? ` (${sv.cvss_kind})` : ''}
+                      {sv.cvss_source === 'derived-from-label' ? ' — ước lượng' : ''}
+                    </span>
+                  )}
+                  <span>
+                    → chuẩn hoá:{' '}
+                    <b style={{ textTransform: 'uppercase' }}>{sv.normalized ?? finding.severity}</b>
+                  </span>
+                </div>
+                {(promoted || disagree) && (
+                  <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                    {promoted
+                      ? 'Nâng bậc DAST: lỗ hổng injection/RCE độ tin cậy cao → critical.'
+                      : 'Nhãn tool và điểm CVSS lệch nhau — hệ thống lấy mức nghiêm trọng hơn.'}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Metadata grid — simplified for dep-scan (no redundant CVE fields) */}
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -725,6 +825,80 @@ export function FindingDetail({
                 ))}
             </div>
           </div>
+
+          {(() => {
+            const corr = getCorrelation(finding);
+            if (!corr) return null;
+            const rows = [
+              { tool: finding.tool, rule_id: finding.rule_id, severity: finding.severity, line_number: finding.line_number, primary: true },
+              ...corr.members.map((m) => ({ ...m, primary: false })),
+            ];
+            return (
+              <div className="card card-pad" style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--fg-3)',
+                    marginBottom: 8,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                  }}
+                >
+                  🔗 Được xác nhận bởi {corr.tools.length} tool
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                  Nhiều tool cùng phát hiện lỗi này ({corr.cwe ?? 'CWE ?'}) — đã gộp {corr.size}{' '}
+                  findings thành 1. Trùng khớp cao giữa các tool = độ tin cậy cao hơn.
+                </div>
+                {rows.map((r, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '5px 0',
+                      borderTop: i === 0 ? 'none' : '1px solid var(--line)',
+                    }}
+                  >
+                    <span
+                      className="tool-tag"
+                      style={{
+                        flexShrink: 0,
+                        ...(r.primary ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {}),
+                      }}
+                    >
+                      {r.tool}
+                    </span>
+                    {r.primary && (
+                      <span className="muted" style={{ fontSize: 10, flexShrink: 0 }}>
+                        primary
+                      </span>
+                    )}
+                    <span
+                      className="mono"
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 11,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={r.rule_id}
+                    >
+                      {r.rule_id}
+                    </span>
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', flexShrink: 0 }}>
+                      {r.severity}
+                      {r.line_number ? ` · L${r.line_number}` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
           {!depScan && (owasp || cweName) && (
             <div className="card card-pad" style={{ marginBottom: 16 }}>

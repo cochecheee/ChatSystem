@@ -1,11 +1,16 @@
 import type {
+  AiStats,
   AnalysisResult,
   CommandRequest,
   CommandResponse,
+  DedupStats,
   Finding,
+  FPInvestigation,
+  SeverityStats,
   Project,
   TokenResponse,
   WorkflowArtifact,
+  WorkflowJob,
   WorkflowRun,
 } from '../types';
 
@@ -40,7 +45,10 @@ function handle401(status: number) {
   if (status === 401 && _onAuthChallenge) _onAuthChallenge();
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {
+async function get<T>(
+  path: string,
+  params?: Record<string, string | number | boolean>
+): Promise<T> {
   const url = new URL(BASE + path);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   const res = await fetch(url.toString(), { headers: authHeaders() });
@@ -70,6 +78,22 @@ async function getWithTotal<T>(
   const totalHeader = res.headers.get('X-Total-Count');
   const total = totalHeader ? parseInt(totalHeader, 10) : Array.isArray(data) ? data.length : 0;
   return { data, total };
+}
+
+/** Like `get` but for text/plain endpoints (CI job logs). */
+async function getText(
+  path: string,
+  params?: Record<string, string | number | boolean>
+): Promise<string> {
+  const url = new URL(BASE + path);
+  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  const res = await fetch(url.toString(), { headers: authHeaders() });
+  if (!res.ok) {
+    handle401(res.status);
+    const detail = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((detail as { detail?: string }).detail ?? `${res.status} ${res.statusText}`);
+  }
+  return res.text();
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
@@ -224,6 +248,32 @@ export const api = {
         low: number;
       }>(`/findings/gate-count${q.toString() ? '?' + q.toString() : ''}`);
     },
+    /** V4.0 — cross-tool dedup funnel + corroborated clusters. */
+    dedupStats: (params?: { project_id?: number; run_id?: number; top?: number }) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params ?? {})) {
+        if (v !== undefined && v !== null) q.set(k, String(v));
+      }
+      return get<DedupStats>(`/findings/dedup-stats${q.toString() ? '?' + q.toString() : ''}`);
+    },
+    /** V4.1 — severity-normalization funnel (promotions, label↔score disagreements). */
+    severityStats: (params?: { project_id?: number; run_id?: number; top?: number }) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params ?? {})) {
+        if (v !== undefined && v !== null) q.set(k, String(v));
+      }
+      return get<SeverityStats>(
+        `/findings/severity-stats${q.toString() ? '?' + q.toString() : ''}`
+      );
+    },
+    /** V4.2 — AI false-positive + hallucination-guard funnel. */
+    aiStats: (params?: { project_id?: number; run_id?: number; top?: number }) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params ?? {})) {
+        if (v !== undefined && v !== null) q.set(k, String(v));
+      }
+      return get<AiStats>(`/findings/ai-stats${q.toString() ? '?' + q.toString() : ''}`);
+    },
   },
   monitor: {
     summary: (hours = 24) => getRaw<UptimeSummary>(`/monitor/summary?hours=${hours}`),
@@ -328,7 +378,11 @@ export const api = {
           const detail = await res.json().catch(() => ({ detail: res.statusText }));
           throw new Error((detail as { detail?: string }).detail ?? `${res.status}`);
         }
-        return res.json() as Promise<{ project_id: number; staging_url: string; monitored: boolean }>;
+        return res.json() as Promise<{
+          project_id: number;
+          staging_url: string;
+          monitored: boolean;
+        }>;
       }),
     delete: (id: number) =>
       fetch(`${BASE}/projects/${id}`, { method: 'DELETE', headers: authHeaders() }).then((res) => {
@@ -388,10 +442,23 @@ export const api = {
       return get<WorkflowRun[]>('/github/runs', Object.keys(params).length ? params : undefined);
     },
     artifacts: (runId: number) => get<WorkflowArtifact[]>(`/github/runs/${runId}/artifacts`),
+    /** Jobs + steps của 1 run — nguồn cho CI Progress timeline. In-progress
+     * runs chưa được ingest nên cần project_id để backend chọn đúng creds. */
+    runJobs: (runId: number, project_id?: number) =>
+      get<WorkflowJob[]>(
+        `/github/runs/${runId}/jobs`,
+        project_id !== undefined ? { project_id } : undefined
+      ),
+    /** Log plain-text của 1 job — GitHub chỉ phát hành sau khi job kết thúc. */
+    jobLogs: (runId: number, jobId: number, project_id?: number) =>
+      getText(
+        `/github/runs/${runId}/jobs/${jobId}/logs`,
+        project_id !== undefined ? { project_id } : undefined
+      ),
     runFindings: (runId: number, excludeRevoked = false) =>
       get<Finding[]>(
         `/github/runs/${runId}/findings`,
-        excludeRevoked ? { exclude_revoked: true } : undefined,
+        excludeRevoked ? { exclude_revoked: true } : undefined
       ),
     reprocessRun: (runId: number) =>
       post<{ status: string; run_id: number; deleted_artifacts: number }>(
@@ -404,7 +471,11 @@ export const api = {
     me: () => get<{ username: string; role: string }>('/api/chat/auth/me'),
     command: (req: CommandRequest) => post<CommandResponse>('/api/chat/command', req),
     message: (text: string, finding_id?: number) =>
-      post<{ reply: string; suggested_command: string | null }>('/api/chat/message', {
+      post<{
+        reply: string;
+        suggested_command: string | null;
+        investigation?: FPInvestigation | null;
+      }>('/api/chat/message', {
         text,
         finding_id,
       }),

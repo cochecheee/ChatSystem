@@ -481,3 +481,77 @@ async def test_status_developer_allowed(client, monkeypatch):
     body = resp.json()
     assert body["status"] == "ok"
     assert body["data"]["runs"] == []
+
+
+# ---------------------------------------------------------------------------
+# V4.3 — "lỗi này có thật không?" investigation (chat + /verify)
+# ---------------------------------------------------------------------------
+
+def test_investigation_intent_detection():
+    from src.api.chat import _investigation_intent
+    assert _investigation_intent("lỗi #3319 có thật không?") == 3319
+    assert _investigation_intent("finding 42 có phải false positive?") == 42
+    assert _investigation_intent("#7 kiểm chứng giúp") == 7
+    # No FP-intent → None even with a number present
+    assert _investigation_intent("giải thích finding 5") is None
+    assert _investigation_intent("báo cáo tổng quan") is None
+
+
+def _fake_investigation(verdict: str = "FALSE_POSITIVE"):
+    from src.models.schemas import FPInvestigation, InvestigationStep
+
+    async def fake(self, finding, session, force=False):
+        return FPInvestigation(
+            finding_id=finding.id, verdict=verdict, confidence="HIGH",
+            summary_vi="Đây là false positive vì input đã được validate upstream.",
+            steps=[InvestigationStep(
+                claim_vi="input được validate trước sink", file="f.py",
+                line_start=1, line_end=1, quote="if not valid: return", grounded=True,
+            )],
+            false_positive_likelihood="HIGH", grounded=True, grounded_note="1/1 khớp",
+            source_available=True,
+            suggested_command=(f"/revoke {finding.id}" if verdict == "FALSE_POSITIVE" else None),
+        )
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_verify_command_returns_investigation(client, finding_id, monkeypatch):
+    from src.services.llm.service import LLMAnalysisService
+    monkeypatch.setattr(LLMAnalysisService, "investigate_finding", _fake_investigation())
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/verify", "finding_id": finding_id},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    d = resp.json()["data"]
+    assert d["verdict"] == "FALSE_POSITIVE"
+    assert d["suggested_command"] == f"/revoke {finding_id}"
+    assert d["steps"][0]["grounded"] is True
+
+
+@pytest.mark.asyncio
+async def test_verify_command_forbidden_for_viewer(client, finding_id):
+    resp = await client.post(
+        "/api/chat/command",
+        json={"command": "/verify", "finding_id": finding_id},
+        headers=_headers("viewer"),
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_chat_message_runs_investigation(client, finding_id, monkeypatch):
+    from src.services.llm.service import LLMAnalysisService
+    monkeypatch.setattr(LLMAnalysisService, "investigate_finding", _fake_investigation())
+    resp = await client.post(
+        "/api/chat/message",
+        json={"text": f"lỗi #{finding_id} có thật không?"},
+        headers=_headers("developer"),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["investigation"] is not None
+    assert body["investigation"]["verdict"] == "FALSE_POSITIVE"
+    assert body["suggested_command"] == f"/revoke {finding_id}"

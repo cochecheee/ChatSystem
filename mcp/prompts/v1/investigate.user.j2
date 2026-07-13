@@ -1,0 +1,14 @@
+### Finding cần kiểm chứng (có thật không?)
+- Công cụ: {{ tool_name }}
+- Rule ID: {{ rule_id }}
+- Mô tả: {{ message }}
+- File: {{ file_path }}, dòng {{ line_number or "N/A" }}
+- CWE: {{ cwe_id or "N/A" }}
+- CVSS Score: {{ cvss_score or "N/A" }}
+
+### Mã nguồn thật (đã đánh số dòng)
+```
+{{ code_context or "(không có mã nguồn — hãy trả verdict UNCERTAIN)" }}
+```
+
+Hãy lần theo luồng dữ liệu trên ĐÚNG mã nguồn trên để xác định finding này là lỗi thật hay false positive. Trả về theo JSON schema: verdict, confidence, summary_vi, và reasoning_steps (mỗi bước trích dẫn dòng code thật qua code_ref + quote).

@@ -41,7 +41,7 @@ def _assert_snapshot(name: str, content: str) -> None:
 
 def test_registry_lists_all_known_prompts():
     r = get_registry()
-    assert set(r.list_ids()) == {"analyze", "cve", "chat", "summary", "triage"}
+    assert set(r.list_ids()) == {"analyze", "cve", "chat", "summary", "triage", "investigate"}
 
 
 def test_registry_unknown_prompt_raises():
@@ -67,7 +67,7 @@ def test_frontmatter_parses_meta():
 # System prompts — snapshot the raw text
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("prompt_id", ["analyze", "chat", "summary", "triage"])
+@pytest.mark.parametrize("prompt_id", ["analyze", "chat", "summary", "triage", "investigate"])
 def test_system_prompt_snapshot(prompt_id: str):
     text = get_registry().system_for(prompt_id)
     _assert_snapshot(f"{prompt_id}.system", text)
@@ -93,14 +93,31 @@ def test_analyze_user_snapshot():
     _assert_snapshot("analyze.user", rendered.user)
 
 
+def test_investigate_user_snapshot():
+    rendered = get_registry().render(
+        "investigate",
+        tool_name="codeql",
+        rule_id="py/sql-injection",
+        message="SQL query built from user input",
+        file_path="app/views.py",
+        line_number=42,
+        cwe_id="CWE-89",
+        cvss_score=9.1,
+        code_context="  40 | def search(request):\n  42 | cursor.execute(f\"...{request.GET['q']}\")",
+    )
+    assert rendered.user is not None
+    _assert_snapshot("investigate.user", rendered.user)
+
+
 def test_triage_user_snapshot():
-    findings = [
-        SimpleNamespace(id=1, tool="semgrep", rule_id="r1", severity="high",
-                        file_path="a.py", line_number=10, message="msg a"),
-        SimpleNamespace(id=2, tool="codeql", rule_id="r2", severity="critical",
-                        file_path="b.java", line_number=None, message="msg b"),
+    items = [
+        {"id": 1, "tool": "semgrep", "rule_id": "r1", "severity": "high",
+         "file_path": "a.py", "line_number": 10, "message": "msg a",
+         "code": "10 | os.system(x)"},
+        {"id": 2, "tool": "codeql", "rule_id": "r2", "severity": "critical",
+         "file_path": "b.java", "line_number": None, "message": "msg b", "code": ""},
     ]
-    rendered = get_registry().render("triage", findings=findings)
+    rendered = get_registry().render("triage", items=items)
     assert rendered.user is not None
     _assert_snapshot("triage.user", rendered.user)
 

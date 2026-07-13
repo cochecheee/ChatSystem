@@ -212,6 +212,11 @@ class SecurityProcessor:
             # gate-count, KPIs, the Vulns/SCA/DAST lists and the AI summary all
             # count the same de-duplicated rows (one source of truth).
             await self._dedup_run_findings(project_id, github_run_id)
+            # V4.0 — cross-tool correlation: collapse the SAME vulnerability
+            # reported by different tools (Semgrep/CodeQL/Trivy…) into one
+            # canonical row, recording the corroborating tools on the keeper.
+            # Runs AFTER exact-hash dedup so it clusters already-unique rows.
+            await self._correlate_run_findings(project_id, github_run_id)
 
         log.info(
             "process_run %d done — %d processed, %d failed (out of %d security artifacts)",
@@ -413,6 +418,212 @@ class SecurityProcessor:
                 "Deduped %d within-run duplicate findings "
                 "(project %d, run %d, %d unique kept)",
                 deleted, project_id, keep_github_run_id, len(groups),
+            )
+            return deleted
+
+    async def _correlate_run_findings(
+        self, project_id: int, keep_github_run_id: int,
+    ) -> int:
+        """Cross-tool deduplication (V4.0) — collapse the SAME vulnerability
+        reported by DIFFERENT tools into one canonical row.
+
+        The exact-hash layers (`base.deduplicate`, `_dedup_run_findings`,
+        Tier-1 carry-forward) key on `sha256(rule_id:file_path:message)`, so a
+        SQL-injection flagged by Semgrep, CodeQL AND Trivy is stored 3× — each
+        tool emits a different rule_id/message. That inflates gate-count, the
+        KPIs and the Vulns/SCA lists (~2–3×) and hides the fact that several
+        independent tools agree (a strong confidence signal).
+
+        This step clusters the run's SURVIVING findings by a strict semantic
+        key — same category (SAST/deps/DAST never mixed) + normalized file +
+        CWE + a small line window — then keeps ONE row per cluster and deletes
+        the rest (destructive collapse, so every count downstream is deduped at
+        the source with no query changes). Findings without a parseable CWE are
+        never cross-tool-merged (left as singletons). The corroborating tools of
+        the dropped rows are preserved on the keeper's `raw_data['_correlation']`
+        so the dashboard/terminal can show "found by N tools".
+
+        Keeper priority (higher wins): audited decision (APPROVED/REVOKED) so
+        triage survives, then AI write-up, then highest severity, then a
+        precise-code-scanner preference, then lowest id (stable). Audit children
+        (finding_actions, command_feedback) of dropped rows are re-pointed onto
+        the keeper before deletion. Returns the number of findings deleted.
+
+        Guarded like `_prune`/`_dedup`: only runs when keep_github_run_id is the
+        project's newest run, so reprocessing an old run never disturbs newer
+        data. Line window is tunable via DEDUP_LINE_WINDOW (default 5).
+        """
+        import os
+        from collections import defaultdict
+
+        from ..models.entities import Artifact as ArtifactModel
+        from ..models.entities import CommandFeedback as FeedbackModel
+        from ..models.entities import Finding as FindingModel
+        from ..models.entities import FindingAction as ActionModel
+        from ..repositories.finding_repo import DAST_TOOLS, DEPS_TOOLS
+
+        window = max(1, int(os.getenv("DEDUP_LINE_WINDOW", "5") or 5))
+
+        _SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+        _STATUS_PRIORITY = {"REVOKED": 3, "APPROVED": 3, "ai_analyzed": 2}
+        _TOOL_PRIORITY = {
+            "codeql": 6, "semgrep": 5,
+            "spotbugs": 4, "bandit": 4, "gosec": 4,
+            "eslint": 3,
+            "npm-audit": 2, "safety": 2, "dependency-check": 2,
+            "owasp-dependency-check": 2,
+            "trivy": 1, "trivy-deps": 1, "owasp-zap": 1, "zap": 1,
+        }
+
+        def _category(tool: str) -> str:
+            t = (tool or "").lower()
+            if t in DEPS_TOOLS:
+                return "deps"
+            if t in DAST_TOOLS:
+                return "dast"
+            return "sast"
+
+        def _norm_path(p: str | None) -> str:
+            s = (p or "").strip().replace("\\", "/").lower()
+            while s.startswith("./"):
+                s = s[2:]
+            return s
+
+        def _cwe_num(cwe_id: str | None) -> int | None:
+            if not cwe_id:
+                return None
+            digits = cwe_id.upper().replace("CWE-", "").strip()
+            return int(digits) if digits.isdigit() else None
+
+        async with self.session_factory() as session:
+            newest = (await session.execute(
+                select(sql_func.max(ArtifactModel.github_run_id)).where(
+                    ArtifactModel.project_id == project_id,
+                    ArtifactModel.github_run_id.is_not(None),
+                )
+            )).scalar_one_or_none() or 0
+            if keep_github_run_id < newest:
+                log.info(
+                    "Correlate skipped: run %d is older than newest %d for project %d",
+                    keep_github_run_id, newest, project_id,
+                )
+                return 0
+
+            run_artifact_ids = [
+                r[0] for r in (await session.execute(
+                    select(ArtifactModel.id).where(
+                        ArtifactModel.project_id == project_id,
+                        ArtifactModel.github_run_id == keep_github_run_id,
+                    )
+                )).all()
+            ]
+            if not run_artifact_ids:
+                return 0
+
+            rows = (await session.execute(
+                select(
+                    FindingModel.id, FindingModel.tool, FindingModel.rule_id,
+                    FindingModel.severity, FindingModel.cwe_id,
+                    FindingModel.file_path, FindingModel.line_number,
+                    FindingModel.message, FindingModel.status,
+                    FindingModel.ai_analysis, FindingModel.raw_data,
+                ).where(FindingModel.artifact_id.in_(run_artifact_ids))
+            )).all()
+
+            groups: dict[str, list[dict]] = defaultdict(list)
+            for (fid, tool, rule_id, severity, cwe_id, file_path,
+                 line_number, message, status, ai_analysis, raw_data) in rows:
+                cwe = _cwe_num(cwe_id)
+                if cwe is None:
+                    continue  # no CWE → never cross-tool-merged
+                bucket = str(line_number // window) if line_number is not None else "na"
+                key = f"{_category(tool)}|{_norm_path(file_path)}|CWE-{cwe}|{bucket}"
+                groups[key].append({
+                    "id": fid, "tool": tool, "rule_id": rule_id,
+                    "severity": severity, "cwe": f"CWE-{cwe}",
+                    "line_number": line_number, "message": message,
+                    "status": status, "has_ai": 1 if ai_analysis is not None else 0,
+                    "raw_data": raw_data,
+                })
+
+            loser_ids: list[int] = []
+            remap: dict[int, int] = {}
+            clusters_collapsed = 0
+            for key, members in groups.items():
+                if len(members) < 2:
+                    continue
+                keeper = max(members, key=lambda m: (
+                    _STATUS_PRIORITY.get(m["status"], 1),
+                    _SEV_RANK.get((m["severity"] or "").lower(), 0),
+                    m["has_ai"],
+                    _TOOL_PRIORITY.get((m["tool"] or "").lower(), 1),
+                    -m["id"],
+                ))
+                losers = [m for m in members if m["id"] != keeper["id"]]
+                tools = sorted({m["tool"] for m in members if m["tool"]})
+                sev_max = max(
+                    members, key=lambda m: _SEV_RANK.get((m["severity"] or "").lower(), 0),
+                )["severity"]
+                correlation = {
+                    "cluster_key": key,
+                    "size": len(members),
+                    "tools": tools,
+                    "primary_tool": keeper["tool"],
+                    "cwe": keeper["cwe"],
+                    "severity_max": sev_max,
+                    "members": [
+                        {
+                            "finding_id": m["id"], "tool": m["tool"],
+                            "rule_id": m["rule_id"], "severity": m["severity"],
+                            "line_number": m["line_number"],
+                            "message": (m["message"] or "")[:300],
+                        }
+                        for m in losers
+                    ],
+                }
+                # Reassign a fresh dict so the JSON column is marked dirty.
+                new_raw = dict(keeper["raw_data"] or {})
+                new_raw["_correlation"] = correlation
+                await session.execute(
+                    update(FindingModel).where(FindingModel.id == keeper["id"]).values(
+                        raw_data=new_raw,
+                    )
+                )
+                clusters_collapsed += 1
+                for m in losers:
+                    loser_ids.append(m["id"])
+                    remap[m["id"]] = keeper["id"]
+
+            if not loser_ids:
+                return 0
+
+            # Re-point audit children of dropped duplicates onto the keeper so
+            # no approve/revoke/feedback history is lost. At ingest time losers
+            # are brand-new (no children) → no-op; matters for one-time cleanup.
+            for child in (ActionModel, FeedbackModel):
+                referenced = {
+                    r[0] for r in (await session.execute(
+                        select(child.finding_id).where(
+                            child.finding_id.in_(loser_ids),
+                        )
+                    )).all()
+                }
+                for loser in referenced:
+                    await session.execute(
+                        update(child).where(child.finding_id == loser).values(
+                            finding_id=remap[loser],
+                        )
+                    )
+
+            result = await session.execute(
+                delete(FindingModel).where(FindingModel.id.in_(loser_ids))
+            )
+            await session.commit()
+            deleted = result.rowcount or len(loser_ids)
+            log.info(
+                "Cross-tool correlated %d duplicate findings across %d clusters "
+                "(project %d, run %d)",
+                deleted, clusters_collapsed, project_id, keep_github_run_id,
             )
             return deleted
 

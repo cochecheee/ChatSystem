@@ -5,16 +5,26 @@ import { AlertBanner } from '../components/AlertBanner';
 import { ApprovalDialog } from '../components/modals/ApprovalDialog';
 import { RevokeDialog } from '../components/modals/RevokeDialog';
 import { Icon } from '../components/Icon';
-import type { CommandResponse } from '../types';
+import { InvestigationCard } from '../features/findings/InvestigationCard';
+import type { CommandResponse, FPInvestigation } from '../types';
 
 interface Message {
   role: 'user' | 'ai' | 'system';
   text: string;
   loading?: boolean;
   suggestedCommand?: string | null;
+  investigation?: FPInvestigation | null;
 }
 
-const PRESETS = ['/explain [id]', '/fix [id]', '/scan', '/approve [id]', '/revoke [id]', '/report'];
+const PRESETS = [
+  '/explain [id]',
+  '/verify [id]',
+  '/fix [id]',
+  '/scan',
+  '/approve [id]',
+  '/revoke [id]',
+  '/report',
+];
 
 function parseCommand(input: string): { cmd: string; args: string[] } {
   const parts = input.trim().split(/\s+/);
@@ -112,11 +122,31 @@ export function PageChat() {
     try {
       const req = {
         command: `/${cmd}`,
-        finding_id: ['explain', 'fix'].includes(cmd) ? parseInt(args[0]) : undefined,
+        finding_id: ['explain', 'fix', 'verify'].includes(cmd) ? parseInt(args[0]) : undefined,
         run_id: cmd === 'rerun' ? parseInt(args[0]) : undefined,
       };
 
       const res: CommandResponse = await api.chat.command(req);
+
+      // V4.3 — /verify returns an FPInvestigation payload → render as a card.
+      if (cmd === 'verify' && res.data && 'verdict' in res.data) {
+        const inv = res.data as unknown as FPInvestigation;
+        setMessages((m) =>
+          m.map((msg, i) =>
+            i === m.length - 1 && msg.role === 'ai'
+              ? {
+                  ...msg,
+                  text: inv.summary_vi || res.message,
+                  loading: false,
+                  investigation: inv,
+                  suggestedCommand: inv.suggested_command ?? null,
+                }
+              : msg
+          )
+        );
+        setCmdStatus({ type: 'success', msg: res.message });
+        return;
+      }
 
       let text = res.message;
       if (res.data?.explanation_vi) {
@@ -144,7 +174,13 @@ export function PageChat() {
       setMessages((m) =>
         m.map((msg, i) =>
           i === m.length - 1 && msg.role === 'ai'
-            ? { ...msg, text: res.reply, loading: false, suggestedCommand: res.suggested_command }
+            ? {
+                ...msg,
+                text: res.reply,
+                loading: false,
+                suggestedCommand: res.suggested_command,
+                investigation: res.investigation ?? null,
+              }
             : msg
         )
       );
@@ -303,6 +339,7 @@ export function PageChat() {
                 m.text.split('\n').map((line, j) => <p key={j}>{line}</p>)
               )}
             </div>
+            {m.investigation && !m.loading && <InvestigationCard inv={m.investigation} />}
             {m.suggestedCommand && !m.loading && (
               <div className="msg-actions" style={{ marginTop: 6 }}>
                 <span

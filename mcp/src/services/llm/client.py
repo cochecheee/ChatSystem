@@ -9,7 +9,7 @@ from google.genai import types
 
 from ...core.config import settings
 from .prompt_loader import get_registry
-from .schemas import AnalysisOutput
+from .schemas import AnalysisOutput, FPInvestigationOutput
 
 log = logging.getLogger(__name__)
 
@@ -31,9 +31,16 @@ class GeminiClient:
         self._model = model or settings.GEMINI_MODEL
         self._max_retries = settings.GEMINI_MAX_RETRIES
 
-    async def analyze(self, prompt: str, system_prompt_id: str = "analyze") -> AnalysisOutput:
-        # system_prompt_id chọn system instruction: "analyze" (SAST/code) hoặc
-        # "cve" (dependency CVE — remediation là nâng cấp phiên bản).
+    async def _generate_structured(
+        self, prompt: str, system_prompt_id: str, schema: type,
+    ):
+        """Run Gemini with a JSON `response_schema` and parse into `schema`.
+
+        Shared body for every structured call (analyze/investigate): same retry
+        + backoff on 429/503/RESOURCE_EXHAUSTED. `system_prompt_id` picks the
+        system instruction; `schema` is the pydantic model both enforced by the
+        SDK and used to validate the returned JSON.
+        """
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -44,11 +51,11 @@ class GeminiClient:
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        response_schema=AnalysisOutput,
+                        response_schema=schema,
                         system_instruction=get_registry().system_for(system_prompt_id),
                     ),
                 )
-                return AnalysisOutput.model_validate_json(response.text)
+                return schema.model_validate_json(response.text)
             except Exception as exc:
                 last_exc = exc
                 err_str = str(exc)
@@ -61,6 +68,22 @@ class GeminiClient:
                     raise
 
         raise RuntimeError(f"Gemini API không phản hồi sau {self._max_retries} lần thử: {last_exc}")
+
+    async def analyze(self, prompt: str, system_prompt_id: str = "analyze") -> AnalysisOutput:
+        # system_prompt_id chọn system instruction: "analyze" (SAST/code) hoặc
+        # "cve" (dependency CVE — remediation là nâng cấp phiên bản).
+        return await self._generate_structured(prompt, system_prompt_id, AnalysisOutput)
+
+    async def investigate(
+        self, prompt: str, system_prompt_id: str = "investigate",
+    ) -> FPInvestigationOutput:
+        """V4.3 — structured data-flow investigation ("có thật không?").
+
+        Returns a verdict + step-by-step reasoning with code citations. Same
+        structured-output path as `analyze()`; grounding of the citations is
+        verified afterwards by the service layer.
+        """
+        return await self._generate_structured(prompt, system_prompt_id, FPInvestigationOutput)
 
     async def stream_analyze(
         self, prompt: str, system_prompt_id: str = "analyze",

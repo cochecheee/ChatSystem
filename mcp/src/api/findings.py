@@ -8,6 +8,9 @@ endpoints live here:
   GET    /findings/ai-summary                 Gemini risk briefing
   POST   /findings/triage                     batch FP triage
   GET    /findings/gate-count                 CI gate decision input
+  GET    /findings/dedup-stats                 cross-tool dedup funnel + clusters
+  GET    /findings/severity-stats              severity-normalization funnel
+  GET    /findings/ai-stats                     AI FP + hallucination-guard funnel
   GET    /findings/{finding_id}               one row
   GET    /github/runs/{run_id}/findings       all findings of one run
 
@@ -285,6 +288,262 @@ async def findings_gate_count(
         "policy": policy,
         "pass": pass_verdict,
         "blocking_reasons": blocking,
+    }
+
+
+@router.get("/findings/dedup-stats")
+async def findings_dedup_stats(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    top: int = 20,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
+) -> dict:
+    """V4.0 — cross-tool deduplication funnel + top corroborated clusters.
+
+    The processor collapses the SAME vulnerability reported by multiple tools
+    into one canonical row (destructive), recording the corroborating tools on
+    the keeper's `raw_data['_correlation']`. This endpoint reconstructs the
+    dedup funnel from those records so the dashboard (and terminal viz) can show
+    how many duplicates were removed and which findings several tools agree on.
+
+    Scope: `run_id` if given, else the latest run per in-scope project. RBAC is
+    the same as other reads (membership-scoped when project_id is omitted).
+    """
+    ensure_project_in_scope(user, project_id)
+    scope_ids = allowed_project_ids(user) if project_id is None else None
+
+    repo = FindingRepository(session)
+    findings = await repo.list_with_filters(
+        project_id=project_id,
+        project_ids=scope_ids if project_id is None else None,
+        run_id=run_id,
+        latest_run_only=run_id is None,
+        skip=0,
+        limit=100_000,
+    )
+
+    unique = len(findings)
+    removed = 0
+    clusters_merged = 0
+    multi_tool_clusters = 0
+    by_tool: dict[str, int] = {}
+    cluster_rows: list[dict] = []
+
+    for f in findings:
+        corr = (f.raw_data or {}).get("_correlation") if isinstance(f.raw_data, dict) else None
+        if not corr:
+            continue
+        size = int(corr.get("size", 1) or 1)
+        tools = corr.get("tools") or []
+        if size < 2:
+            continue
+        removed += size - 1
+        clusters_merged += 1
+        if len(tools) >= 2:
+            multi_tool_clusters += 1
+        for t in tools:
+            by_tool[t] = by_tool.get(t, 0) + 1
+        cluster_rows.append({
+            "finding_id": f.id,
+            "file_path": f.file_path,
+            "line_number": f.line_number,
+            "cwe": corr.get("cwe") or f.cwe_id,
+            "severity": corr.get("severity_max") or f.severity,
+            "tools": tools,
+            "size": size,
+            "primary_tool": corr.get("primary_tool") or f.tool,
+        })
+
+    cluster_rows.sort(key=lambda c: c["size"], reverse=True)
+    raw_estimate = unique + removed
+    reduction_pct = round(100.0 * removed / raw_estimate, 1) if raw_estimate else 0.0
+
+    return {
+        "project_id": project_id,
+        "run_id": run_id,
+        "unique_findings": unique,
+        "raw_findings_estimate": raw_estimate,
+        "cross_tool_duplicates_removed": removed,
+        "clusters_merged": clusters_merged,
+        "multi_tool_clusters": multi_tool_clusters,
+        "reduction_pct": reduction_pct,
+        "by_tool_contribution": dict(
+            sorted(by_tool.items(), key=lambda kv: kv[1], reverse=True)
+        ),
+        "clusters": cluster_rows[: max(0, top)],
+    }
+
+
+@router.get("/findings/severity-stats")
+async def findings_severity_stats(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    top: int = 15,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
+) -> dict:
+    """V4.1 — severity-normalization funnel for the Processing page.
+
+    Aggregates the per-finding provenance (`raw_data['_severity']`) written by
+    the unified resolver: how many findings were promoted (score/DAST raised the
+    label), how many had a label↔score disagreement, the decision source mix,
+    real-vs-derived CVSS, and per-tool contribution. Findings ingested before
+    V4.1 have no provenance — they count toward `total` but not the promotion
+    metrics (`with_provenance` tells the UI to hint a re-ingest).
+
+    Scope + auth identical to the other read endpoints.
+    """
+    from ..services.normalizers.severity import CANON_RANK
+
+    ensure_project_in_scope(user, project_id)
+    scope_ids = allowed_project_ids(user) if project_id is None else None
+
+    repo = FindingRepository(session)
+    findings = await repo.list_with_filters(
+        project_id=project_id,
+        project_ids=scope_ids if project_id is None else None,
+        run_id=run_id,
+        latest_run_only=run_id is None,
+        skip=0,
+        limit=100_000,
+    )
+
+    def rank(sev: str | None) -> int:
+        return CANON_RANK.get((sev or "").lower(), 0)
+
+    total = len(findings)
+    with_provenance = 0
+    promoted = 0
+    disagreements = 0
+    by_source: dict[str, int] = {}
+    cvss_real = cvss_derived = cvss_none = 0
+    by_tool: dict[str, dict] = {}
+    promoted_rows: list[dict] = []
+
+    for f in findings:
+        sv = (f.raw_data or {}).get("_severity") if isinstance(f.raw_data, dict) else None
+        tool_bucket = by_tool.setdefault(f.tool, {"total": 0, "promoted": 0})
+        tool_bucket["total"] += 1
+        if not isinstance(sv, dict):
+            continue
+        with_provenance += 1
+        source = sv.get("source") or "unknown"
+        by_source[source] = by_source.get(source, 0) + 1
+        if sv.get("disagreement"):
+            disagreements += 1
+        cs = sv.get("cvss_source")
+        if cs == "tool":
+            cvss_real += 1
+        elif cs == "derived-from-label":
+            cvss_derived += 1
+        else:
+            cvss_none += 1
+        band_label = sv.get("band_label")
+        normalized = sv.get("normalized") or f.severity
+        is_promoted = source == "promoted-dast" or (
+            band_label is not None and rank(normalized) > rank(band_label)
+        )
+        if is_promoted:
+            promoted += 1
+            tool_bucket["promoted"] += 1
+            promoted_rows.append({
+                "finding_id": f.id,
+                "tool": f.tool,
+                "file_path": f.file_path,
+                "line_number": f.line_number,
+                "original_label": sv.get("original_label"),
+                "band_label": band_label,
+                "band_score": sv.get("band_score"),
+                "cvss": sv.get("cvss"),
+                "cvss_kind": sv.get("cvss_kind"),
+                "normalized": normalized,
+            })
+
+    promoted_rows.sort(key=lambda r: rank(r["normalized"]), reverse=True)
+
+    return {
+        "project_id": project_id,
+        "run_id": run_id,
+        "total": total,
+        "with_provenance": with_provenance,
+        "promoted": promoted,
+        "disagreements": disagreements,
+        "by_source": dict(sorted(by_source.items(), key=lambda kv: kv[1], reverse=True)),
+        "cvss_real": cvss_real,
+        "cvss_derived": cvss_derived,
+        "cvss_none": cvss_none,
+        "by_tool": by_tool,
+        "top_promoted": promoted_rows[: max(0, top)],
+    }
+
+
+@router.get("/findings/ai-stats")
+async def findings_ai_stats(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    top: int = 15,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
+) -> dict:
+    """V4.2 — AI false-positive + hallucination-guard funnel for the Processing
+    page. Aggregates the per-finding `ai_analysis` JSON: how many were analyzed,
+    the false-positive-likelihood split, how many fix diffs were grounded vs
+    flagged ungrounded (possible hallucination), AI auto-revokes, and a
+    `top_false_positive` list (likely-FP findings devs should NOT dig into).
+    """
+    ensure_project_in_scope(user, project_id)
+    scope_ids = allowed_project_ids(user) if project_id is None else None
+    repo = FindingRepository(session)
+    findings = await repo.list_with_filters(
+        project_id=project_id,
+        project_ids=scope_ids if project_id is None else None,
+        run_id=run_id,
+        latest_run_only=run_id is None,
+        skip=0,
+        limit=100_000,
+    )
+
+    analyzed = 0
+    fp_likelihood = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    grounded = ungrounded = 0
+    ai_revoked = 0
+    top_fp: list[dict] = []
+
+    for f in findings:
+        if f.status == "REVOKED" and "triage" in (f.revoked_by or "").lower():
+            ai_revoked += 1
+        ai = f.ai_analysis if isinstance(f.ai_analysis, dict) else None
+        if not ai:
+            continue
+        analyzed += 1
+        fpl = (ai.get("false_positive_likelihood") or "LOW").upper()
+        fp_likelihood[fpl] = fp_likelihood.get(fpl, 0) + 1
+        if ai.get("grounded") is False:
+            ungrounded += 1
+        elif ai.get("grounded") is True:
+            grounded += 1
+        if fpl == "HIGH":
+            top_fp.append({
+                "finding_id": f.id,
+                "tool": f.tool,
+                "file_path": f.file_path,
+                "line_number": f.line_number,
+                "severity": f.severity,
+                "reason": ai.get("false_positive_reason") or "",
+                "grounded": ai.get("grounded", True),
+            })
+
+    return {
+        "project_id": project_id,
+        "run_id": run_id,
+        "total": len(findings),
+        "analyzed": analyzed,
+        "fp_likelihood": fp_likelihood,
+        "grounded": grounded,
+        "ungrounded": ungrounded,
+        "ai_revoked": ai_revoked,
+        "top_false_positive": top_fp[: max(0, top)],
     }
 
 

@@ -13,6 +13,7 @@ import { PageReports } from './pages/Reports';
 import { PageSCA } from './pages/Sca';
 import { PageSettings } from './pages/Settings';
 import { PageVulns } from './pages/Vulns';
+import { PageProcessing } from './pages/Processing';
 import { PageRuntime } from './pages/Runtime';
 import { PageMonitor } from './pages/Monitor';
 
@@ -91,6 +92,9 @@ function AppInner() {
       break;
     case 'sca':
       page = <PageSCA />;
+      break;
+    case 'processing':
+      page = <PageProcessing onNav={onNav} onOpenVuln={onOpenVuln} />;
       break;
     case 'runtime':
       page = <PageRuntime />;

@@ -41,6 +41,14 @@ prompts:
     response_schema: null               # plain text
     temperature: 0.4
 
+  investigate:
+    description: FP investigation — trace a finding's data flow over real source, verdict + step reasoning + code evidence (Vietnamese).
+    system: investigate.system.md
+    user: investigate.user.j2
+    response_schema: FPInvestigationOutput   # src/services/llm/schemas.py
+    temperature: null
+    notes: Used by /api/chat/message ("có thật không?") and /verify. Grounding of citations verified by service.
+
   triage:
     description: Batch FP triage — classify many findings in one call.
     system: triage.system.md

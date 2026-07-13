@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models.entities import Finding
 from .client import GeminiClient
 from .prompt_loader import get_registry
-from .service import LLMAnalysisService
+from .service import LLMAnalysisService, _extract_context, _is_dependency_finding
 
 log = logging.getLogger(__name__)
 
@@ -34,10 +34,27 @@ class TriageBatch(BaseModel):
 
 
 async def _run_triage_call(client: GeminiClient, findings: list[Finding]) -> TriageBatch:
-    """One Gemini call for up to BATCH_SIZE findings — returns structured output."""
+    """One Gemini call for up to BATCH_SIZE findings — returns structured output.
+
+    V4.2 — each item now carries a ±context slice of the REAL source (from the
+    cached `raw_data['source_code']`, populated by `triage_findings`), so the
+    model classifies false positives from code, not metadata alone."""
     from google.genai import types
 
-    rendered = get_registry().render("triage", findings=findings)
+    items = [
+        {
+            "id": f.id,
+            "tool": f.tool,
+            "rule_id": f.rule_id,
+            "severity": f.severity,
+            "file_path": f.file_path,
+            "line_number": f.line_number,
+            "message": (f.message or "")[:300],
+            "code": _extract_context((f.raw_data or {}).get("source_code"), f.line_number),
+        }
+        for f in findings
+    ]
+    rendered = get_registry().render("triage", items=items)
     response = await asyncio.to_thread(
         client._client.models.generate_content,
         model=client._model,
@@ -92,6 +109,43 @@ class TriageService:
         else:
             client = self._llm_service._injected_client or GeminiClient()
 
+        # V4.2 — ensure each SAST finding has source context so FP classification
+        # sees the code. Cached first; else best-effort GitHub fetch (bounded,
+        # failure-tolerant). `code_seen` gates auto-revoke below: we never
+        # suppress a finding from metadata alone.
+        from ...core.guardrails import layer_on
+        from ..github_client import GitHubClient
+        gh = None
+        if project and project.github_token and project.github_owner and project.github_repo:
+            gh = GitHubClient.for_project(project)
+        elif self._llm_service._injected_github is not None:
+            gh = self._llm_service._injected_github
+        code_seen: dict[int, bool] = {}
+        fetched = 0
+        for f in findings:
+            src = (f.raw_data or {}).get("source_code")
+            if (
+                not src and gh is not None and fetched < 15
+                and not _is_dependency_finding(f)
+                and f.file_path and f.file_path not in ("unknown", "")
+                and not f.file_path.endswith((".jar", ".class", ".war", ".ear"))
+            ):
+                try:
+                    raw = await gh.fetch_file_content(f.file_path)
+                    if raw:
+                        src = (
+                            self._llm_service._scrubber.scrub_content(raw)
+                            if layer_on("scrubbing") else raw
+                        )
+                        nr = dict(f.raw_data or {})
+                        nr["source_code"] = src
+                        f.raw_data = nr
+                        fetched += 1
+                except Exception as exc:
+                    log.debug("triage source fetch failed for finding %d: %s", f.id, exc)
+                    src = None
+            code_seen[f.id] = bool(src)
+
         all_items: list[TriageItem] = []
         batches = 0
         for i in range(0, len(findings), self.BATCH_SIZE):
@@ -108,6 +162,7 @@ class TriageService:
         by_id = {f.id: f for f in findings}
         counts = {"TRUE_POSITIVE": 0, "FALSE_POSITIVE": 0, "NEEDS_REVIEW": 0}
         auto_revoked = 0
+        withheld_no_code = 0
         action_log: list[dict] = []
         for item in all_items:
             counts[item.classification] = counts.get(item.classification, 0) + 1
@@ -119,21 +174,25 @@ class TriageService:
                 "applied": False,
             }
             f = by_id.get(item.finding_id)
-            if (
-                not dry_run
-                and f is not None
-                and item.classification == "FALSE_POSITIVE"
+            is_fp_high = (
+                item.classification == "FALSE_POSITIVE"
                 and item.confidence >= confidence_threshold
-                and f.status != "REVOKED"
-            ):
-                f.status = "REVOKED"
-                f.revoked_by = invoked_by
-                f.revoke_justification = (
-                    f"AI triage (confidence {item.confidence:.2f}): {item.reason}"
-                )
-                f.revoked_at = datetime.now(UTC)
-                auto_revoked += 1
-                action["applied"] = True
+            )
+            if not dry_run and f is not None and is_fp_high and f.status != "REVOKED":
+                # V4.2 — only auto-revoke when the model actually saw the code
+                # (grounded evidence). No code → hold for human (NEEDS_REVIEW).
+                if code_seen.get(item.finding_id):
+                    f.status = "REVOKED"
+                    f.revoked_by = invoked_by
+                    f.revoke_justification = (
+                        f"AI triage (confidence {item.confidence:.2f}): {item.reason}"
+                    )
+                    f.revoked_at = datetime.now(UTC)
+                    auto_revoked += 1
+                    action["applied"] = True
+                else:
+                    withheld_no_code += 1
+                    action["withheld"] = "no_code_context"
             action_log.append(action)
 
         if not dry_run and auto_revoked > 0:
@@ -144,6 +203,7 @@ class TriageService:
             "classified": len(all_items),
             "classifications": counts,
             "auto_revoked": auto_revoked,
+            "withheld_no_code": withheld_no_code,
             "batches": batches,
             "confidence_threshold": confidence_threshold,
             "dry_run": dry_run,

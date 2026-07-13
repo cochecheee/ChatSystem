@@ -2,8 +2,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.models.schemas import AnalysisResult
-from src.services.llm.schemas import AnalysisOutput
+from src.models.schemas import AnalysisResult, FPInvestigation
+from src.services.llm.schemas import (
+    AnalysisOutput,
+    CodeRef,
+    FPInvestigationOutput,
+    ReasoningStep,
+)
 from src.services.llm.service import LLMAnalysisService, _extract_context
 
 SAMPLE_OUTPUT = AnalysisOutput(
@@ -80,6 +85,129 @@ async def test_analyze_finding_uses_code_context():
 
     prompt_arg = mock_client.analyze.call_args[0][0]
     assert "line" in prompt_arg
+
+
+# ---------------------------------------------------------------------------
+# V4.3 — investigate_finding (data-flow FP investigation)
+# ---------------------------------------------------------------------------
+
+INV_SRC = (
+    "def search(request):\n"
+    "    q = request.GET['q']\n"
+    "    cursor.execute('SELECT * FROM t WHERE id=' + q)\n"
+    "    return q\n"
+)
+
+
+def _inv_finding(source=INV_SRC, tool="semgrep", rule_id="py.sqli"):
+    f = _make_finding()
+    f.tool = tool
+    f.rule_id = rule_id
+    f.line_number = 3
+    f.raw_data = {"source_code": source} if source else {}
+    return f
+
+
+def _inv_output(verdict, quote, ls=3, le=3):
+    return FPInvestigationOutput(
+        verdict=verdict, confidence="HIGH", summary_vi="tóm tắt",
+        reasoning_steps=[ReasoningStep(
+            claim_vi="q từ request.GET tới sink cursor.execute",
+            kind="sink", code_ref=CodeRef(file="f.py", line_start=ls, line_end=le), quote=quote,
+        )],
+        false_positive_likelihood="LOW",
+    )
+
+
+@pytest.mark.asyncio
+async def test_investigate_true_positive_grounded():
+    mock_client = AsyncMock()
+    mock_client.investigate.return_value = _inv_output(
+        "TRUE_POSITIVE", "cursor.execute('SELECT * FROM t WHERE id=' + q)")
+    service = LLMAnalysisService(client=mock_client, github_client=AsyncMock())
+    finding = _inv_finding()
+    session = AsyncMock()
+
+    result = await service.investigate_finding(finding, session)
+
+    assert isinstance(result, FPInvestigation)
+    assert result.verdict == "TRUE_POSITIVE"
+    assert result.grounded is True
+    assert result.steps[0].grounded is True
+    assert result.suggested_command == "/fix 1"
+    # advisory only — status untouched
+    assert finding.status == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_investigate_false_positive_grounded_suggests_revoke():
+    mock_client = AsyncMock()
+    mock_client.investigate.return_value = _inv_output(
+        "FALSE_POSITIVE", "q = request.GET['q']", ls=2, le=2)
+    service = LLMAnalysisService(client=mock_client, github_client=AsyncMock())
+    result = await service.investigate_finding(_inv_finding(), AsyncMock())
+
+    assert result.verdict == "FALSE_POSITIVE"
+    assert result.grounded is True
+    assert result.suggested_command == "/revoke 1"
+
+
+@pytest.mark.asyncio
+async def test_investigate_fp_ungrounded_downgraded_to_uncertain():
+    mock_client = AsyncMock()
+    # quote references code NOT in the source -> ungrounded -> FP downgraded
+    mock_client.investigate.return_value = _inv_output(
+        "FALSE_POSITIVE", "sanitized = bleach.clean(q)  # not in source", ls=2, le=2)
+    service = LLMAnalysisService(client=mock_client, github_client=AsyncMock())
+    result = await service.investigate_finding(_inv_finding(), AsyncMock())
+
+    assert result.verdict == "UNCERTAIN"
+    assert result.confidence == "LOW"
+    assert result.grounded is False
+    assert result.suggested_command is None
+
+
+@pytest.mark.asyncio
+async def test_investigate_no_source_is_uncertain():
+    mock_client = AsyncMock()
+    mock_github = AsyncMock()
+    mock_github.fetch_file_content.return_value = None
+    service = LLMAnalysisService(client=mock_client, github_client=mock_github)
+    finding = _inv_finding(source=None)
+
+    result = await service.investigate_finding(finding, AsyncMock())
+
+    assert result.verdict == "UNCERTAIN"
+    assert result.source_available is False
+    mock_client.investigate.assert_not_called()  # never LLM-decides FP from metadata
+
+
+@pytest.mark.asyncio
+async def test_investigate_dependency_short_circuits():
+    mock_client = AsyncMock()
+    service = LLMAnalysisService(client=mock_client, github_client=AsyncMock())
+    finding = _inv_finding(tool="trivy", rule_id="CVE-2021-23337")
+
+    result = await service.investigate_finding(finding, AsyncMock())
+
+    assert result.verdict == "UNCERTAIN"
+    assert result.source_available is False
+    mock_client.investigate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_investigate_caches_result():
+    mock_client = AsyncMock()
+    mock_client.investigate.return_value = _inv_output(
+        "TRUE_POSITIVE", "cursor.execute('SELECT * FROM t WHERE id=' + q)")
+    service = LLMAnalysisService(client=mock_client, github_client=AsyncMock())
+    finding = _inv_finding()
+    session = AsyncMock()
+
+    await service.investigate_finding(finding, session)
+    await service.investigate_finding(finding, session)  # second call uses cache
+
+    assert mock_client.investigate.call_count == 1
 
 
 def test_extract_context_no_source():

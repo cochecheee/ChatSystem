@@ -9,7 +9,7 @@ import json
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _ESLINT_SEVERITY_TO_SEVERITY
+from .severity import _ESLINT_SEVERITY_TO_SEVERITY, resolve_severity
 
 
 class ESLintNormalizer(BaseNormalizer):
@@ -29,7 +29,11 @@ class ESLintNormalizer(BaseNormalizer):
             for msg in file_result.get("messages", []):
                 rule_id = msg.get("ruleId") or "unknown-rule"
                 eslint_sev = msg.get("severity", 1)
-                severity = _ESLINT_SEVERITY_TO_SEVERITY.get(eslint_sev, "medium")
+                res = resolve_severity(
+                    label_band=_ESLINT_SEVERITY_TO_SEVERITY.get(eslint_sev),
+                    raw_label=f"eslint={eslint_sev}",
+                )
+                severity = res.severity
                 message = msg.get("message", "")
                 line_number = msg.get("line")
 
@@ -46,6 +50,7 @@ class ESLintNormalizer(BaseNormalizer):
                         raw_data={
                             "column": msg.get("column"),
                             "dedup_hash": dedup,
+                            "_severity": res.provenance(),
                         },
                     )
                 )

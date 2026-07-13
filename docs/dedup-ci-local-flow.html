@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luồng Dedup: CI ↔ Local (chat-system)</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --border: #d8dde3;
+    --text: #1c2128;
+    --text-dim: #5b6673;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --green: #16a34a;
+    --green-soft: #dcfce7;
+    --amber: #d97706;
+    --amber-soft: #fef3c7;
+    --red: #dc2626;
+    --red-soft: #fee2e2;
+    --purple: #7c3aed;
+    --purple-soft: #ede9fe;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1c2230;
+      --border: #2d333b;
+      --text: #e6edf3;
+      --text-dim: #9098a3;
+      --accent: #58a6ff;
+      --accent-soft: #12283f;
+      --green: #3fb950;
+      --green-soft: #10251a;
+      --amber: #d29922;
+      --amber-soft: #2b2410;
+      --red: #f85149;
+      --red-soft: #2d1618;
+      --purple: #a371f7;
+      --purple-soft: #21182f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.hero {
+    border-left: 4px solid var(--accent);
+    padding: 4px 0 4px 18px;
+    margin-bottom: 8px;
+  }
+  h1 { font-size: 1.9rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--text-dim); font-size: 1rem; margin: 0; }
+  .meta { color: var(--text-dim); font-size: 0.82rem; margin-top: 10px; }
+  h2 {
+    font-size: 1.35rem; margin: 44px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.05rem; margin: 22px 0 8px; }
+  p { margin: 10px 0; }
+  code {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px; overflow-x: auto;
+    font-family: var(--mono); font-size: 0.82rem; line-height: 1.5;
+  }
+  pre code { background: none; border: none; padding: 0; }
+  .ref {
+    font-family: var(--mono); font-size: 0.75rem; color: var(--accent);
+    background: var(--accent-soft); padding: 1px 6px; border-radius: 4px;
+    white-space: nowrap;
+  }
+  .callout {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: 8px;
+    padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.tldr { border-left-color: var(--green); background: var(--green-soft); }
+  .callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+  .callout strong { display: inline; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.9rem;
+    background: var(--surface); border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+  .tbl-scroll { overflow-x: auto; }
+
+  /* Layer cards */
+  .layers { display: grid; gap: 14px; margin: 18px 0; }
+  .layer {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px; position: relative;
+  }
+  .layer .tag {
+    display: inline-block; font-size: 0.72rem; font-weight: 700;
+    padding: 2px 9px; border-radius: 999px; margin-bottom: 6px;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .layer h3 { margin: 4px 0 8px; font-size: 1.02rem; }
+  .layer p { margin: 6px 0; font-size: 0.92rem; }
+  .t-batch  .tag { background: var(--accent-soft); color: var(--accent); }
+  .t-learn  .tag { background: var(--purple-soft); color: var(--purple); }
+  .t-run    .tag { background: var(--green-soft);  color: var(--green); }
+  .t-prune  .tag { background: var(--amber-soft);  color: var(--amber); }
+
+  /* Flow diagram */
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 22px 0; }
+  .step {
+    display: flex; align-items: stretch; gap: 0;
+  }
+  .step .num {
+    flex: 0 0 34px; display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-weight: 700; font-size: 0.85rem;
+    color: #fff; background: var(--accent); border-radius: 8px 0 0 8px;
+  }
+  .step .body {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-left: none; border-radius: 0 8px 8px 0; padding: 12px 16px;
+  }
+  .step .body .title { font-weight: 600; }
+  .step .body .desc { font-size: 0.86rem; color: var(--text-dim); margin-top: 2px; }
+  .arrow { text-align: center; color: var(--text-dim); font-size: 1.1rem; line-height: 1; padding: 5px 0; }
+  .step.dedup .num { background: var(--green); }
+  .step.gate  .num { background: var(--purple); }
+
+  .pill { display:inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 1px 7px; border-radius: 999px; border:1px solid var(--border); background: var(--surface-2); color: var(--text-dim); }
+
+  /* sequence diagram */
+  .seq-scroll { overflow-x: auto; margin: 20px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+  svg.seq { display: block; width: 100%; min-width: 720px; height: auto; }
+  .seq-ll line { stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .seq-actor rect { fill: var(--surface-2); stroke: var(--border); stroke-width: 1; }
+  .seq-actor text { fill: var(--text); font-family: var(--sans); font-size: 12px; font-weight: 600; text-anchor: middle; }
+  .seq-actor text.sub { fill: var(--text-dim); font-size: 9.5px; font-weight: 400; }
+  svg.seq .lbl { fill: var(--text); font-family: var(--sans); font-size: 10.5px; text-anchor: middle; }
+  svg.seq .phase { fill: var(--text-dim); font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
+  svg.seq .m-accent { stroke: var(--accent); stroke-width: 1.6; marker-end: url(#ah-accent); }
+  svg.seq .m-green  { stroke: var(--green);  stroke-width: 1.6; marker-end: url(#ah-green); }
+  svg.seq .m-purple { stroke: var(--purple); stroke-width: 1.6; stroke-dasharray: 5 3; marker-end: url(#ah-purple); }
+  svg.seq .m-ret    { stroke: var(--text-dim); stroke-width: 1.3; stroke-dasharray: 3 3; marker-end: url(#ah-dim); }
+  svg.seq .note { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 1; }
+  svg.seq .note-t { fill: var(--amber); font-family: var(--sans); font-size: 10px; text-anchor: middle; font-weight: 600; }
+  svg.seq .divider { stroke: var(--green); stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.6; }
+  svg.seq .state { fill: var(--green); font-family: var(--sans); font-size: 10px; font-weight: 700; text-anchor: middle; }
+  svg.seq .loop { fill: none; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.7; }
+  svg.seq .loop-t { fill: var(--accent); font-family: var(--mono); font-size: 9.5px; font-weight: 700; }
+  svg.seq .verdict { fill: var(--text-dim); font-family: var(--sans); font-size: 10px; font-style: italic; text-anchor: middle; }
+
+  /* numeric example */
+  .example-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .num-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .num-box .big { font-size: 1.6rem; font-weight: 700; font-family: var(--mono); }
+  .strike { text-decoration: line-through; color: var(--red); opacity: 0.75; }
+
+  .pillars { display: grid; gap: 12px; margin: 16px 0; }
+  .pillar { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; border-top: 3px solid var(--accent); }
+  .pillar h3 { margin: 0 0 6px; font-size: 0.98rem; }
+  .pillar p { margin: 4px 0; font-size: 0.9rem; }
+
+  footer { margin-top: 50px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.82rem; }
+  footer code { font-size: 0.8rem; }
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .kbd { font-family: var(--mono); background: var(--surface-2); border:1px solid var(--border); border-radius:4px; padding: 0 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>Luồng Dedup: CI ↔ Local</h1>
+  <p class="subtitle">Cách hệ thống chat-system khử trùng finding và giữ số liệu CI khớp với dashboard/local</p>
+</header>
+<p class="meta">Module: <code>mcp/</code> · SAST/SCA dashboard · Cập nhật cho V3.9 · Tài liệu kỹ thuật nội bộ</p>
+
+<div class="callout tldr">
+  <strong>TL;DR —</strong> Không tồn tại "hai bộ data CI và local để đồng bộ". Chỉ có <strong>một DB duy nhất</strong>.
+  "Số của CI" và "số ở dashboard" chỉ là hai câu query khác nhau trên cùng bảng <code>findings</code>.
+  Chúng khớp nhau vì: (1) mỗi finding có một <strong>fingerprint <code>dedup_hash</code></strong>;
+  (2) trùng lặp bị <strong>xóa ở tầng lưu trữ</strong> (không phải lọc ở query-time) nên mọi reader đếm cùng số row vật lý;
+  (3) khóa nối là <code>github_run_id</code>; (4) CI poll tín hiệu <code>run_ingested</code> để đọc đúng thời điểm.
+</div>
+
+<h2>0. Fingerprint — nền tảng của mọi tầng</h2>
+<p>
+  Danh tính của một finding là một hash SHA-256. Hai finding cùng hash được coi là <strong>cùng một lỗi</strong>.
+  Hash được tính trên <em>message đã scrub</em> (đã bỏ PII/secret) nên ổn định.
+</p>
+<pre><code>def compute_dedup_hash(rule_id: str, file_path: str, message: str) -&gt; str:
+    raw = f"{rule_id}:{file_path}:{message}"
+    return hashlib.sha256(raw.encode()).hexdigest()</code></pre>
+<p>
+  <span class="ref">src/models/schemas.py:211</span>
+  &nbsp;→ lưu vào cột <code>Finding.dedup_hash</code> <span class="ref">entities.py:146</span>,
+  có index <code>ix_findings_dedup_project (dedup_hash, project_id)</code> <span class="ref">entities.py:166</span>.
+</p>
+<div class="callout">
+  <strong>Vì sao scrub trước rồi mới hash?</strong> Xem <code>_build_findings</code>
+  <span class="ref">processor.py:587-589</span>: message được <code>scrub_text()</code> <em>post-parse</em> rồi mới
+  đưa vào <code>compute_dedup_hash</code>. Nếu hash trên message thô, cùng một lỗi có email/IP khác nhau sẽ ra hash khác → hỏng dedup.
+</div>
+
+<h2>1. Bốn tầng dedup</h2>
+<p>Dedup không nằm một chỗ. Nó là bốn cơ chế chạy ở các thời điểm khác nhau, tất cả xoay quanh <code>dedup_hash</code>:</p>
+
+<div class="layers">
+  <div class="layer t-batch">
+    <span class="tag">Tầng 1 · trong 1 batch</span>
+    <h3>Khử trùng khi normalize (trong cùng artifact)</h3>
+    <p>Khi <code>_build_findings</code> duyệt nhiều file report trong cùng một artifact, biến <code>batch_hashes</code> tích lũy qua các file. Cùng một lỗi xuất hiện ở 2 file bị loại ngay <strong>trước khi ghi DB</strong>.</p>
+    <pre><code>def deduplicate(self, findings, existing_hashes):
+    seen = set()
+    for f in findings:
+        h = compute_dedup_hash(f.rule_id, f.file_path, f.message)
+        if h not in existing_hashes and h not in seen:  # bỏ nếu đã thấy
+            seen.add(h); result.append(f)</code></pre>
+    <p><span class="ref">normalizers/base.py:16</span> · gọi tại <span class="ref">processor.py:579</span></p>
+  </div>
+
+  <div class="layer t-learn">
+    <span class="tag">Tầng 2 · cross-run (learning loop)</span>
+    <h3>Kế thừa quyết định triage qua các run (V3.1)</h3>
+    <p><strong>Không xóa row</strong> — mà "học" từ quyết định cũ. Khi ingest run mới, nếu hash trùng một finding đã REVOKE/APPROVE ở run trước (cùng project) → tự động kế thừa:</p>
+    <ul>
+      <li><strong>Tier 1</strong> — khớp hash chính xác: revoke → auto-revoke; approve → auto-carry approve (để gate không flag lại).</li>
+      <li><strong>Tier 2</strong> — khớp <em>pattern</em> qua <code>suppression_rules</code> (rule_id/file/tool/severity). Tier 1 thắng nếu cả hai khớp.</li>
+    </ul>
+    <p>Mỗi auto-decision ghi <code>FindingAction(submitted_by="webhook:auto-triage")</code> để phân biệt trong audit log.</p>
+    <p><span class="ref">processor.py:439-499</span> · lookup <span class="ref">finding_repo.py:378 find_revoked_hashes / :414 find_approved_hashes</span></p>
+  </div>
+
+  <div class="layer t-run">
+    <span class="tag">Tầng 3 · trong 1 run ⭐</span>
+    <h3>Gộp trùng lưu trữ trong cùng một run (V3.9)</h3>
+    <p>Đây là tầng giải quyết bug <strong>CI ↔ dashboard lệch số</strong>. Một run CI publish <em>cả</em> artifact gộp (<code>sast-reports-&lt;run&gt;</code>) <em>lẫn</em> per-tool (<code>sast-reports-&lt;run&gt;-&lt;tool&gt;</code>) → cùng finding lưu ~2–3 lần dưới cùng <code>github_run_id</code>.</p>
+    <p>Gom theo <code>dedup_hash</code>, giữ <strong>1 row/hash</strong> theo ưu tiên keeper, re-point audit children của bản bị bỏ sang bản giữ (không mất lịch sử), rồi DELETE bản trùng:</p>
+    <pre><code># ưu tiên keeper (cao thắng):
+_STATUS_PRIORITY = {"REVOKED": 3, "APPROVED": 3, "ai_analyzed": 2}
+keeper = max(members, key=lambda m: (_STATUS_PRIORITY.get(m[1], 1), -m[0]))
+# → quyết định đã audit (approve/revoke) sống sót > có AI write-up > id nhỏ nhất</code></pre>
+    <p><span class="ref">processor.py:295-417 _dedup_run_findings</span> · gọi tại <span class="ref">processor.py:214</span></p>
+  </div>
+
+  <div class="layer t-prune">
+    <span class="tag">Tầng 4 · cross-run (current-state)</span>
+    <h3>Xóa findings của các run CŨ HƠN (V3.8)</h3>
+    <p>Không dedup theo hash, mà xóa <strong>toàn bộ findings của run cũ</strong> để DB chỉ giữ run mới nhất mỗi project → chặn trùng lặp tích lũy qua các lần CI chạy lại. Giữ nguyên metadata run (Artifact / PipelineRun) làm lịch sử.</p>
+    <p><strong>Guard:</strong> chỉ chạy khi run đang xử lý là run mới nhất (GitHub run id tăng đơn điệu) → reprocess run cũ không xóa nhầm data mới. Tầng 3 có guard tương tự.</p>
+    <p><span class="ref">processor.py:221-293 _prune_superseded_findings</span> · gọi tại <span class="ref">processor.py:210</span></p>
+  </div>
+</div>
+
+<h2>2. Thứ tự chạy trong <code>process_run</code></h2>
+<p>Một lần ingest chạy các tầng theo đúng thứ tự sau:</p>
+
+<div class="flow">
+  <div class="step">
+    <div class="num">1</div>
+    <div class="body">
+      <div class="title">CI scan &amp; upload</div>
+      <div class="desc">Pipeline chạy semgrep/codeql/trivy/… → upload artifact (merged + per-tool) → bắn webhook về <code>/webhooks/github</code>.</div>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step">
+    <div class="num">2</div>
+    <div class="body">
+      <div class="title">Ingest từng artifact — <span class="pill">Tầng 1 + Tầng 2</span></div>
+      <div class="desc"><code>_build_findings</code> normalize + dedup trong batch (Tầng 1); auto-triage kế thừa revoke/approve (Tầng 2); ghi <code>findings</code> + <code>finding_actions</code>. <span class="ref">processor.py:_run</span></div>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step dedup">
+    <div class="num">3</div>
+    <div class="body">
+      <div class="title">Prune run cũ — <span class="pill">Tầng 4</span></div>
+      <div class="desc">Xóa findings của mọi run cũ hơn của project (guard: chỉ khi đây là run mới nhất). <span class="ref">processor.py:210</span></div>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step dedup">
+    <div class="num">4</div>
+    <div class="body">
+      <div class="title">Dedup trong run — <span class="pill">Tầng 3</span></div>
+      <div class="desc">Gộp merged-vs-per-tool về 1 row/<code>dedup_hash</code>. Sau bước này DB ở trạng thái "một nguồn sự thật". <span class="ref">processor.py:214</span></div>
+    </div>
+  </div>
+  <div class="arrow">↓</div>
+  <div class="step gate">
+    <div class="num">5</div>
+    <div class="body">
+      <div class="title">CI poll gate-count</div>
+      <div class="desc">CI gọi <code>GET /findings/gate-count?project_id&amp;run_id</code>, poll tới khi <code>run_ingested=true</code> rồi đọc <code>pass</code>. <span class="ref">api/findings.py:185</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>3. Flow cụ thể end-to-end</h2>
+<p>
+  Toàn bộ đường đi của một run — từ lúc CI chạy xong đến lúc gate cho pass/fail — đi qua 4 pha.
+  Ingest chạy <strong>async</strong>: webhook trả <code>202</code> ngay rồi <code>process_run</code> chạy nền, còn CI <strong>poll song song</strong> ở pha D.
+</p>
+
+<div class="seq-scroll">
+<svg viewBox="0 0 900 660" class="seq" role="img" aria-label="Sequence diagram luồng dedup CI và local">
+  <defs>
+    <marker id="ah-accent" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" style="fill:var(--accent)"/></marker>
+    <marker id="ah-green" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" style="fill:var(--green)"/></marker>
+    <marker id="ah-purple" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" style="fill:var(--purple)"/></marker>
+    <marker id="ah-dim" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" style="fill:var(--text-dim)"/></marker>
+  </defs>
+
+  <!-- lifelines -->
+  <g class="seq-ll">
+    <line x1="95"  y1="54" x2="95"  y2="628"/>
+    <line x1="330" y1="54" x2="330" y2="628"/>
+    <line x1="575" y1="54" x2="575" y2="628"/>
+    <line x1="820" y1="54" x2="820" y2="628"/>
+  </g>
+
+  <!-- actor heads -->
+  <g class="seq-actor">
+    <rect x="35"  y="14" width="120" height="34" rx="6"/><text x="95"  y="30">CI Runner</text><text x="95"  y="42" class="sub">repo target</text>
+    <rect x="270" y="14" width="120" height="34" rx="6"/><text x="330" y="30">FastAPI</text><text x="330" y="42" class="sub">webhook + gate</text>
+    <rect x="515" y="14" width="120" height="34" rx="6"/><text x="575" y="30">process_run</text><text x="575" y="42" class="sub">background task</text>
+    <rect x="760" y="14" width="120" height="34" rx="6"/><text x="820" y="30">Database</text><text x="820" y="42" class="sub">findings</text>
+  </g>
+
+  <!-- PHASE B: webhook -->
+  <text x="16" y="80" class="phase">PHA B · Webhook</text>
+  <line x1="95"  y1="92"  x2="330" y2="92"  class="m-accent"/><text x="212" y="86" class="lbl">POST /webhook/pipeline-complete {run_id, repo} + HMAC</text>
+  <line x1="330" y1="120" x2="820" y2="120" class="m-accent"/><text x="575" y="114" class="lbl">check WebhookDelivery(delivery_id) — replay dedup</text>
+  <line x1="330" y1="146" x2="820" y2="146" class="m-accent"/><text x="575" y="140" class="lbl">record_delivery(outcome=accepted)</text>
+  <line x1="330" y1="176" x2="575" y2="176" class="m-purple"/><text x="452" y="170" class="lbl">background_tasks.add_task(process_run)</text>
+  <line x1="330" y1="204" x2="95"  y2="204" class="m-ret"/><text x="212" y="198" class="lbl">202 Accepted</text>
+
+  <!-- PHASE C: process_run -->
+  <text x="16" y="240" class="phase">PHA C · process_run (nền)</text>
+  <rect x="500" y="252" width="150" height="30" rx="5" class="note"/><text x="575" y="271" class="note-t">GitHub: list_artifacts + fetch zip</text>
+  <line x1="575" y1="310" x2="820" y2="310" class="m-green"/><text x="697" y="304" class="lbl">write findings — Tầng 1 (batch) + Tầng 2 (auto-triage)</text>
+  <line x1="575" y1="338" x2="820" y2="338" class="m-green"/><text x="697" y="332" class="lbl">_prune_superseded_findings — Tầng 4 (xóa run cũ)</text>
+  <line x1="575" y1="366" x2="820" y2="366" class="m-green"/><text x="697" y="360" class="lbl">_dedup_run_findings — Tầng 3 (gộp 1 row/hash)</text>
+  <line x1="500" y1="392" x2="900" y2="392" class="divider"/>
+  <text x="575" y="386" class="state">⚑ DB = một nguồn sự thật</text>
+
+  <!-- PHASE D: gate poll -->
+  <text x="16" y="426" class="phase">PHA D · CI poll gate (song song)</text>
+  <rect x="60" y="438" width="800" height="150" rx="8" class="loop"/>
+  <text x="72" y="454" class="loop-t">loop tới khi run_ingested=true</text>
+  <line x1="95"  y1="482" x2="330" y2="482" class="m-accent"/><text x="212" y="476" class="lbl">GET /findings/gate-count?project_id&amp;run_id</text>
+  <line x1="330" y1="512" x2="820" y2="512" class="m-accent"/><text x="575" y="506" class="lbl">count_with_filters(exclude_revoked + exclude_approved)</text>
+  <line x1="330" y1="540" x2="95"  y2="540" class="m-ret"/><text x="212" y="534" class="lbl">{critical, high, run_ingested, pass}</text>
+  <text x="460" y="574" class="verdict">pass=false → CI đỏ (block merge) · pass=true → CI xanh</text>
+</svg>
+</div>
+
+<h3>Pha A — CI Runner (repo target, vd. ALOUTE)</h3>
+<ul>
+  <li>Workflow chạy các scanner (semgrep, codeql, trivy, bandit, spotbugs, dependency-check, owasp-zap…).</li>
+  <li>Upload artifact: <code>sast-reports-&lt;run&gt;</code> (gộp) <strong>+</strong> <code>sast-reports-&lt;run&gt;-&lt;tool&gt;</code> (per-tool) → đây chính là nguồn gây trùng mà Tầng 3 xử lý.</li>
+  <li>Bắn webhook về chat-system, body <code>{run_id, repository}</code>, kèm header <code>X-Hub-Signature-256</code> (HMAC) hoặc Bearer token + <code>X-GitHub-Delivery</code> (UUID).</li>
+</ul>
+
+<h3>Pha B — Webhook handler <span class="ref">api/artifacts.py:161 /webhook/pipeline-complete</span></h3>
+<ol>
+  <li><strong>Parse body</strong> → <code>WebhookRunPayload</code> (422 nếu sai).</li>
+  <li><strong>Replay dedup:</strong> tra <code>WebhookDelivery</code> theo <code>delivery_id</code>. Đã có → trả <code>outcome=duplicate</code>, bỏ qua toàn bộ. <span class="ref">artifacts.py:201-216</span></li>
+  <li><strong>Auth 3 tầng:</strong> HMAC → per-project Bearer → global token. Không path nào hợp lệ → <code>403</code> (fail-closed). <span class="ref">artifacts.py:222-295</span></li>
+  <li><code>record_delivery(accepted)</code> + commit. <span class="ref">artifacts.py:298-303</span></li>
+  <li><code>background_tasks.add_task(process_run, project.id, run_id)</code> → trả <code>202</code> <strong>ngay</strong>, xử lý sang nền. <span class="ref">artifacts.py:305-315</span></li>
+</ol>
+
+<h3>Pha C — <code>process_run</code> chạy nền <span class="ref">services/processor.py:process_run</span></h3>
+<ol>
+  <li>Load project → <code>GitHubClient.for_project()</code> + <code>load_profile()</code>. <span class="ref">processor.py:100-113</span></li>
+  <li><code>gh.list_artifacts(run_id)</code> → lọc security artifacts qua <code>_is_security_artifact</code>. <span class="ref">processor.py:115-122</span></li>
+  <li><strong>Loop từng artifact</strong> <span class="ref">processor.py:126-188</span>:
+    <ul>
+      <li><em>Idempotency:</em> Artifact đã <code>processed</code> → skip (chống double-webhook SAST+DAST cùng <code>run_id</code>). <span class="ref">:141-146</span></li>
+      <li>Chưa có → tạo Artifact <code>status=pending</code>; đã có mà <code>pending/failed</code> → wipe findings cũ trước khi re-ingest (BUG-5). <span class="ref">:147-175</span></li>
+      <li><code>process_artifact → _run</code>: <code>fetch_artifact</code> (tải zip) → <code>_build_findings</code> [scrub → normalize → <strong>Tầng 1</strong> → enrich → scrub message → hash] → <strong>Tầng 2</strong> auto-triage → <code>add_all</code> + commit + ghi <code>FindingAction</code>. <span class="ref">processor.py:423-531</span></li>
+      <li>Lỗi 1 artifact được cô lập, không dừng cả run (BUG-4). <span class="ref">:180-188</span></li>
+    </ul>
+  </li>
+  <li><strong>Sau loop</strong>, nếu <code>processed_count &gt; 0</code>: bump <code>last_processed_run_id</code> → <strong>Tầng 4</strong> <code>_prune_superseded_findings</code> → <strong>Tầng 3</strong> <code>_dedup_run_findings</code>. <span class="ref">processor.py:194-214</span></li>
+</ol>
+
+<h3>Pha D — CI poll gate <span class="ref">api/findings.py:185 /findings/gate-count</span></h3>
+<ol>
+  <li>Song song với Pha C, CI gọi <code>GET /findings/gate-count?project_id&amp;run_id</code>.</li>
+  <li>Auth: webhook token (per-project/global) hoặc JWT hoặc anonymous. <span class="ref">findings.py:213-227</span></li>
+  <li><code>count_with_filters(run_id, exclude_revoked=True, exclude_approved=True)</code> cho critical/high/medium/low. <span class="ref">findings.py:234-241</span></li>
+  <li><code>run_total</code> → <code>run_ingested</code>. CI <strong>poll tới khi <code>run_ingested=true</code></strong> mới tin số (tránh đọc 0/0 lúc ingest chưa xong). <span class="ref">findings.py:249-250</span></li>
+  <li>So <code>critical/high</code> với <code>gate_critical_threshold / gate_high_threshold</code> của project → <code>pass</code>. <span class="ref">findings.py:256-270</span></li>
+  <li><code>pass=false</code> → CI đỏ, chặn merge; <code>pass=true</code> → CI xanh.</li>
+</ol>
+
+<div class="callout">
+  <strong>Điểm mấu chốt của "map":</strong> Pha C bước cuối (Tầng 4 + Tầng 3) đưa DB về trạng thái "một nguồn sự thật" <em>trước khi</em>
+  Pha D đọc số. Vì <code>run_ingested</code> chỉ bật sau khi findings đã vào DB, và dedup chạy ngay trong cùng <code>process_run</code>,
+  nên khi CI đọc được số hợp lệ thì đó đã là số <strong>đã khử trùng</strong> — cùng tập row mà dashboard <code>latest_run_only</code> hiển thị.
+</div>
+
+<h2>4. CI và Local map với nhau như thế nào</h2>
+<p>Sau khi dedup, số CI và số local khớp nhờ 4 trụ. Bỏ bất kỳ trụ nào là số lại vênh.</p>
+
+<div class="pillars">
+  <div class="pillar">
+    <h3>Trụ 1 — CI không tự đếm; nó HỎI chính DB</h3>
+    <p>CI gate không đếm finding trong file report của mình. Nó upload artifact, rồi <strong>query</strong> <code>/findings/gate-count</code> — cùng repository, cùng bảng mà dashboard KPI đọc. "Map" xảy ra vì cả hai <strong>đọc chung một nguồn</strong>. <span class="ref">api/findings.py:229</span></p>
+  </div>
+  <div class="pillar">
+    <h3>Trụ 2 — Khóa map chung là <code>github_run_id</code></h3>
+    <p>Mỗi <code>Finding</code> → <code>Artifact</code> → mang <code>github_run_id</code>.</p>
+    <div class="tbl-scroll"><table>
+      <tr><th>Bên</th><th>Lọc theo</th><th>Ref</th></tr>
+      <tr><td><strong>CI gate</strong></td><td><code>run_id = &lt;run vừa chạy&gt;</code></td><td><span class="ref">findings.py:235</span></td></tr>
+      <tr><td><strong>Dashboard / local</strong></td><td><code>latest_run_only=True</code> = run mới nhất mỗi project</td><td><span class="ref">finding_repo.py:257 _latest_run_ids</span></td></tr>
+    </table></div>
+    <p>Sau khi run vừa chạy ingest xong, nó <strong>chính là</strong> run mới nhất → cùng <code>github_run_id</code> → cùng tập row.</p>
+  </div>
+  <div class="pillar">
+    <h3>Trụ 3 — Dedup ở tầng STORAGE nên mọi query đếm cùng row</h3>
+    <p>Trước đây mỗi surface (gate-count, KPI, list Vulns/SCA/DAST, AI summary) tự khử trùng ở query-time theo cách khác nhau → số vênh. Fix: <strong>xóa hẳn row trùng</strong> (Tầng 3) thay vì lọc ở từng query. Còn 1 row thật/lỗi → ai đếm cũng ra cùng số. <span class="ref">processor.py:301-309 (docstring)</span></p>
+  </div>
+  <div class="pillar">
+    <h3>Trụ 4 — Chống lệch do timing: <code>run_ingested</code></h3>
+    <p>Ingest chạy async (webhook → background). Nếu CI đọc gate-count trước khi ingest xong sẽ thấy 0/0 và PASS sai. <code>gate-count</code> trả thêm <code>run_total</code> / <code>run_ingested</code>; CI poll tới khi <code>run_ingested=true</code> rồi mới tin số. <span class="ref">findings.py:249-250</span></p>
+  </div>
+</div>
+
+<div class="callout warn">
+  <strong>Ngữ nghĩa đếm phải đồng bộ, không chỉ con số.</strong>
+  Gate và dashboard đều loại cùng tập trạng thái để "active risk" nhất quán:
+  <code>exclude_revoked=True</code> + <code>exclude_approved=True</code> <span class="ref">findings.py:236</span>.
+  REVOKED (false-positive) và APPROVED (accepted-risk) đều <strong>không</strong> chặn gate và <strong>không</strong> tính KPI active
+  → một <code>/approve</code> khiến run kế tiếp qua gate, và Tầng 2 (carry-forward) đảm bảo quyết định theo hash sang run mới, khỏi approve lại.
+</div>
+
+<h2>5. Ví dụ số cụ thể</h2>
+<p>Giả sử run <code>#4432</code> của project ALOUTE tìm ra <strong>184 lỗi thực sự</strong>, nhưng CI publish cả artifact gộp lẫn 3 per-tool → mỗi lỗi lưu trùng.</p>
+
+<div class="example-grid">
+  <div class="num-box">
+    <div class="desc">Sau bước 2 (ingest thô, trước dedup) — trong DB</div>
+    <div class="big strike">~510 rows</div>
+    <div class="desc">merged (184) + per-tool trùng (~326). Nếu poller re-ingest còn cao hơn.</div>
+  </div>
+  <div class="num-box">
+    <div class="desc">Sau bước 4 (Tầng 3 gộp về 1 row/hash)</div>
+    <div class="big" style="color:var(--green)">184 rows</div>
+    <div class="desc">Một row vật lý cho mỗi <code>dedup_hash</code> trong run #4432.</div>
+  </div>
+  <div class="num-box">
+    <div class="desc">Bước 5 — gate-count(run_id=4432) &amp; dashboard(latest_run) đọc cùng 184 row, trừ REVOKED/APPROVED</div>
+    <div class="big" style="color:var(--purple)">= khớp</div>
+    <div class="desc">CI thấy đúng số active mà dashboard hiển thị. Đây là ý nghĩa "map".</div>
+  </div>
+</div>
+
+<div class="callout">
+  <strong>Bug lịch sử liên quan:</strong> trong <code>docs/fix_bugs.md</code> có ghi lần pipeline hiển thị sai 9.1% pass rate (V3.3)
+  và fix khớp số liệu CI↔dashboard (commit gần nhất). Tài liệu này mô tả cơ chế đứng sau fix đó.
+</div>
+
+<footer>
+  <strong>File nguồn tham chiếu</strong><br>
+  <code>src/models/schemas.py</code> — <code>compute_dedup_hash</code><br>
+  <code>src/services/normalizers/base.py</code> — <code>deduplicate</code> (Tầng 1)<br>
+  <code>src/services/processor.py</code> — <code>_run</code> auto-triage (Tầng 2), <code>_prune_superseded_findings</code> (Tầng 4), <code>_dedup_run_findings</code> (Tầng 3)<br>
+  <code>src/repositories/finding_repo.py</code> — <code>_latest_run_ids</code>, <code>find_revoked_hashes</code>, <code>find_approved_hashes</code>, <code>count_with_filters</code><br>
+  <code>src/api/findings.py</code> — <code>/findings/gate-count</code><br>
+  <code>src/models/entities.py</code> — cột <code>dedup_hash</code> + index<br>
+  <br>
+  Tài liệu kỹ thuật nội bộ · chat-system · mở bằng trình duyệt bất kỳ (self-contained, không cần mạng).
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.auth import (
     User,
-    allowed_project_ids,
     enforce_run_project_access,
+    ensure_project_in_scope,
     require_read_access,
 )
 from ..core.config import settings
@@ -54,6 +55,27 @@ def get_processor() -> SecurityProcessor:
 # GitHub browser — inspect runs & artifacts without leaving Swagger UI
 # ---------------------------------------------------------------------------
 
+async def _resolve_client(
+    project_id: int | None,
+    session: AsyncSession,
+    github: GitHubClient,
+    user: User | None,
+) -> GitHubClient:
+    """Swap the env-credential client for per-project credentials.
+
+    `?project_id=` (V2.9): dùng credentials per-project thay vì env. 404 nếu
+    project không tồn tại.
+    V3.3: khi RBAC on + non-admin, project_id phải nằm trong memberships.
+    """
+    ensure_project_in_scope(user, project_id)
+    if project_id is None:
+        return github
+    project = await ProjectRepository(session).get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return GitHubClient.for_project(project)
+
+
 @router.get("/github/runs", summary="List recent workflow runs from GitHub")
 async def list_github_runs(
     branch: str = "",
@@ -65,22 +87,8 @@ async def list_github_runs(
 ) -> list[dict]:
     """Return recent workflow runs for the configured repo.
     Use the `id` field as input for **GET /github/runs/{run_id}/artifacts**.
-
-    `?project_id=` (V2.9): dùng credentials per-project thay vì env. 404 nếu
-    project không tồn tại.
-    V3.3: khi RBAC on + non-admin, project_id phải nằm trong memberships.
     """
-    scope_ids = allowed_project_ids(user)
-    if scope_ids is not None and project_id is not None and project_id not in scope_ids:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Project {project_id} not in your memberships",
-        )
-    if project_id is not None:
-        project = await ProjectRepository(session).get(project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        github = GitHubClient.for_project(project)
+    github = await _resolve_client(project_id, session, github, user)
     try:
         return await github.list_workflow_runs(
             workflow_name="",
@@ -112,6 +120,70 @@ async def list_github_artifacts(
         return await github.list_artifacts(run_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"GitHub API error: {exc}")
+
+
+@router.get(
+    "/github/runs/{run_id}/jobs",
+    summary="List jobs + steps for a workflow run",
+)
+async def list_github_run_jobs(
+    run_id: int,
+    project_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+    github: GitHubClient = Depends(get_github_client),
+    user: User | None = Depends(require_read_access),
+) -> list[dict]:
+    """Live proxy sang GitHub — jobs kèm steps (status/conclusion/timing).
+
+    Nguồn dữ liệu cho "CI Progress" trên Pipelines page. GitHub cập nhật
+    step status real-time cả khi run đang in_progress, nên UI poll endpoint
+    này để vẽ timeline từng bước. In-progress runs chưa được ingest (webhook
+    chỉ bắn khi complete) → cần `?project_id=` để chọn đúng credentials.
+    """
+    await enforce_run_project_access(run_id, user, session)
+    github = await _resolve_client(project_id, session, github, user)
+    try:
+        return await github.list_run_jobs(run_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub API error: {exc}")
+
+
+@router.get(
+    "/github/runs/{run_id}/jobs/{job_id}/logs",
+    summary="Plain-text log of one job",
+    response_class=PlainTextResponse,
+)
+async def get_github_job_logs(
+    run_id: int,
+    job_id: int,
+    project_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+    github: GitHubClient = Depends(get_github_client),
+    user: User | None = Depends(require_read_access),
+) -> PlainTextResponse:
+    """Log của 1 job. GitHub chỉ phát hành log sau khi job kết thúc —
+    job đang chạy trả 404 (UI hiển thị steps live thay thế).
+
+    Job được xác minh thuộc đúng `run_id` trước khi tải, để route run-scoped
+    (đã qua RBAC theo run) không đọc được log của run khác qua job_id lạ.
+    """
+    await enforce_run_project_access(run_id, user, session)
+    github = await _resolve_client(project_id, session, github, user)
+    try:
+        job = await github.get_job(job_id)
+        if job is None or job.get("run_id") != run_id:
+            raise HTTPException(status_code=404, detail="Job not found for this run")
+        logs = await github.fetch_job_logs(job_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub API error: {exc}")
+    if logs is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Logs not available yet — job may still be running",
+        )
+    return PlainTextResponse(logs)
 
 
 # ---------------------------------------------------------------------------

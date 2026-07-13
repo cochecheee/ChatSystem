@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI · MCP · Guardrail 4 lớp — Cơ chế &amp; flow (chat-system)</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dde3;
+    --text: #1c2128; --text-dim: #5b6673;
+    --accent: #ea580c; --accent-soft: #ffedd5;
+    --blue: #2563eb; --blue-soft: #dbeafe;
+    --teal: #0d9488; --teal-soft: #ccfbf1;
+    --green: #16a34a; --green-soft: #dcfce7;
+    --amber: #d97706; --amber-soft: #fef3c7;
+    --red: #dc2626; --red-soft: #fee2e2;
+    --purple: #7c3aed; --purple-soft: #ede9fe;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --surface: #161b22; --surface-2: #1c2230; --border: #2d333b;
+      --text: #e6edf3; --text-dim: #9098a3;
+      --accent: #fb923c; --accent-soft: #2b1a0e;
+      --blue: #58a6ff; --blue-soft: #12283f;
+      --teal: #2dd4bf; --teal-soft: #0c2a27;
+      --green: #3fb950; --green-soft: #10251a;
+      --amber: #d29922; --amber-soft: #2b2410;
+      --red: #f85149; --red-soft: #2d1618;
+      --purple: #a371f7; --purple-soft: #21182f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.6; font-size: 16px; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.hero { border-left: 4px solid var(--accent); padding: 4px 0 4px 18px; margin-bottom: 8px; }
+  h1 { font-size: 1.85rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--text-dim); font-size: 1rem; margin: 0; }
+  .meta { color: var(--text-dim); font-size: 0.82rem; margin-top: 10px; }
+  h2 { font-size: 1.35rem; margin: 46px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -0.01em; }
+  h3 { font-size: 1.05rem; margin: 22px 0 8px; }
+  p { margin: 10px 0; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 0.8rem; line-height: 1.5; }
+  pre code { background: none; border: none; padding: 0; }
+  .ref { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .callout { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.tldr { border-left-color: var(--green); background: var(--green-soft); }
+  .callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.86rem; background: var(--surface); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+  .tbl-scroll { overflow-x: auto; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display:inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
+  .p-read { background: var(--blue-soft); color: var(--blue); }
+  .p-ai   { background: var(--accent-soft); color: var(--accent); }
+  .p-mut  { background: var(--red-soft); color: var(--red); }
+  .p-l1 { background: var(--blue-soft); color: var(--blue); }
+  .p-l2 { background: var(--teal-soft); color: var(--teal); }
+  .p-l3 { background: var(--green-soft); color: var(--green); }
+  .p-l4 { background: var(--red-soft); color: var(--red); }
+
+  .layers { display: grid; gap: 14px; margin: 18px 0; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 720px) { .layers { grid-template-columns: 1fr; } }
+  .layer { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 15px 17px; border-top: 3px solid var(--border); }
+  .layer h3 { margin: 2px 0 6px; font-size: 1rem; }
+  .layer p { margin: 5px 0; font-size: 0.88rem; }
+  .l1 { border-top-color: var(--blue); }
+  .l2 { border-top-color: var(--teal); }
+  .l3 { border-top-color: var(--green); }
+  .l4 { border-top-color: var(--red); }
+
+  /* schema field grid */
+  .schema { background: var(--surface); border:1px solid var(--border); border-radius: 10px; padding: 6px 4px; margin: 14px 0; }
+  .field { display: grid; grid-template-columns: 190px 1fr; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+  .field:last-child { border-bottom: none; }
+  .field .k { font-family: var(--mono); color: var(--accent); font-size: 0.82rem; }
+
+  /* full flow */
+  .flow { display: flex; flex-direction: column; margin: 22px 0; }
+  .step { display: flex; align-items: stretch; }
+  .step .num { flex: 0 0 34px; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; font-size: 0.82rem; color: #fff; background: var(--text-dim); border-radius: 8px 0 0 8px; }
+  .step .body { flex: 1; background: var(--surface); border: 1px solid var(--border); border-left: none; border-radius: 0 8px 8px 0; padding: 10px 15px; }
+  .step .body .title { font-weight: 600; font-size: 0.95rem; }
+  .step .body .desc { font-size: 0.84rem; color: var(--text-dim); margin-top: 2px; }
+  .step.s-l1 .num { background: var(--blue); }
+  .step.s-l2 .num { background: var(--teal); }
+  .step.s-l3 .num { background: var(--green); }
+  .step.s-l4 .num { background: var(--red); }
+  .step.s-ai .num { background: var(--accent); }
+  .arrow { text-align: center; color: var(--text-dim); font-size: 1.05rem; padding: 4px 0; }
+
+  footer { margin-top: 50px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.82rem; }
+  footer code { font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>AI · MCP · Guardrail 4 lớp</h1>
+  <p class="subtitle">Giải thích lỗ hổng + sinh bản vá (structured output JSON Schema), MCP 9 tool, và phòng thủ chiều sâu chống OWASP LLM Top 10</p>
+</header>
+<p class="meta">Module: <code>mcp/</code> · SAST/SCA DevSecOps · Tài liệu kỹ thuật nội bộ</p>
+
+<div class="callout tldr">
+  <strong>TL;DR —</strong> Ba trụ cột nằm ở 3 vùng code:
+  <strong>AI</strong> (<code>services/llm/</code>) biến finding thô thành giải thích tiếng Việt + bản vá <em>unified diff</em>,
+  ép cấu trúc bằng <strong>JSON Schema</strong> để máy đọc được;
+  <strong>MCP</strong> (<code>mcp_server.py</code>) phơi DB + hành động thành <strong>9 tool</strong> (đọc/AI/mutate), mọi mutate ghi audit;
+  <strong>Guardrail</strong> (<code>core/auth.py</code> + <code>core/guardrails.py</code>) là <strong>4 lớp độc lập</strong>
+  (xác thực → kiểm cấu trúc → làm sạch PII → chặn injection), bật/tắt riêng qua env.
+</div>
+
+<h2>1. Ba trụ cột &amp; vị trí code</h2>
+<div class="tbl-scroll"><table>
+  <tr><th>Trụ cột</th><th>File chính</th><th>Vai trò</th></tr>
+  <tr><td><strong>AI phân tích</strong></td><td><code>src/services/llm/</code> (service · client · schemas), <code>prompts/v1/*.md/.j2</code></td><td>Giải thích lỗ hổng (VI) + sinh bản vá, structured output theo JSON Schema</td></tr>
+  <tr><td><strong>MCP server</strong></td><td><code>src/mcp_server.py</code></td><td>Chuẩn hoá ngữ cảnh → 9 tool cho AI client; tái dùng repository + CommandService của FastAPI</td></tr>
+  <tr><td><strong>Guardrail L1</strong> — xác thực</td><td><code>src/core/auth.py</code> + <code>main.py</code></td><td>JWT + RBAC per-project + kill-switch</td></tr>
+  <tr><td><strong>Guardrail L2</strong> — kiểm cấu trúc</td><td>Pydantic ở biên FastAPI + <code>llm/schemas.py</code></td><td>Validate input <em>và</em> output (AnalysisOutput)</td></tr>
+  <tr><td><strong>Guardrail L3</strong> — làm sạch PII</td><td><code>src/core/guardrails.py</code> <code>ScrubbingService</code></td><td>Bỏ secret (detect-secrets) + email/IP</td></tr>
+  <tr><td><strong>Guardrail L4</strong> — chặn injection</td><td><code>src/core/guardrails.py</code> <code>InjectionGuardrail</code></td><td>Từ chối/khử prompt injection trước khi tới LLM</td></tr>
+</table></div>
+
+<!-- ============ AI ============ -->
+<h2>2. Trụ 1 — AI: giải thích lỗ hổng + sinh bản vá (structured output)</h2>
+<p>
+  Lõi ở <code>LLMAnalysisService.analyze_finding</code> <span class="ref">llm/service.py:221</span>:
+  chuẩn bị prompt (<code>_prepare_analysis</code>) → gọi Gemini → parse kết quả về schema → cache lại DB
+  (<code>status="ai_analyzed"</code>, <code>ai_analysis=result.model_dump()</code>).
+</p>
+
+<h3>Structured output — ép JSON Schema để máy đọc được</h3>
+<p>Điểm mấu chốt ở <code>GeminiClient.analyze</code> <span class="ref">llm/client.py:45-51</span> — cấu hình Gemini trả JSON đúng schema, không phải văn bản tự do:</p>
+<pre><code>config = types.GenerateContentConfig(
+    response_mime_type="application/json",   # ép output là JSON
+    response_schema=AnalysisOutput,          # theo schema Pydantic
+    system_instruction=get_registry().system_for(system_prompt_id),
+)
+...
+return AnalysisOutput.model_validate_json(response.text)   # parse + validate</code></pre>
+<p>Schema <code>AnalysisOutput</code> <span class="ref">llm/schemas.py:4</span> — 7 trường máy đọc được:</p>
+<div class="schema">
+  <div class="field"><span class="k">vulnerability_id</span><span>Định danh lỗ hổng (vd CWE/CVE)</span></div>
+  <div class="field"><span class="k">explanation_vi</span><span>Giải thích lỗ hổng — <strong>tiếng Việt bắt buộc</strong> (pin trong system prompt)</span></div>
+  <div class="field"><span class="k">impact_vi</span><span>Tác động nếu bị khai thác — tiếng Việt</span></div>
+  <div class="field"><span class="k">remediation_diff</span><span><strong>Bản vá dạng Unified Diff</strong> — chỉ sửa phần cần thiết (SAST); hoặc hướng nâng cấp version (CVE)</span></div>
+  <div class="field"><span class="k">severity</span><span>Validator kẹp về {CRITICAL, HIGH, MEDIUM, LOW, INFO} — sai → MEDIUM</span></div>
+  <div class="field"><span class="k">cwe_reference</span><span>Tham chiếu CWE</span></div>
+  <div class="field"><span class="k">confidence</span><span>Validator kẹp về {HIGH, MEDIUM, LOW} — sai → LOW (thiếu context code)</span></div>
+</div>
+<p>
+  <code>field_validator</code> làm output <strong>an toàn kể cả khi LLM trả sai giá trị</strong>: mọi enum lệch bị kẹp về mặc định
+  thay vì làm hỏng downstream. Đây là một phần của Guardrail Layer 2 áp lên <em>đầu ra</em>.
+</p>
+
+<h3>Hai nhánh prompt: code vs dependency</h3>
+<div class="tbl-scroll"><table>
+  <tr><th>prompt_id</th><th>Khi nào</th><th>remediation_diff là gì</th><th>Ref</th></tr>
+  <tr><td><code>analyze</code></td><td>Lỗ hổng mã nguồn (SAST)</td><td>Unified diff sửa code + fetch source từ GitHub làm context</td><td><span class="ref">service.py:169-216</span></td></tr>
+  <tr><td><code>cve</code></td><td>Lỗ hổng thư viện (SCA/CVE — Trivy, Dep-Check, hoặc rule GHSA/CVE)</td><td>Hướng <strong>nâng cấp phiên bản</strong> (fixed_version) — vì sửa code vô nghĩa với CVE</td><td><span class="ref">service.py:159-168</span> · <code>_is_dependency_finding</code> :28</td></tr>
+</table></div>
+
+<h3>Hai bề mặt: structured vs streaming</h3>
+<ul>
+  <li><strong>POST /findings/{id}/explain</strong> → <code>analyze_finding</code> → JSON có schema (canonical, có <code>remediation_diff</code>) → cache. <span class="ref">service.py:221</span></li>
+  <li><strong>GET /findings/{id}/explain/stream</strong> (SSE) → <code>stream_explain</code> → chỉ stream <em>prose</em> tiếng Việt chunk-by-chunk, KHÔNG ép schema; nếu đã cache thì replay 1 chunk. Không ghi kết quả degrade vào cache. <span class="ref">service.py:248-271</span> · <code>client.stream_analyze</code> :65</li>
+</ul>
+
+<!-- ============ MCP ============ -->
+<h2>3. Trụ 2 — MCP: 9 tool / 3 nhóm / audit</h2>
+<p>
+  <code>FastMCP</code> <span class="ref">mcp_server.py:40</span> phơi dữ liệu + hành động của chat-system thành tool để AI client
+  (Claude Desktop, Cursor, Continue) kết nối qua <strong>stdio</strong> hoặc <strong>HTTP+SSE</strong> và hỏi/thao tác bằng ngôn ngữ tự nhiên.
+  Nó <strong>tái dùng cùng SQLAlchemy engine + repository + CommandService</strong> của FastAPI → một nguồn sự thật, không có logic trùng.
+</p>
+<div class="tbl-scroll"><table>
+  <tr><th>Nhóm</th><th>Tool</th><th>Nguồn dữ liệu</th></tr>
+  <tr><td rowspan="4"><span class="pill p-read">ĐỌC ×4</span></td><td><code>list_findings</code></td><td>DB — <code>FindingRepository.list_with_filters</code></td></tr>
+  <tr><td><code>get_finding</code></td><td>DB — <code>FindingRepository.get</code></td></tr>
+  <tr><td><code>get_stats_overview</code></td><td>DB — <code>StatsService.overview</code></td></tr>
+  <tr><td><code>list_pipelines</code></td><td>GitHub API — <code>list_workflow_runs</code></td></tr>
+  <tr><td><span class="pill p-ai">AI ×1</span></td><td><code>explain_finding</code></td><td>DB + Gemini (chạy <code>LLMAnalysisService</code>, cache lại)</td></tr>
+  <tr><td rowspan="4"><span class="pill p-mut">MUTATE ×4</span></td><td><code>approve_finding</code></td><td>DB (qua <code>CommandService</code>) — audit</td></tr>
+  <tr><td><code>revoke_finding</code></td><td>DB (qua <code>CommandService</code>) — audit</td></tr>
+  <tr><td><code>unrevoke_finding</code></td><td>DB (qua <code>CommandService</code>) — audit</td></tr>
+  <tr><td><code>trigger_scan</code></td><td>GitHub <code>workflow_dispatch</code> — audit</td></tr>
+</table></div>
+<div class="callout">
+  <strong>Mọi thao tác mutate ghi audit.</strong> Helper <code>_user(role="security_lead")</code> <span class="ref">mcp_server.py:56</span>
+  gán username <code>mcp:&lt;role&gt;</code>; các lệnh approve/revoke/unrevoke đi qua <code>CommandService.handle</code> nên ghi
+  <code>FindingAction(submitted_by="mcp:security_lead")</code>, còn <code>trigger_scan</code> trả <code>dispatched_by="mcp:security_lead"</code>
+  → phân biệt được hành động của AI agent với click trên dashboard (<code>dashboard:</code>) và CI (<code>webhook:</code>).
+</div>
+
+<!-- ============ GUARDRAILS ============ -->
+<h2>4. Trụ 3 — Guardrail 4 lớp (phòng thủ chiều sâu)</h2>
+<p>
+  4 lớp <strong>độc lập</strong> — mỗi lớp là một chốt chặn riêng, bật/tắt được, để nếu một lớp thủng thì lớp khác vẫn giữ.
+  Cấu trúc lấy từ docstring <span class="ref">guardrails.py:1-8</span>.
+</p>
+<div class="layers">
+  <div class="layer l1">
+    <span class="pill p-l1">Layer 1 · Xác thực</span>
+    <h3>Auth + RBAC + kill-switch</h3>
+    <p>JWT (<code>get_current_user</code>), phân quyền per-project (developer/security_lead/admin), công tắc chặn đọc ẩn danh. Giới hạn <em>ai</em> được gọi tool/endpoint nào.</p>
+    <p><span class="ref">core/auth.py</span> · <span class="ref">main.py production-safety</span></p>
+  </div>
+  <div class="layer l2">
+    <span class="pill p-l2">Layer 2 · Kiểm cấu trúc</span>
+    <h3>Pydantic schema (input &amp; output)</h3>
+    <p>Ở biên FastAPI: <code>CommandRequest</code>, <code>WebhookRunPayload</code>… validate request. Ở đầu ra AI: <code>AnalysisOutput</code> + <code>field_validator</code> kẹp enum. Dữ liệu sai hình dạng bị chặn sớm.</p>
+    <p><span class="ref">models/schemas.py</span> · <span class="ref">llm/schemas.py</span></p>
+  </div>
+  <div class="layer l3">
+    <span class="pill p-l3">Layer 3 · Làm sạch PII</span>
+    <h3>ScrubbingService</h3>
+    <p>Bỏ secret (detect-secrets → <code>[SECRET_SCRUBBED]</code>) + email/IP (<code>[EMAIL/IP_SCRUBBED]</code>) trước khi vào DB/LLM. Skip JSON để không phá SARIF; scrub từng field post-parse.</p>
+    <p><span class="ref">guardrails.py:60-129</span></p>
+  </div>
+  <div class="layer l4">
+    <span class="pill p-l4">Layer 4 · Chặn injection</span>
+    <h3>InjectionGuardrail</h3>
+    <p><code>check()</code> từ chối nội dung &gt; 2000 ký tự hoặc khớp 9 pattern (<code>ignore previous instructions</code>, <code>&lt;script</code>, <code>jailbreak</code>, <code>system prompt</code>…). <code>sanitize()</code> cắt độ dài + bỏ ký tự điều khiển.</p>
+    <p><span class="ref">guardrails.py:136-169</span></p>
+  </div>
+</div>
+
+<h3>Bật/tắt độc lập — cho ma trận thí nghiệm</h3>
+<p>Biến env <code>GUARDRAIL_LAYERS</code> chọn lớp nào chạy (đọc tại call-time): <code>full</code> (cả hai), <code>none</code>, <code>scrubbing</code>, <code>injection</code>, hoặc <code>scrubbing,injection</code>. Dùng cho ma trận C0..C4 trong báo cáo. <span class="ref">guardrails.py:31-41</span> · <code>layer_on()</code></p>
+
+<h3>Định hướng chống OWASP LLM Top 10</h3>
+<div class="tbl-scroll"><table>
+  <tr><th>Rủi ro OWASP LLM</th><th>Lớp phòng thủ</th><th>Cơ chế</th></tr>
+  <tr><td><strong>LLM01 — Prompt Injection</strong> (direct &amp; indirect)</td><td>Layer 4</td><td><code>check()</code> trên <code>finding.message</code> (direct) và <code>code_context</code> lấy từ repo untrusted (indirect)</td></tr>
+  <tr><td><strong>LLM02 — Sensitive Information Disclosure</strong></td><td>Layer 3</td><td>Scrub secret + PII trước khi text tới Gemini và trước khi lưu DB</td></tr>
+  <tr><td><strong>LLM05 — Improper Output Handling</strong></td><td>Layer 2</td><td>Structured output JSON Schema + validator kẹp enum → downstream không nhận giá trị lạ</td></tr>
+  <tr><td><strong>LLM06 — Excessive Agency</strong></td><td>Layer 1 + MCP audit</td><td>RBAC giới hạn tool được gọi; mọi mutate ghi <code>submitted_by=mcp:&lt;role&gt;</code></td></tr>
+</table></div>
+<p class="meta">Bảng mô tả <em>định hướng thiết kế</em> — ánh xạ theo phân loại OWASP LLM Top 10, không phải chứng nhận chính thức.</p>
+
+<!-- ============ FULL FLOW ============ -->
+<h2>5. Flow đầy đủ — một lần <code>/explain</code> xuyên cả 4 lớp + AI</h2>
+<p>Màu số thứ tự = lớp/hệ thống phụ trách: <span class="pill p-l1">L1</span> <span class="pill p-l2">L2</span> <span class="pill p-l3">L3</span> <span class="pill p-l4">L4</span> <span class="pill p-ai">AI</span>.</p>
+
+<div class="flow">
+  <div class="step s-l1"><div class="num">1</div><div class="body">
+    <div class="title">Client gọi — <span class="pill p-l1">L1</span></div>
+    <div class="desc"><code>POST /findings/{id}/explain</code> (dashboard) hoặc tool <code>explain_finding</code> (MCP). <code>require_read_access</code> / JWT xác thực; RBAC kiểm quyền project. <span class="ref">api/analysis.py</span> · <span class="ref">mcp_server.py:141</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">2</div><div class="body">
+    <div class="title">Load finding + kiểm cache</div>
+    <div class="desc">Lấy finding từ DB. Nếu <code>status=ai_analyzed</code> &amp; có <code>ai_analysis</code> → trả cache ngay, KHÔNG gọi LLM lần 2. <span class="ref">service.py:262-266</span> · <span class="ref">mcp_server.py:149</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step s-l4"><div class="num">3</div><div class="body">
+    <div class="title">Chặn injection trên message — <span class="pill p-l4">L4</span></div>
+    <div class="desc"><code>InjectionGuardrail.check(finding.message)</code>; khớp pattern / quá dài → raise <code>ValueError</code> → API trả "rejected_by_guardrail", KHÔNG gửi tới AI. Chỉ chạy khi <code>layer_on("injection")</code>. <span class="ref">service.py:148-157</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">4</div><div class="body">
+    <div class="title">Chọn nhánh + fetch source</div>
+    <div class="desc"><code>prompt_id = cve|analyze</code>. Nhánh analyze: fetch source code từ GitHub (theo <code>file_path</code>) làm context ±15 dòng. <span class="ref">service.py:146, 170-194</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step s-l3"><div class="num">5</div><div class="body">
+    <div class="title">Làm sạch source — <span class="pill p-l3">L3</span></div>
+    <div class="desc"><code>ScrubbingService.scrub_content(fetched)</code> bỏ secret/PII rồi cache vào <code>raw_data.source_code</code>. Chỉ khi <code>layer_on("scrubbing")</code>. <span class="ref">service.py:182-189</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step s-l4"><div class="num">6</div><div class="body">
+    <div class="title">Chặn injection gián tiếp trên code context — <span class="pill p-l4">L4</span></div>
+    <div class="desc"><code>check(code_context)</code> — code từ repo open-source là nguồn untrusted, có thể chứa injection nhúng. Khớp → reject. <span class="ref">service.py:196-204</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">7</div><div class="body">
+    <div class="title">Render prompt + sanitize</div>
+    <div class="desc"><code>registry.render("analyze"|"cve", …)</code> với <code>message</code> và <code>code_context</code> đã qua <code>sanitize()</code> (cắt 2000 ký tự + bỏ control char). <span class="ref">service.py:206-216</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step s-ai"><div class="num">8</div><div class="body">
+    <div class="title">Gọi Gemini — structured output <span class="pill p-l2">L2</span> <span class="pill p-ai">AI</span></div>
+    <div class="desc"><code>gemini.analyze(prompt, system_prompt_id)</code>: <code>response_mime_type="application/json"</code> + <code>response_schema=AnalysisOutput</code>. Retry backoff khi 429/503. <span class="ref">client.py:34-63</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step s-l2"><div class="num">9</div><div class="body">
+    <div class="title">Validate output — <span class="pill p-l2">L2</span></div>
+    <div class="desc"><code>AnalysisOutput.model_validate_json(response.text)</code>; <code>field_validator</code> kẹp <code>severity/confidence</code> về enum hợp lệ. <span class="ref">schemas.py:13-29</span></div>
+  </div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="num">10</div><div class="body">
+    <div class="title">Cache + trả kết quả</div>
+    <div class="desc"><code>finding.status="ai_analyzed"</code>, <code>ai_analysis=result.model_dump()</code>, commit. Trả JSON: <code>explanation_vi</code>, <code>impact_vi</code>, <code>remediation_diff</code>, <code>severity</code>, <code>confidence</code>… <span class="ref">service.py:230-246</span></div>
+  </div></div>
+</div>
+
+<div class="callout warn">
+  <strong>Khi tắt guardrail (demo rủi ro).</strong> <code>GUARDRAIL_LAYERS=none</code> → bước 3/5/6 bị bỏ, payload finding (kể cả injection/PII)
+  đi thẳng tới Gemini. Đây là kịch bản C0 trong ma trận báo cáo để chứng minh giá trị của từng lớp.
+</div>
+
+<footer>
+  <strong>File nguồn tham chiếu</strong><br>
+  <code>mcp/src/services/llm/service.py</code> — <code>LLMAnalysisService</code> (_prepare_analysis · analyze_finding · stream_explain)<br>
+  <code>mcp/src/services/llm/client.py</code> — <code>GeminiClient</code> (structured output · streaming · chat)<br>
+  <code>mcp/src/services/llm/schemas.py</code> — <code>AnalysisOutput</code> (JSON Schema + validators)<br>
+  <code>mcp/prompts/registry.yaml</code> + <code>prompts/v1/analyze.*</code> — system + user prompt (VI bắt buộc, đòi unified diff)<br>
+  <code>mcp/src/mcp_server.py</code> — 9 tool MCP + audit tagging<br>
+  <code>mcp/src/core/guardrails.py</code> — Layer 3 (Scrubbing) + Layer 4 (Injection) + toggle<br>
+  <code>mcp/src/core/auth.py</code> — Layer 1 (JWT + RBAC)<br>
+  <br>
+  Xem kèm: <code>docs/dedup-ci-local-flow.html</code> · <code>docs/sast-action-mechanism.html</code> · <code>docs/gate-count-flow.html</code>.
+</footer>
+
+</div>
+</body>
+</html>

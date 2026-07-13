@@ -5,6 +5,7 @@ import { timeAgo } from '../lib/dateUtils';
 import { AreaTrend, SeverityBar } from '../components/Charts';
 import { Icon } from '../components/Icon';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
+import { JobsPanel } from '../features/pipelines/JobsPanel';
 import type { Finding, WorkflowArtifact, WorkflowRun } from '../types';
 import { SEVERITY_ORDER } from '../types';
 
@@ -418,6 +419,9 @@ function RunPanel({ run }: { run: WorkflowRun }) {
           {reprocessMsg}
         </div>
       )}
+
+      {/* CI progress — jobs + steps + logs (live khi run đang chạy) */}
+      <JobsPanel run={run} />
 
       {/* Boards */}
       {loadingF && (

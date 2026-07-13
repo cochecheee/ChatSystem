@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.auth import User, create_access_token, get_current_user
+from ..core.auth import (
+    User,
+    create_access_token,
+    enforce_finding_project_access,
+    get_current_user,
+)
 from ..core.db import get_session
 from ..models.schemas import (
     CommandRequest,
     CommandResponse,
+    FPInvestigation,
     TokenRequest,
     TokenResponse,
 )
@@ -37,6 +44,8 @@ COMMAND_ROLES: dict[str, list[str]] = {
     "results":  ["developer", "security_lead", "admin"],
     "help":     ["developer", "security_lead", "admin"],
     "feedback": ["developer", "security_lead", "admin"],
+    # V4.3 — investigate whether a finding is a false positive (read-only advisory)
+    "verify":   ["developer", "security_lead", "admin"],
 }
 
 _command_service = CommandService()
@@ -116,6 +125,10 @@ class ChatMessageRequest(BaseModel):
 class ChatMessageResponse(BaseModel):
     reply: str
     suggested_command: str | None = None  # e.g. "/explain 5" — frontend can show as a one-click chip
+    # V4.3 — when the user asks "có thật không?" about a finding, the chat runs a
+    # data-flow investigation and returns the structured verdict + reasoning +
+    # code evidence here (frontend renders it as an InvestigationCard).
+    investigation: FPInvestigation | None = None
 
 
 _gemini: GeminiClient | None = None
@@ -128,13 +141,38 @@ def _get_gemini() -> GeminiClient:
     return _gemini
 
 
+# V4.3 — phrases that mean "is this finding a real bug or a false positive?".
+# When matched together with a finding id, the chat runs a code data-flow
+# investigation instead of the generic assistant answer.
+_FP_INTENT_RE = re.compile(
+    r"(có thật không|thật không|đúng không|false[\s-]?positive|dương tính giả|"
+    r"kiểm chứng|xác minh|\bfp\b|có phải lỗi|lỗi thật|real bug)"
+)
+
+
+def _investigation_intent(text: str, fallback_finding_id: int | None = None) -> int | None:
+    """Return a finding id when — and ONLY when — the user is asking whether a
+    finding is a real bug / false positive (e.g. "lỗi #3319 có thật không?").
+
+    The FP-intent check gates everything: a non-FP question (e.g. "evidence",
+    "giải thích thêm") returns None even inside a finding-scoped panel, so it
+    falls through to the normal assistant instead of re-running the investigation.
+    The id is taken from an explicit `#id`/number in the text, else the panel's
+    `fallback_finding_id` (the finding the user has open)."""
+    if not _FP_INTENT_RE.search(text.lower()):
+        return None
+    m = re.search(r"#(\d+)", text) or re.search(r"\b(\d+)\b", text)
+    if m:
+        return int(m.group(1))
+    return fallback_finding_id
+
+
 def _suggested_command(text: str) -> str | None:
     """Heuristic: map common natural-language phrases to a slash command.
 
     Lets the user say "phân tích finding 5" and get a clickable /explain 5
     suggestion in the AI reply, without forcing them to learn the syntax.
     """
-    import re
     t = text.lower()
 
     m = re.search(r"(?:explain|phân tích|giải thích).*?\b(\d+)\b", t)
@@ -198,6 +236,51 @@ def _history_key(username: str, finding_id: int | None) -> tuple[str, int | None
     return (username, finding_id)
 
 
+async def _try_investigate(
+    finding_id: int, user: User, db: AsyncSession,
+) -> ChatMessageResponse | None:
+    """V4.3 — run the data-flow FP investigation for a finding referenced in a
+    chat message. Returns a ChatMessageResponse (verdict + reasoning + evidence)
+    or None to fall through to the generic assistant (e.g. unknown id). RBAC 403
+    and Gemini/quota errors are turned into friendly 200 replies."""
+    finding = await FindingRepository(db).get(finding_id)
+    if finding is None:
+        return None  # unknown id → let the generic assistant answer
+    try:
+        await enforce_finding_project_access(finding.id, user, db, min_role="developer")
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            return ChatMessageResponse(
+                reply=f"Bạn không có quyền truy cập finding #{finding_id} (thuộc project khác).",
+                suggested_command=None,
+            )
+        raise
+    try:
+        inv = await _command_service._llm.investigate_finding(finding, db)
+    except ValueError:
+        return ChatMessageResponse(
+            reply="⚠️ Nội dung finding bị guardrail từ chối nên không thể phân tích.",
+            suggested_command=None,
+        )
+    except Exception as exc:  # Gemini/quota/network — degrade gracefully
+        log.warning("investigate_finding(%s) failed: %s", finding_id, exc)
+        err = str(exc).lower()
+        if any(k in err for k in ("429", "resource_exhausted", "quota", "rate")):
+            reply = (
+                "AI đang bị giới hạn tần suất (quota Gemini). Đợi ~1 phút rồi thử lại, "
+                f"hoặc dùng lệnh /verify {finding_id}."
+            )
+        else:
+            reply = f"Hiện chưa phân tích được finding này. Thử /explain {finding_id} hoặc thử lại sau."
+        return ChatMessageResponse(reply=reply, suggested_command=f"/verify {finding_id}")
+
+    return ChatMessageResponse(
+        reply=inv.summary_vi or f"Đã phân tích finding #{finding_id}.",
+        suggested_command=inv.suggested_command,
+        investigation=inv,
+    )
+
+
 @router.post("/message", response_model=ChatMessageResponse)
 async def chat_message(
     request: ChatMessageRequest,
@@ -226,6 +309,16 @@ async def chat_message(
                 ),
                 suggested_command=None,
             )
+
+    # V4.3 — "lỗi #X có thật không?": CHỈ khi tin nhắn hỏi tính xác thực của một
+    # finding (ý định FP) thì mới chạy điều tra luồng dữ liệu (đọc code + trích
+    # dẫn bằng chứng); ngược lại rơi xuống trợ lý thường. Id lấy từ câu hỏi, hoặc
+    # fallback về finding đang mở (panel gửi finding_id; trang chat gửi None).
+    fid = _investigation_intent(text, fallback_finding_id=request.finding_id)
+    if fid is not None:
+        inv_resp = await _try_investigate(fid, current_user, db)
+        if inv_resp is not None:
+            return inv_resp
 
     suggested = _suggested_command(text)
 

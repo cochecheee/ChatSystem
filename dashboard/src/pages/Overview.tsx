@@ -4,6 +4,7 @@ import { POLL_INTERVAL_MS } from '../lib/constants';
 import { timeAgo } from '../lib/dateUtils';
 import { Donut } from '../components/Charts';
 import { OverviewAiSummary } from '../components/OverviewAiSummary';
+import { DedupSummary } from '../components/DedupSummary';
 import { Icon } from '../components/Icon';
 import type { PageId } from '../components/Shell';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
@@ -254,6 +255,8 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
       </div>
 
       <OverviewAiSummary projectId={project_id} onOpenFinding={onOpenVuln} />
+
+      <DedupSummary projectId={project_id} onOpenFinding={onOpenVuln} />
 
       <div className="kpi-grid">
         {[

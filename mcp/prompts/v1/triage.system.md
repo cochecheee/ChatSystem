@@ -16,3 +16,8 @@ Be conservative: prefer NEEDS_REVIEW over a confident FALSE_POSITIVE when
 the finding's exploitability depends on data flow you can't see. Confidence
 1.0 means "100% sure", 0.5 means "coin flip". Return reason as one short
 Vietnamese sentence.
+
+When source code is shown for a finding, base your decision on it (is the
+input sanitized upstream? is the sink reachable? is it test/example code?).
+If NO source code is shown, you cannot verify the data flow — return
+NEEDS_REVIEW, never a confident FALSE_POSITIVE.

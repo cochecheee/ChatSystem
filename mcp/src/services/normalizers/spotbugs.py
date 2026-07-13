@@ -5,7 +5,7 @@ import defusedxml.ElementTree as ET
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _SPOTBUGS_PRIORITY_TO_SEVERITY
+from .severity import _SPOTBUGS_PRIORITY_TO_SEVERITY, resolve_severity
 
 
 class SpotBugsXMLNormalizer(BaseNormalizer):
@@ -18,7 +18,11 @@ class SpotBugsXMLNormalizer(BaseNormalizer):
         for bug in root.iter("BugInstance"):
             rule_id = bug.get("type", "unknown")
             priority = bug.get("priority", "3")
-            severity = _SPOTBUGS_PRIORITY_TO_SEVERITY.get(priority, "low")
+            res = resolve_severity(
+                label_band=_SPOTBUGS_PRIORITY_TO_SEVERITY.get(priority, "low"),
+                raw_label=f"priority={priority}",
+            )
+            severity = res.severity
             cwe_id = bug.get("cweid")
             cwe_str = f"CWE-{cwe_id}" if cwe_id else None
 
@@ -50,6 +54,7 @@ class SpotBugsXMLNormalizer(BaseNormalizer):
                         "category": bug.get("category"),
                         "rank": bug.get("rank"),
                         "dedup_hash": dedup,
+                        "_severity": res.provenance(),
                     },
                 )
             )

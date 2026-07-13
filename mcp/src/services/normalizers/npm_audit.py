@@ -5,7 +5,7 @@ import json
 
 from ...models.schemas import FindingCreate, compute_dedup_hash
 from .base import BaseNormalizer
-from .severity import _NPM_SEVERITY_TO_SEVERITY, _sca_severity
+from .severity import resolve_severity
 
 
 class NpmAuditNormalizer(BaseNormalizer):
@@ -39,7 +39,8 @@ class NpmAuditNormalizer(BaseNormalizer):
 
             if not advisories:
                 # Transitive-only: every `via` is a string (upstream pkg name).
-                severity = _NPM_SEVERITY_TO_SEVERITY.get(pkg_sev) or _sca_severity(pkg_sev, None)
+                res = resolve_severity(raw_label=pkg_sev or None)
+                severity = res.severity
                 rule_id = f"npm-audit-{pkg_name}"
                 upstream = ", ".join(str(v) for v in vias) or "transitive dependency"
                 message = f"{pkg_name} {pkg_range}: vulnerable via {upstream}"
@@ -51,7 +52,7 @@ class NpmAuditNormalizer(BaseNormalizer):
                     line_number=None, cwe_id=None, cvss_score=None,
                     raw_data={"pkg_name": pkg_name, "installed_version": None,
                               "fixed_version": fixed_version, "range": pkg_range,
-                              "dedup_hash": dedup},
+                              "dedup_hash": dedup, "_severity": res.provenance()},
                 ))
                 continue
 
@@ -66,7 +67,8 @@ class NpmAuditNormalizer(BaseNormalizer):
                 cvss = adv.get("cvss") or {}
                 cvss_score = cvss.get("score") or None  # npm sends 0 when absent
                 via_sev = (adv.get("severity") or pkg_sev or "").lower()
-                severity = _NPM_SEVERITY_TO_SEVERITY.get(via_sev) or _sca_severity(via_sev, cvss_score)
+                res = resolve_severity(raw_label=via_sev or None, score=cvss_score, score_kind="v3")
+                severity = res.severity
                 adv_range = adv.get("range") or pkg_range
                 message = f"{title} ({pkg_name} {adv_range})".strip()
                 file_path = f"package-lock.json:{pkg_name}"
@@ -74,11 +76,11 @@ class NpmAuditNormalizer(BaseNormalizer):
                 findings.append(FindingCreate(
                     artifact_id=artifact_id, tool=self.TOOL_NAME, rule_id=rule_id,
                     severity=severity, message=message, file_path=file_path,
-                    line_number=None, cwe_id=cwe_id, cvss_score=cvss_score,
+                    line_number=None, cwe_id=cwe_id, cvss_score=res.cvss_score,
                     raw_data={"pkg_name": pkg_name, "installed_version": None,
                               "fixed_version": fixed_version, "range": adv_range,
                               "advisory_url": url, "source": source,
-                              "dedup_hash": dedup},
+                              "dedup_hash": dedup, "_severity": res.provenance()},
                 ))
 
         return findings

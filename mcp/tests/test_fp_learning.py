@@ -402,6 +402,8 @@ async def test_triage_service_auto_revokes_high_confidence_fp(db):
             artifact_id=artifact_id, tool="semgrep", rule_id="r1",
             severity="high", message="exec()", file_path="src/a.py",
             status="pending_review", dedup_hash="h1",
+            # V4.2 — auto-revoke now requires the model to have seen code.
+            raw_data={"source_code": "def a():\n    exec(user_input)\n"},
         )
         f2 = Finding(
             artifact_id=artifact_id, tool="semgrep", rule_id="r2",
@@ -440,6 +442,42 @@ async def test_triage_service_auto_revokes_high_confidence_fp(db):
         statuses = {f.id: f.status for f in fresh}
         assert statuses[f1_id] == "REVOKED"
         assert statuses[f2_id] == "pending_review"
+
+
+@pytest.mark.asyncio
+async def test_triage_withholds_fp_without_code(db):
+    """V4.2 — high-confidence FALSE_POSITIVE but NO source code seen → NOT
+    auto-revoked (held for human as NEEDS_REVIEW-equivalent)."""
+    from src.services.llm.triage import TriageBatch, TriageItem, TriageService
+
+    _, artifact_id = await _create_project_and_artifact(db, "art-nocode")
+    async with db() as session:
+        f = Finding(
+            artifact_id=artifact_id, tool="semgrep", rule_id="r",
+            severity="high", message="m", file_path="x.py",
+            status="pending_review", dedup_hash="hn",  # no raw_data.source_code
+        )
+        session.add(f)
+        await session.commit()
+        await session.refresh(f)
+        fid = f.id
+
+    async def stub_llm(client, findings):
+        return TriageBatch(items=[TriageItem(
+            finding_id=fid, classification="FALSE_POSITIVE",
+            confidence=0.99, reason="looks safe",
+        )])
+
+    svc = TriageService(llm_caller=stub_llm)
+    async with db() as session:
+        findings = list((await session.execute(select(Finding))).scalars().all())
+        result = await svc.triage_findings(session, findings)
+
+    assert result["auto_revoked"] == 0
+    assert result["withheld_no_code"] == 1
+    async with db() as session:
+        row = (await session.execute(select(Finding))).scalar_one()
+        assert row.status == "pending_review"
 
 
 @pytest.mark.asyncio

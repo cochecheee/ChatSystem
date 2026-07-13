@@ -101,6 +101,109 @@ async def test_list_artifacts_returns_list():
 
 
 # ---------------------------------------------------------------------------
+# Tests: list_run_jobs / get_job / fetch_job_logs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_run_jobs_returns_jobs_with_steps():
+    jobs = [
+        {
+            "id": 7001,
+            "name": "backend",
+            "status": "in_progress",
+            "conclusion": None,
+            "steps": [{"name": "Checkout", "status": "completed", "conclusion": "success"}],
+        },
+    ]
+    mock_http = _mock_client(json_data={"jobs": jobs})
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.list_run_jobs(run_id=1001)
+
+    assert result[0]["id"] == 7001
+    assert result[0]["steps"][0]["conclusion"] == "success"
+    # filter=latest keeps only the newest attempt — same view as the GitHub UI
+    call_kwargs = mock_http.get.call_args.kwargs
+    assert call_kwargs["params"].get("filter") == "latest"
+
+
+@pytest.mark.asyncio
+async def test_get_job_404_returns_none():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        assert await client.get_job(job_id=7001) is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_job_logs_returns_text():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.content = b"2026-07-11T00:00:00Z ##[group]Run pytest\nline\n"
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_job_logs(job_id=7001)
+
+    assert result is not None
+    assert "##[group]Run pytest" in result
+
+
+@pytest.mark.asyncio
+async def test_fetch_job_logs_404_returns_none():
+    """GitHub answers 404 while the job is still running — must map to None,
+    not raise, so the API layer can return a descriptive 404."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        assert await client.fetch_job_logs(job_id=7001) is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_job_logs_truncates_oversized_to_tail():
+    from src.services.github_client import _MAX_LOG_BYTES
+
+    head = b"OLD LINE\n" * 10
+    tail_marker = b"FINAL ERROR LINE\n"
+    filler = b"x" * _MAX_LOG_BYTES
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.content = head + filler + b"\n" + tail_marker
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.get = AsyncMock(return_value=mock_resp)
+
+    with patch("src.services.github_client.httpx.AsyncClient", return_value=mock_http):
+        client = GitHubClient(token="tok", owner="owner", repo="repo")
+        result = await client.fetch_job_logs(job_id=7001)
+
+    assert result is not None
+    assert result.startswith("[... truncated")
+    assert "FINAL ERROR LINE" in result
+    assert "OLD LINE" not in result
+
+
+# ---------------------------------------------------------------------------
 # Tests: fetch_artifact / _extract_security_files
 # ---------------------------------------------------------------------------
 

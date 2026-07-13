@@ -130,6 +130,96 @@ async def test_list_github_runs_502_on_error(client):
 
 
 # ---------------------------------------------------------------------------
+# GET /github/runs/{run_id}/jobs & .../jobs/{job_id}/logs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_github_run_jobs(client):
+    mock_gh = AsyncMock()
+    mock_gh.list_run_jobs.return_value = [
+        {
+            "id": 7001,
+            "run_id": 1001,
+            "name": "Backend (lint + test)",
+            "status": "in_progress",
+            "conclusion": None,
+            "steps": [
+                {"name": "Checkout", "status": "completed", "conclusion": "success", "number": 1},
+                {"name": "Pytest", "status": "in_progress", "conclusion": None, "number": 2},
+            ],
+        },
+    ]
+    app.dependency_overrides[get_github_client] = lambda: mock_gh
+    try:
+        resp = await client.get("/github/runs/1001/jobs")
+    finally:
+        app.dependency_overrides.pop(get_github_client, None)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["id"] == 7001
+    assert body[0]["steps"][1]["status"] == "in_progress"
+    mock_gh.list_run_jobs.assert_awaited_once_with(1001)
+
+
+@pytest.mark.asyncio
+async def test_list_github_run_jobs_502_on_error(client):
+    mock_gh = AsyncMock()
+    mock_gh.list_run_jobs.side_effect = Exception("network error")
+    app.dependency_overrides[get_github_client] = lambda: mock_gh
+    try:
+        resp = await client.get("/github/runs/1001/jobs")
+    finally:
+        app.dependency_overrides.pop(get_github_client, None)
+    assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_get_job_logs_returns_plain_text(client):
+    mock_gh = AsyncMock()
+    mock_gh.get_job.return_value = {"id": 7001, "run_id": 1001}
+    mock_gh.fetch_job_logs.return_value = "2026-07-11T00:00:00Z line one\nline two\n"
+    app.dependency_overrides[get_github_client] = lambda: mock_gh
+    try:
+        resp = await client.get("/github/runs/1001/jobs/7001/logs")
+    finally:
+        app.dependency_overrides.pop(get_github_client, None)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert "line one" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_get_job_logs_404_when_job_not_in_run(client):
+    """A job_id belonging to another run must not leak its log through this
+    run-scoped (and run-RBAC'd) path."""
+    mock_gh = AsyncMock()
+    mock_gh.get_job.return_value = {"id": 7001, "run_id": 9999}
+    app.dependency_overrides[get_github_client] = lambda: mock_gh
+    try:
+        resp = await client.get("/github/runs/1001/jobs/7001/logs")
+    finally:
+        app.dependency_overrides.pop(get_github_client, None)
+    assert resp.status_code == 404
+    mock_gh.fetch_job_logs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_job_logs_404_while_job_running(client):
+    """GitHub only publishes logs after the job finishes — fetch_job_logs
+    returns None then, and the endpoint surfaces a descriptive 404."""
+    mock_gh = AsyncMock()
+    mock_gh.get_job.return_value = {"id": 7001, "run_id": 1001}
+    mock_gh.fetch_job_logs.return_value = None
+    app.dependency_overrides[get_github_client] = lambda: mock_gh
+    try:
+        resp = await client.get("/github/runs/1001/jobs/7001/logs")
+    finally:
+        app.dependency_overrides.pop(get_github_client, None)
+    assert resp.status_code == 404
+    assert "still be running" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # POST /webhook/pipeline-complete
 # ---------------------------------------------------------------------------
 
