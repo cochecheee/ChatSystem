@@ -184,6 +184,68 @@ async def test_rotation_invalidates_old_token(client, project):
 
 
 @pytest.mark.asyncio
+async def test_create_returns_integration_bundle(client):
+    """V4.4 — POST /projects trả về gói integration one-time đầy đủ."""
+    resp = await client.post("/projects", json={
+        "name": "Bundle Proj", "github_url": "https://github.com/acme/app",
+        "language": "python",
+    }, headers=_admin_headers())
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    pid = body["id"]
+    assert body["has_webhook_token"] is True
+    # Token KHÔNG lộ ở tầng ProjectOut, chỉ trong integration.
+    assert "webhook_token" not in body
+
+    integ = body["integration"]
+    assert integ["project_id"] == pid
+    assert len(integ["webhook_token"]) >= 30
+    assert integ["dashboard_url"].startswith("http")
+    by_name = {s["name"]: s for s in integ["secrets_to_set"]}
+    assert set(by_name) == {"MCP_GATEWAY_URL", "MCP_WEBHOOK_TOKEN", "NVD_API_KEY"}
+    # 2 secret bắt buộc + NVD_API_KEY đánh dấu optional (required=false)
+    assert by_name["MCP_GATEWAY_URL"]["required"] == "true"
+    assert by_name["MCP_WEBHOOK_TOKEN"]["required"] == "true"
+    assert by_name["NVD_API_KEY"]["required"] == "false"
+    # secret value khớp token trả về
+    assert by_name["MCP_WEBHOOK_TOKEN"]["value"] == integ["webhook_token"]
+
+    yaml = integ["workflow_yaml"]
+    assert "cochecheee/sast-action/.github/workflows/sast-ci.yml@master" in yaml
+    assert f"mcp_project_id: {pid}" in yaml
+    assert "language: python" in yaml
+    assert "MCP_WEBHOOK_TOKEN" in yaml
+    # V4.5 — workflow phải có issues: write (DAST) + forward nvd_api_key
+    assert "issues: write" in yaml
+    assert "nvd_api_key:" in yaml
+    assert "NVD_API_KEY" in yaml
+
+
+@pytest.mark.asyncio
+async def test_create_language_fills_workflow(client):
+    resp = await client.post("/projects", json={
+        "name": "Node Proj", "github_url": "https://github.com/acme/node-app",
+        "language": "node",
+    }, headers=_admin_headers())
+    assert resp.status_code == 201
+    assert "language: node" in resp.json()["integration"]["workflow_yaml"]
+
+
+@pytest.mark.asyncio
+async def test_list_hides_webhook_token(client):
+    """GET /projects KHÔNG lộ token — chỉ has_webhook_token + không có integration."""
+    await client.post("/projects", json={
+        "name": "Hidden Proj", "github_url": "https://github.com/acme/hidden",
+    }, headers=_admin_headers())
+    resp = await client.get("/projects", headers=_admin_headers())
+    assert resp.status_code == 200
+    for p in resp.json():
+        assert "webhook_token" not in p
+        assert "integration" not in p
+        assert "has_webhook_token" in p
+
+
+@pytest.mark.asyncio
 async def test_integration_endpoint_hides_token_from_non_owner(client, project):
     """/projects/{id}/integration should hide the plaintext token from
     developers/viewers — only owner/admin sees the real value."""

@@ -156,7 +156,7 @@ export function Topbar({
         <ProjectSelector />
         <div className="search-box">
           <Icon name="search" size={14} />
-          <input placeholder="Search vulnerabilities, repos, runs…" readOnly />
+          <input placeholder="Tìm lỗ hổng, repo, lần chạy…" readOnly />
           <span className="kbd">⌘K</span>
         </div>
         <button

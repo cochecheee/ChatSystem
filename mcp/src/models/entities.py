@@ -143,6 +143,9 @@ class Finding(Base):
     normalized_at: Mapped[datetime | None] = mapped_column(DT_TZ, nullable=True)
     cwe_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cvss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # V4.4 — OWASP Top-10 2021 class code ("A03"). First-class so the dashboard
+    # can filter/group by vulnerability class; human label kept in raw_data.
+    owasp_class: Mapped[str | None] = mapped_column(String(20), nullable=True)
     dedup_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="pending_review", nullable=False)
     ai_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -165,6 +168,7 @@ class Finding(Base):
         Index("ix_findings_artifact", "artifact_id"),
         Index("ix_findings_dedup_project", "dedup_hash", "project_id"),
         Index("ix_findings_normalized", "normalized_at"),
+        Index("ix_findings_owasp_class", "owasp_class"),
     )
 
 

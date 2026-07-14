@@ -46,6 +46,7 @@ class FindingRepository:
         tool: str | None = None,
         status: str | None = None,
         category: str | None = None,
+        owasp_class: str | None = None,
         q: str | None = None,
         run_id: int | None = None,
         exclude_revoked: bool = False,
@@ -96,6 +97,8 @@ class FindingRepository:
                 query = query.where(
                     ~Finding.tool.in_(DEPS_TOOLS | DAST_TOOLS)
                 )
+        if owasp_class is not None:
+            query = query.where(Finding.owasp_class == owasp_class)
         if q:
             like = f"%{q.lower()}%"
             query = query.where(
@@ -196,6 +199,7 @@ class FindingRepository:
         tool: str | None = None,
         status: str | None = None,
         category: str | None = None,
+        owasp_class: str | None = None,
         q: str | None = None,
         run_id: int | None = None,
         exclude_revoked: bool = False,
@@ -241,6 +245,8 @@ class FindingRepository:
                 query = query.where(
                     ~Finding.tool.in_(DEPS_TOOLS | DAST_TOOLS)
                 )
+        if owasp_class is not None:
+            query = query.where(Finding.owasp_class == owasp_class)
         if q:
             like = f"%{q.lower()}%"
             query = query.where(

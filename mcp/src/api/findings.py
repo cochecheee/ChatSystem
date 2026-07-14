@@ -54,6 +54,7 @@ async def list_findings(
     tool: str | None = None,
     status: str | None = None,
     category: str | None = None,
+    owasp_class: str | None = None,
     q: str | None = None,
     run_id: int | None = None,
     exclude_revoked: bool = False,
@@ -71,6 +72,7 @@ async def list_findings(
     - tool: semgrep|codeql|spotbugs|eslint|trivy|dependency-check|...
     - status: pending_review|ai_analyzed|APPROVED|REVOKED
     - category: sast | deps  (deps = trivy + dependency-check; sast = các tool còn lại)
+    - owasp_class: A01..A10 | A00 (lọc theo lớp OWASP Top-10 đã phân loại)
     - q: search trong message / file_path / rule_id (LIKE %q%, case-insensitive)
     - skip / limit: pagination
 
@@ -87,6 +89,7 @@ async def list_findings(
         tool=tool,
         status=status,
         category=category,
+        owasp_class=owasp_class,
         q=q,
         run_id=run_id,
         exclude_revoked=exclude_revoked,
@@ -544,6 +547,74 @@ async def findings_ai_stats(
         "ungrounded": ungrounded,
         "ai_revoked": ai_revoked,
         "top_false_positive": top_fp[: max(0, top)],
+    }
+
+
+@router.get("/findings/category-stats")
+async def findings_category_stats(
+    project_id: int | None = None,
+    run_id: int | None = None,
+    top: int = 20,
+    session: AsyncSession = Depends(get_session),
+    user: User | None = Depends(require_read_access),
+) -> dict:
+    """V4.4 — vulnerability-category (OWASP Top-10 2021) distribution.
+
+    Every finding is classified into an OWASP class code (`owasp_class`, e.g.
+    "A03") at ingest — CWE map first, then a keyword fallback, else "A00"
+    (Uncategorized). This aggregates the distribution + a top list so the
+    dashboard can group/filter by vulnerability class. Findings ingested before
+    V4.4 have `owasp_class=NULL` → counted under `uncategorized` (hint the UI to
+    re-ingest / backfill). Scope + auth identical to the other read endpoints.
+    """
+    ensure_project_in_scope(user, project_id)
+    scope_ids = allowed_project_ids(user) if project_id is None else None
+    repo = FindingRepository(session)
+    findings = await repo.list_with_filters(
+        project_id=project_id,
+        project_ids=scope_ids if project_id is None else None,
+        run_id=run_id,
+        latest_run_only=run_id is None,
+        skip=0,
+        limit=100_000,
+    )
+
+    _sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+    by_class: dict[str, int] = {}
+    with_class = 0
+    uncategorized = 0
+    rows: list[dict] = []
+    for f in findings:
+        code = f.owasp_class
+        rd = f.raw_data if isinstance(f.raw_data, dict) else {}
+        if not code:
+            # fall back to a code stored in raw_data (pre-column ingests) if any
+            code = rd.get("owasp_class")
+        if code and code != "A00":
+            with_class += 1
+        else:
+            uncategorized += 1
+            code = code or "A00"
+        by_class[code] = by_class.get(code, 0) + 1
+        rows.append({
+            "finding_id": f.id,
+            "tool": f.tool,
+            "file_path": f.file_path,
+            "line_number": f.line_number,
+            "severity": f.severity,
+            "owasp_class": code,
+            "owasp_category": rd.get("owasp_category") or code,
+        })
+
+    rows.sort(key=lambda r: _sev_rank.get((r["severity"] or "").lower(), 0), reverse=True)
+    return {
+        "project_id": project_id,
+        "run_id": run_id,
+        "total": len(findings),
+        "with_class": with_class,
+        "uncategorized": uncategorized,
+        "by_class": dict(sorted(by_class.items(), key=lambda kv: kv[1], reverse=True)),
+        "top_classes": rows[: max(0, top)],
     }
 
 

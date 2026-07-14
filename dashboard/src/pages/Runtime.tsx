@@ -78,10 +78,10 @@ export function PageRuntime() {
           <Icon name="alert" size={28} />
           <h3 style={{ margin: '12px 0 6px' }}>Chưa có DAST finding nào</h3>
           <p style={{ color: 'var(--fg-3)', maxWidth: 480, margin: '0 auto', lineHeight: 1.5 }}>
-            DAST (Dynamic Application Security Testing) chạy OWASP ZAP baseline scan đối với app
-            staging sau khi CD redeploy. Bật bằng cách thêm <code>dast: true</code> +{' '}
-            <code>staging_url</code> vào file <code>.github/workflows/security.yml</code> của
-            inheritor repo.
+            DAST (Kiểm thử bảo mật động) chạy OWASP ZAP quét ứng dụng trên môi trường staging sau
+            khi triển khai. Bật bằng cách thêm <code>dast: true</code> +{' '}
+            <code>staging_url</code> vào file <code>.github/workflows/security.yml</code> của repo
+            dự án.
           </p>
         </div>
       </div>
@@ -94,7 +94,7 @@ export function PageRuntime() {
         <div>
           <h1 style={{ margin: 0 }}>Runtime — DAST findings</h1>
           <p style={{ color: 'var(--fg-3)', margin: '4px 0 0', fontSize: 13 }}>
-            OWASP ZAP baseline scan kết quả từ staging URL của inheritor.
+            Kết quả quét OWASP ZAP trên môi trường staging của dự án.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>

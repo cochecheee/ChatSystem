@@ -122,7 +122,7 @@ export function LoginModal({ open, onClose, required }: Props) {
             marginBottom: 12,
             outline: 'none',
           }}
-          placeholder="cochecheee"
+          placeholder="Tên đăng nhập"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           onKeyDown={(e) => {
@@ -167,13 +167,6 @@ export function LoginModal({ open, onClose, required }: Props) {
         >
           {loading ? 'Đang đăng nhập…' : 'Đăng nhập'}
         </button>
-
-        <div className="muted" style={{ fontSize: 10.5, marginTop: 12, lineHeight: 1.4 }}>
-          Role &amp; project membership lấy từ server khi login. Tài khoản seed:{' '}
-          <code>cochecheee</code> (admin), <code>alice</code>/<code>bob</code>/
-          <code>viewer-demo</code> (developer). Mật khẩu mặc định:{' '}
-          <code>changeme123</code>.
-        </div>
       </div>
     </div>
   );

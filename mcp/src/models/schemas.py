@@ -16,6 +16,7 @@ class FindingCreate(BaseModel):
     raw_data: dict[str, Any] | None = None
     cwe_id: str | None = None
     cvss_score: float | None = None
+    owasp_class: str | None = None  # V4.4 — OWASP Top-10 class code (e.g. "A03")
 
 
 class FindingOut(BaseModel):
@@ -31,6 +32,7 @@ class FindingOut(BaseModel):
     normalized_at: datetime | None
     cwe_id: str | None
     cvss_score: float | None
+    owasp_class: str | None = None  # V4.4 — OWASP Top-10 class code
     dedup_hash: str | None
     status: str
     raw_data: dict[str, Any] | None
@@ -62,6 +64,9 @@ class ProjectCreate(BaseModel):
     polling_branch: str = "main"
     staging_url: str = ""
     active: bool = True
+    # Chỉ để điền sẵn workflow snippet trong integration bundle — KHÔNG lưu vào
+    # Project (create_project pop ra trước khi insert). java|python|node|go.
+    language: str = "python"
 
 
 class ProjectUpdate(BaseModel):
@@ -111,6 +116,28 @@ class ProjectOut(BaseModel):
     archived_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class IntegrationInfo(BaseModel):
+    """Gói one-time trả về khi TẠO project — mọi thứ cần để tích hợp pipeline.
+
+    `webhook_token` (plaintext) chỉ xuất hiện Ở ĐÂY, đúng precedent của
+    /webhook/rotate; sau đó ẩn khỏi mọi API response (ProjectOut chỉ có
+    `has_webhook_token`). Muốn lấy lại phải rotate.
+    """
+    project_id: int
+    webhook_token: str
+    dashboard_url: str
+    # [{"name", "value", "required": "true"|"false", "note"}] — `required=false`
+    # đánh dấu secret tuỳ chọn (vd NVD_API_KEY); `note` giải thích cách lấy/ý nghĩa.
+    secrets_to_set: list[dict[str, str]] = []
+    workflow_yaml: str = ""
+    note: str = ""
+
+
+class ProjectCreateOut(ProjectOut):
+    """Response của POST /projects: ProjectOut + khối integration one-time."""
+    integration: IntegrationInfo | None = None
 
 
 class GatePolicyUpdate(BaseModel):

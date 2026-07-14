@@ -303,7 +303,11 @@ class LLMAnalysisService:
         # Layer 4 (injection) — chỉ áp khi GUARDRAIL_LAYERS bật "injection".
         # Tắt (GUARDRAIL_LAYERS=none) → bỏ qua, payload tới thẳng LLM (demo rủi ro).
         if layer_on("injection"):
-            safe_message, reason_msg = self._guardrail.check(finding.message or "")
+            # Check the SANITIZED text (same bytes that reach the LLM): length is
+            # bounded by sanitize(), so only real injection patterns can reject.
+            safe_message, reason_msg = self._guardrail.check(
+                self._guardrail.sanitize(finding.message or "")
+            )
             if not safe_message:
                 log.warning(
                     "Injection guardrail blocked finding %d: msg=%r", finding.id, reason_msg,
@@ -328,7 +332,9 @@ class LLMAnalysisService:
             # Defend against indirect prompt injection: code context comes from
             # untrusted sources (open-source repos). Reject obvious injection.
             if layer_on("injection"):
-                safe_context, reason_ctx = self._guardrail.check(code_context)
+                safe_context, reason_ctx = self._guardrail.check(
+                    self._guardrail.sanitize(code_context)
+                )
                 if not safe_context:
                     log.warning(
                         "Injection guardrail blocked finding %d: ctx=%r", finding.id, reason_ctx,
@@ -476,8 +482,11 @@ class LLMAnalysisService:
         code_context = _extract_wide_context(source_code, finding.line_number)
 
         if layer_on("injection"):
-            safe_msg, _ = self._guardrail.check(finding.message or "")
-            safe_ctx, _ = self._guardrail.check(code_context)
+            # Check the SANITIZED text (what actually reaches the LLM): the wide
+            # investigation context is legitimately large, so length must not
+            # reject — only genuine injection patterns should.
+            safe_msg, _ = self._guardrail.check(self._guardrail.sanitize(finding.message or ""))
+            safe_ctx, _ = self._guardrail.check(self._guardrail.sanitize(code_context))
             if not (safe_msg and safe_ctx):
                 log.warning("Injection guardrail blocked investigation for finding %d", finding.id)
                 raise ValueError("Finding content rejected by injection guardrail")

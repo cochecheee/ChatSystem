@@ -5,8 +5,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .api.analysis import router as analysis_router
 from .api.artifacts import router as artifacts_router
@@ -127,6 +128,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def _cors_safe_500(request: Request, exc: Exception) -> JSONResponse:
+    """Ensure unhandled 500s still carry CORS headers.
+
+    Starlette's ServerErrorMiddleware sits OUTSIDE CORSMiddleware, so a bare
+    unhandled exception returns a 500 WITHOUT `Access-Control-Allow-Origin`.
+    Browsers then mask the real 500 as an opaque "Failed to fetch" / CORS
+    error, hiding the actual failure. Re-attach the allowed origin so the
+    dashboard surfaces a real error instead. HTTPException is unaffected —
+    it is handled by the inner ExceptionMiddleware and keeps its CORS header.
+    """
+    log.exception("Unhandled error on %s %s", request.method, request.url.path)
+    origin = request.headers.get("origin")
+    headers: dict[str, str] = {}
+    if _cors_origins == ["*"]:
+        headers["Access-Control-Allow-Origin"] = "*"
+    elif origin and origin in _cors_origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    return JSONResponse(
+        {"detail": "Internal Server Error"},
+        status_code=500,
+        headers=headers,
+    )
 
 app.include_router(projects_router, tags=["projects"])
 app.include_router(artifacts_router, tags=["core"])

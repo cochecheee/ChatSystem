@@ -22,11 +22,13 @@ def _finding(
     status: str = "pending_review",
     rule: str | None = None,
     raw: dict | None = None,
+    owasp: str | None = None,
 ) -> Finding:
     return Finding(
         artifact_id=artifact_id, tool=tool, rule_id=rule or f"{tool}.rule",
         severity=severity, message=f"{tool} says line {line}", file_path=file,
         line_number=line, cwe_id=cwe, status=status, raw_data=raw,
+        owasp_class=owasp,
     )
 
 
@@ -240,6 +242,52 @@ async def test_dedup_stats_endpoint(client):
     assert len(data["clusters"]) == 1
     assert set(data["clusters"][0]["tools"]) == {"semgrep", "codeql", "bandit"}
     assert data["clusters"][0]["primary_tool"] == "codeql"
+
+
+async def test_category_stats_endpoint(client):
+    """V4.4 — OWASP class distribution + uncategorized count."""
+    pid, a1 = await _seed_run()
+    async with AsyncSessionLocal() as s:
+        s.add_all([
+            _finding(a1, "semgrep", file="a.py", owasp="A03"),
+            _finding(a1, "codeql", file="b.py", owasp="A03"),
+            _finding(a1, "bandit", file="c.py", owasp="A01"),
+            _finding(a1, "eslint", file="d.py", owasp=None),   # uncategorized
+        ])
+        await s.commit()
+
+    r = await client.get(
+        "/findings/category-stats", params={"project_id": pid, "run_id": 300},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 4
+    assert data["with_class"] == 3
+    assert data["uncategorized"] == 1
+    assert data["by_class"]["A03"] == 2
+    assert data["by_class"]["A01"] == 1
+    assert data["by_class"]["A00"] == 1
+
+
+async def test_owasp_class_filter(client):
+    """V4.4 — /findings?owasp_class=A03 returns only that class."""
+    pid, a1 = await _seed_run()
+    async with AsyncSessionLocal() as s:
+        s.add_all([
+            _finding(a1, "semgrep", file="a.py", owasp="A03"),
+            _finding(a1, "codeql", file="b.py", owasp="A03"),
+            _finding(a1, "bandit", file="c.py", owasp="A01"),
+        ])
+        await s.commit()
+
+    r = await client.get(
+        "/findings", params={"project_id": pid, "run_id": 300, "owasp_class": "A03"},
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 2
+    assert all(f["owasp_class"] == "A03" for f in rows)
+    assert r.headers["X-Total-Count"] == "2"
 
 
 async def test_correlate_guard_skips_older_run(client):

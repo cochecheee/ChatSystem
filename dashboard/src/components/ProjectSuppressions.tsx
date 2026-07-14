@@ -184,19 +184,19 @@ export function ProjectSuppressions({ projectId }: { projectId: number }) {
         }}
       >
         <input
-          placeholder="rule_id (e.g. java/path-injection)"
+          placeholder="Mã quy tắc (vd java/path-injection)"
           value={ruleId}
           onChange={(e) => setRuleId(e.target.value)}
           style={inputStyle}
         />
         <input
-          placeholder="file_glob (e.g. src/test/**)"
+          placeholder="Đường dẫn file (vd src/test/**)"
           value={fileGlob}
           onChange={(e) => setFileGlob(e.target.value)}
           style={inputStyle}
         />
         <input
-          placeholder="tool (e.g. semgrep)"
+          placeholder="Công cụ (vd semgrep)"
           value={tool}
           onChange={(e) => setTool(e.target.value)}
           style={inputStyle}

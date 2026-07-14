@@ -110,7 +110,23 @@ class CommandService:
         if finding.status == "ai_analyzed" and finding.ai_analysis:
             data = finding.ai_analysis
         else:
-            result = await self._llm.analyze_finding(finding, db)
+            # Mirror analysis.py /explain: map LLM failures to clean HTTP
+            # errors. Without this a guardrail rejection (ValueError) or a
+            # Gemini outage/rate-limit/timeout (RuntimeError) escapes as a
+            # bare 500 from Starlette's ServerErrorMiddleware — which sits
+            # OUTSIDE CORSMiddleware, so the response carries no CORS header
+            # and the browser masks it as "Failed to fetch".
+            try:
+                result = await self._llm.analyze_finding(finding, db)
+            except ValueError as exc:
+                log.warning("Guardrail blocked finding %s: %s", finding.id, exc)
+                raise HTTPException(
+                    status_code=422,
+                    detail="Nội dung finding bị guardrail từ chối (nghi prompt injection) — không gửi tới AI.",
+                )
+            except RuntimeError as exc:
+                log.error("Gemini failed for finding %s: %s", finding.id, exc)
+                raise HTTPException(status_code=503, detail=f"AI service unavailable: {exc}")
             data = result.model_dump()
 
         return CommandResponse(
@@ -132,7 +148,19 @@ class CommandService:
         finding = await self._get_finding(request.finding_id, db)
         # Read-only advisory — developer+ (same as /explain access).
         await enforce_finding_project_access(finding.id, user, db, min_role="developer")
-        inv = await self._llm.investigate_finding(finding, db)
+        # Same error mapping as _handle_explain — a transient Gemini failure
+        # must not surface as a CORS-less 500 ("Failed to fetch" in the UI).
+        try:
+            inv = await self._llm.investigate_finding(finding, db)
+        except ValueError as exc:
+            log.warning("Guardrail blocked investigation for finding %s: %s", finding.id, exc)
+            raise HTTPException(
+                status_code=422,
+                detail="Nội dung finding bị guardrail từ chối (nghi prompt injection) — không gửi tới AI.",
+            )
+        except RuntimeError as exc:
+            log.error("Gemini failed investigating finding %s: %s", finding.id, exc)
+            raise HTTPException(status_code=503, detail=f"AI service unavailable: {exc}")
         return CommandResponse(
             status="ok",
             message=inv.summary_vi or f"Đã kiểm chứng finding #{finding.id}.",

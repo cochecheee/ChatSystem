@@ -123,6 +123,52 @@ export interface DedupStats {
   clusters: DedupCluster[];
 }
 
+// V4.4 — vulnerability-category (OWASP Top-10 2021) distribution.
+export interface CategoryRow {
+  finding_id: number;
+  tool: string;
+  file_path: string;
+  line_number: number | null;
+  severity: string;
+  owasp_class: string;
+  owasp_category: string;
+}
+
+export interface CategoryStats {
+  project_id: number | null;
+  run_id: number | null;
+  total: number;
+  with_class: number;
+  uncategorized: number;
+  by_class: Record<string, number>;
+  top_classes: CategoryRow[];
+}
+
+// Human labels for OWASP class codes (FE display without hitting the backend).
+export const OWASP_LABELS: Record<string, string> = {
+  A01: 'A01 Broken Access Control',
+  A02: 'A02 Cryptographic Failures',
+  A03: 'A03 Injection',
+  A04: 'A04 Insecure Design',
+  A05: 'A05 Security Misconfiguration',
+  A06: 'A06 Vulnerable & Outdated Components',
+  A07: 'A07 Identification & Authentication Failures',
+  A08: 'A08 Software & Data Integrity Failures',
+  A09: 'A09 Security Logging & Monitoring Failures',
+  A10: 'A10 Server-Side Request Forgery (SSRF)',
+  A00: 'A00 Uncategorized',
+};
+
+// V4.4 — one-time integration bundle returned by POST /projects.
+export interface IntegrationInfo {
+  project_id: number;
+  webhook_token: string;
+  dashboard_url: string;
+  secrets_to_set: { name: string; value: string; required?: string; note?: string }[];
+  workflow_yaml: string;
+  note: string;
+}
+
 export interface Project {
   id: number;
   name: string;

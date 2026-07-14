@@ -18,8 +18,10 @@ from ..core.db import get_session
 from ..models.entities import Project
 from ..models.schemas import (
     GatePolicyUpdate,
+    IntegrationInfo,
     MonitorTargetUpdate,
     ProjectCreate,
+    ProjectCreateOut,
     ProjectOut,
 )
 from ..repositories import ArtifactRepository, FindingRepository, ProjectRepository
@@ -85,27 +87,67 @@ class SuppressionCreate(BaseModel):
 # Projects
 # ---------------------------------------------------------------------------
 
-@router.post("/projects", response_model=ProjectOut, status_code=201)
+def _render_caller_workflow(project_id: int, language: str) -> str:
+    """File `.github/workflows/security.yml` sẵn-để-commit cho repo mục tiêu:
+    một caller gọi reusable workflow, đã điền `language` + `mcp_project_id` và
+    nối 2 secret dashboard. Ngôn ngữ ghim về java|python|node|go."""
+    lang = language if language in ("java", "python", "node", "go") else "python"
+    return (
+        "name: Security scan\n"
+        "on:\n"
+        "  push: { branches: [main, master] }\n"
+        "  pull_request:\n"
+        "  workflow_dispatch:\n"
+        "permissions:\n"
+        "  contents: read\n"
+        "  security-events: write\n"
+        "  actions: read\n"
+        "  issues: write          # BẮT BUỘC: job DAST (OWASP ZAP) cần quyền này mới chạy\n"
+        "jobs:\n"
+        "  security:\n"
+        "    uses: cochecheee/sast-action/.github/workflows/sast-ci.yml@master\n"
+        "    with:\n"
+        f"      language: {lang}\n"
+        f"      mcp_project_id: {project_id}\n"
+        "      gate_enabled: true\n"
+        "    secrets:\n"
+        "      dashboard_url:   ${{ secrets.MCP_GATEWAY_URL }}\n"
+        "      dashboard_token: ${{ secrets.MCP_WEBHOOK_TOKEN }}\n"
+        "      # nvd_api_key: OPTIONAL — chỉ dùng cho OWASP Dependency-Check (Java);\n"
+        "      # bỏ trống vẫn quét được (SCA Java có thể chậm/bị NVD rate-limit).\n"
+        "      nvd_api_key:     ${{ secrets.NVD_API_KEY }}\n"
+    )
+
+
+@router.post("/projects", response_model=ProjectCreateOut, status_code=201)
 async def create_project(
     body: ProjectCreate,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     current: User = Depends(get_current_user_required),
-) -> Project:
-    """Tạo project với full credentials (V2.8 P7).
+) -> ProjectCreateOut:
+    """Tạo project với full credentials (V2.8 P7) + trả về gói tích hợp one-time.
 
-    V3.8 — yêu cầu xác thực: trước đây endpoint KHÔNG gate auth nên bất kỳ ai
-    cũng tạo được project và nhét credentials (`github_token`/`gemini_api_key`).
-    Nay phải có JWT hợp lệ; khi RBAC bật, người tạo trở thành `owner` của
-    project (để sau đó có quyền archive/delete/quản lý thành viên).
+    V3.8 — yêu cầu xác thực: khi RBAC bật, người tạo trở thành `owner`.
+    Secrets (`github_token`, `gemini_api_key`, `webhook_token`) được Fernet-encrypt
+    khi `FERNET_KEY` set; `active=False` map sang INTEGER 0.
 
-    Secrets (`github_token`, `gemini_api_key`) được Fernet-encrypt khi
-    `FERNET_KEY` set; `active=False` map sang INTEGER 0 — Postgres asyncpg
-    không tự coerce.
+    V4.4 — endpoint tự sinh `webhook_token` per-project và trả về khối
+    `integration` (project_id + token plaintext + gateway URL + secrets + file
+    workflow điền sẵn). Token **chỉ xuất hiện Ở ĐÂY** (giống /webhook/rotate);
+    các API khác chỉ thấy `has_webhook_token`. Muốn lấy lại phải rotate.
     """
+    import secrets as _secrets
+
     repo = ProjectRepository(session)
     fields = body.model_dump(exclude_unset=False)
+    # `language` chỉ để render snippet — KHÔNG phải cột Project → pop ra.
+    language = str(fields.pop("language", "python") or "python")
     # Bool -> int để khớp Mapped[int] cột active
     fields["active"] = 1 if fields.get("active", True) else 0
+    # V4.4 — sinh token per-project ngay khi tạo (Fernet-encrypt khi lưu).
+    webhook_token = _secrets.token_urlsafe(32)
+    fields["webhook_token"] = webhook_token
     project = await repo.create(**fields)
     # Creator becomes owner so per-project RBAC has an accountable owner.
     if settings.RBAC_PER_PROJECT:
@@ -113,7 +155,34 @@ async def create_project(
         await ProjectMemberRepository(session).upsert(
             project_id=project.id, username=current.username, role="owner",
         )
-    return project
+
+    # Base URL từ request (khớp local dev + tunnel/proxy) — như /integration.
+    scheme = request.url.scheme
+    host = request.headers.get("host") or request.url.netloc
+    base = f"{scheme}://{host}"
+
+    out = ProjectCreateOut.model_validate(project)
+    out.integration = IntegrationInfo(
+        project_id=project.id,
+        webhook_token=webhook_token,
+        dashboard_url=base,
+        secrets_to_set=[
+            {"name": "MCP_GATEWAY_URL", "value": base, "required": "true",
+             "note": "URL của MCP Gateway (dashboard) để CI gửi kết quả về."},
+            {"name": "MCP_WEBHOOK_TOKEN", "value": webhook_token, "required": "true",
+             "note": "Token xác thực CI → Gateway. Chỉ hiển thị 1 lần."},
+            {"name": "NVD_API_KEY", "value": "", "required": "false",
+             "note": ("OPTIONAL — chỉ cần cho OWASP Dependency-Check (dự án Java). "
+                      "Xin miễn phí tại nvd.nist.gov/developers/request-an-api-key. "
+                      "Bỏ trống vẫn quét được nhưng SCA Java có thể chậm/bị rate-limit.")},
+        ],
+        workflow_yaml=_render_caller_workflow(project.id, language),
+        note=(
+            "Token webhook chỉ hiển thị 1 LẦN — lưu ngay vào GitHub repo "
+            "(Settings → Secrets → Actions). Muốn lấy lại phải Rotate webhook token."
+        ),
+    )
+    return out
 
 
 @router.get("/projects", response_model=list[ProjectOut])

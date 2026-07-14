@@ -1,11 +1,13 @@
 import type {
   AiStats,
   AnalysisResult,
+  CategoryStats,
   CommandRequest,
   CommandResponse,
   DedupStats,
   Finding,
   FPInvestigation,
+  IntegrationInfo,
   SeverityStats,
   Project,
   TokenResponse,
@@ -116,6 +118,8 @@ export interface FindingListParams {
   tool?: string;
   status?: string;
   category?: 'sast' | 'deps' | 'dast';
+  /** V4.4 — lọc theo lớp OWASP Top-10 (A01..A10 | A00). */
+  owasp_class?: string;
   q?: string;
   skip?: number;
   limit?: number;
@@ -274,6 +278,16 @@ export const api = {
       }
       return get<AiStats>(`/findings/ai-stats${q.toString() ? '?' + q.toString() : ''}`);
     },
+    /** V4.4 — vulnerability-category (OWASP Top-10) distribution. */
+    categoryStats: (params?: { project_id?: number; run_id?: number; top?: number }) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params ?? {})) {
+        if (v !== undefined && v !== null) q.set(k, String(v));
+      }
+      return get<CategoryStats>(
+        `/findings/category-stats${q.toString() ? '?' + q.toString() : ''}`
+      );
+    },
   },
   monitor: {
     summary: (hours = 24) => getRaw<UptimeSummary>(`/monitor/summary?hours=${hours}`),
@@ -366,7 +380,8 @@ export const api = {
       polling_branch?: string;
       staging_url?: string;
       active?: boolean;
-    }) => post<Project>('/projects', body),
+      language?: string;
+    }) => post<Project & { integration?: IntegrationInfo }>('/projects', body),
     /** V3.7 — set/clear a project's uptime Monitor staging URL (owner/admin). */
     setMonitorTarget: (projectId: number, staging_url: string) =>
       fetch(`${BASE}/projects/${projectId}/monitor`, {

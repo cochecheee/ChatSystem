@@ -84,7 +84,7 @@ function SummaryBar({ groups }: { groups: PackageGroup[] }) {
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
         {groups.length} {groups.length === 1 ? 'dependency' : 'dependencies'} affected
         <span style={{ color: 'var(--fg-3)', fontWeight: 400, marginLeft: 6 }}>
-          · {totalCves} CVE{totalCves === 1 ? '' : 's'} (deduped)
+          · {totalCves} CVE{totalCves === 1 ? '' : 's'} (đã gộp)
         </span>
       </div>
       <div

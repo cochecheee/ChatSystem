@@ -25,6 +25,7 @@ export function useVulnsFindings(initialId?: number) {
   const [sevFilter, setSevFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [toolFilter, setToolFilter] = useState('all');
+  const [owaspFilter, setOwaspFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(initialId ?? null);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
@@ -51,6 +52,7 @@ export function useVulnsFindings(initialId?: number) {
     else if (ambient.project_id !== undefined) params.project_id = ambient.project_id;
     if (sevFilter !== 'all') params.severity = sevFilter;
     if (toolFilter !== 'all') params.tool = toolFilter;
+    if (owaspFilter !== 'all') params.owasp_class = owaspFilter;
     if (statusFilter !== 'all') {
       const map: Record<string, string> = {
         pending: 'pending_review',
@@ -71,7 +73,7 @@ export function useVulnsFindings(initialId?: number) {
   // Reset to first page whenever a filter changes.
   useEffect(() => {
     setPage(0);
-  }, [projectFilter, sevFilter, statusFilter, toolFilter, search]);
+  }, [projectFilter, sevFilter, statusFilter, toolFilter, owaspFilter, search]);
 
   useEffect(() => {
     setLoading(true);
@@ -100,6 +102,7 @@ export function useVulnsFindings(initialId?: number) {
     sevFilter,
     statusFilter,
     toolFilter,
+    owaspFilter,
     search,
     ambient.project_id,
     refetchTick,
@@ -146,6 +149,8 @@ export function useVulnsFindings(initialId?: number) {
     setStatusFilter,
     toolFilter,
     setToolFilter,
+    owaspFilter,
+    setOwaspFilter,
     search,
     setSearch,
     selectedId,

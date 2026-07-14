@@ -86,11 +86,11 @@ export function DedupSummary({ projectId, onOpenFinding }: Props) {
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 13.5 }}>Cross-tool deduplication</div>
+          <div style={{ fontWeight: 600, fontSize: 13.5 }}>Gộp lỗi trùng giữa các công cụ</div>
           <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>
-            {data.project_id ? `Project #${data.project_id}` : 'All projects'}
-            {data.run_id ? ` · run #${data.run_id}` : ''}
-            {' · gộp lỗi trùng giữa các SAST tool'}
+            {data.project_id ? `Dự án #${data.project_id}` : 'Tất cả dự án'}
+            {data.run_id ? ` · lần chạy #${data.run_id}` : ''}
+            {' · gộp cùng một lỗi được nhiều công cụ báo'}
           </div>
         </div>
         {cross_tool_duplicates_removed > 0 && (

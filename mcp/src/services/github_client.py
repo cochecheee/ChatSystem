@@ -34,6 +34,10 @@ class GitHubClient:
         }
         self.owner = owner or settings.GITHUB_OWNER
         self.repo = repo or settings.GITHUB_REPO
+        # Resolved lazily by _get_default_branch() and cached — avoids the old
+        # hardcoded ref="main" that 404'd on repos whose default branch is
+        # `master` (e.g. NodeGoat), leaving /verify & /explain with no source.
+        self._default_branch: str | None = None
 
     @classmethod
     def for_project(cls, project) -> "GitHubClient":
@@ -216,19 +220,42 @@ class GitHubClient:
 
         return self._extract_security_files(zip_bytes)
 
+    async def _get_default_branch(self) -> str:
+        """Resolve (and cache) the repo's default branch. Best-effort: on any
+        error fall back to `main` so a transient failure never blocks a fetch."""
+        if self._default_branch is None:
+            try:
+                async with httpx.AsyncClient(headers=self._headers, timeout=20) as client:
+                    resp = await client.get(
+                        f"{_GITHUB_API}/repos/{self.owner}/{self.repo}",
+                    )
+                if resp.status_code == 200:
+                    self._default_branch = resp.json().get("default_branch") or "main"
+                else:
+                    self._default_branch = "main"
+            except Exception as exc:  # network/parse — degrade gracefully
+                log.warning("default_branch lookup failed for %s/%s: %s", self.owner, self.repo, exc)
+                self._default_branch = "main"
+        return self._default_branch
+
     async def fetch_file_content(
         self,
         file_path: str,
-        ref: str = "main",
+        ref: str | None = None,
     ) -> str | None:
         """Fetch decoded text content of a file at a given git ref.
 
-        Returns None on 404, binary files (non-base64 encoding),
-        files > 100 KB, and path traversal attempts.
+        When `ref` is None, the repo's actual default branch is resolved
+        (cached) instead of assuming `main` — repos default to `master`,
+        `develop`, etc. Returns None on 404, binary files (non-base64
+        encoding), files > 100 KB, and path traversal attempts.
         """
         # Guard: reject path traversal
         if not file_path or ".." in Path(file_path.lstrip("/")).parts:
             return None
+
+        if ref is None:
+            ref = await self._get_default_branch()
 
         clean_path = file_path.lstrip("/")
         async with httpx.AsyncClient(headers=self._headers, timeout=30) as client:

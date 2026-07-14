@@ -10,8 +10,9 @@ import type { PageId } from '../components/Shell';
 import { useActiveProjectParam } from '../contexts/ProjectContext';
 import { useRuns } from '../features/pipelines/useRuns';
 import { usePolling } from '../hooks/usePolling';
-import type { Finding, WorkflowRun } from '../types';
+import type { CategoryStats, Finding, WorkflowRun } from '../types';
 import type { Project } from '../types';
+import { OWASP_LABELS } from '../types';
 
 interface Props {
   onNav: (id: PageId) => void;
@@ -61,6 +62,7 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
   const [loadingFindings, setLoadingFindings] = useState(false);
   const [overviewStats, setOverviewStats] =
     useState<Awaited<ReturnType<typeof api.stats.overview>> | null>(null);
+  const [catStats, setCatStats] = useState<CategoryStats | null>(null);
 
   const { project_id } = useActiveProjectParam();
   const allProjects = project_id === undefined;
@@ -98,6 +100,19 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
     };
     fetch();
     const id = setInterval(fetch, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [project_id]);
+
+  // V4.4 — OWASP-class distribution (single project or scoped all-projects).
+  useEffect(() => {
+    const fetchCat = () => {
+      api.findings
+        .categoryStats({ project_id })
+        .then(setCatStats)
+        .catch(() => {});
+    };
+    fetchCat();
+    const id = setInterval(fetchCat, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [project_id]);
 
@@ -321,6 +336,67 @@ export function PageOverview({ onNav, onOpenVuln }: Props) {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* V4.4 — OWASP Top-10 class distribution (bar-list; not the severity donut). */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 20 }}>
+        <div className="card">
+          <div className="card-header">
+            <div className="h3">Theo nhóm OWASP Top 10</div>
+            {catStats && (
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {catStats.with_class}/{catStats.total} đã phân loại
+              </span>
+            )}
+          </div>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const by = catStats?.by_class ?? {};
+              const entries = Object.entries(by).sort((a, b) => b[1] - a[1]);
+              if (entries.length === 0)
+                return (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Chưa có dữ liệu phân loại — hãy quét lại để phân loại.
+                  </span>
+                );
+              const max = Math.max(...entries.map(([, n]) => n), 1);
+              return entries.map(([code, n]) => (
+                <div
+                  key={code}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}
+                >
+                  <span style={{ width: 240, color: 'var(--fg-2)' }}>
+                    {OWASP_LABELS[code] || code}
+                  </span>
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 8,
+                      borderRadius: 3,
+                      background: 'var(--surface-2, rgba(128,128,128,0.15))',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${(n / max) * 100}%`,
+                        height: '100%',
+                        borderRadius: 3,
+                        background: 'var(--accent)',
+                        transition: 'width .3s',
+                      }}
+                    />
+                  </div>
+                  <span
+                    className="mono"
+                    style={{ color: 'var(--fg-3)', width: 32, textAlign: 'right' }}
+                  >
+                    {n}
+                  </span>
+                </div>
+              ));
+            })()}
           </div>
         </div>
       </div>

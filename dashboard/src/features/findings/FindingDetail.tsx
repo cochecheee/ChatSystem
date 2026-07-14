@@ -434,6 +434,9 @@ export function FindingDetail({
 }) {
   const owasp = finding.raw_data?.owasp_category as string | undefined;
   const cweName = finding.raw_data?.cwe_name as string | undefined;
+  const references = finding.raw_data?.references as
+    | { label: string; url: string }[]
+    | undefined;
   const depScan = isDepScan(finding.tool);
   const [revokeOpen, setRevokeOpen] = useState(false);
   // V3.6 FP-B — after a successful revoke, offer to create a Tier 2
@@ -593,7 +596,7 @@ export function FindingDetail({
                 <button
                   className="btn sm"
                   onClick={() => setRevokeOpen(true)}
-                  title="Đánh dấu finding này không phải lỗi thật. Các lần quét sau sẽ tự bỏ qua theo dedup_hash."
+                  title="Đánh dấu đây không phải lỗi thật. Các lần quét sau sẽ tự động bỏ qua lỗi này."
                 >
                   <Icon name="shield" size={12} /> Đánh dấu không phải lỗi
                 </button>
@@ -650,13 +653,12 @@ export function FindingDetail({
               }}
             >
               <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>
-                Tạo rule chặn future scans?
+                Tạo quy tắc bỏ qua cho các lần quét sau?
               </div>
               <div className="muted" style={{ fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>
-                Đã đánh dấu finding #{finding.id} là không phải lỗi. Tạo thêm
-                <strong> suppression rule </strong>để mọi finding cùng pattern ở các lần quét tiếp
-                theo tự động bỏ qua (Tier 2 — pattern-based, khác với Tier 1 chỉ match dedup_hash
-                chính xác).
+                Đã đánh dấu lỗi #{finding.id} là không phải lỗi thật. Tạo thêm
+                <strong> quy tắc bỏ qua </strong>để mọi lỗi cùng dạng ở các lần quét sau được tự
+                động bỏ qua.
               </div>
               <div
                 style={{
@@ -915,6 +917,48 @@ export function FindingDetail({
                   {cweName}
                 </div>
               )}
+            </div>
+          )}
+
+          {references && references.length > 0 && (
+            <div className="card card-pad" style={{ marginBottom: 16 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: 'var(--fg-3)',
+                  marginBottom: 6,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.3,
+                }}
+              >
+                Tham chiếu (CWE / OWASP / CVE)
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {references.map((r) => (
+                  <a
+                    key={r.url}
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      fontSize: 12.5,
+                      color: 'var(--accent)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      textDecoration: 'none',
+                    }}
+                    title={r.url}
+                  >
+                    <Icon name="external" />
+                    <span
+                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {r.label}
+                    </span>
+                  </a>
+                ))}
+              </div>
             </div>
           )}
 

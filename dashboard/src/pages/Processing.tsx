@@ -6,7 +6,8 @@ import { Icon } from '../components/Icon';
 import { DedupSummary } from '../components/DedupSummary';
 import { SevChip } from '../features/findings/sast';
 import type { PageId } from '../components/Shell';
-import type { AiStats, DedupStats, SeverityStats } from '../types';
+import type { AiStats, CategoryStats, DedupStats, SeverityStats } from '../types';
+import { OWASP_LABELS } from '../types';
 
 interface Props {
   onNav: (id: PageId) => void;
@@ -22,7 +23,7 @@ interface GateStats {
   policy?: { critical_threshold: number; high_threshold: number } | null;
 }
 
-type StageKey = 'raw' | 'normalize' | 'dedup' | 'ai' | 'unique' | 'gate';
+type StageKey = 'raw' | 'normalize' | 'category' | 'dedup' | 'ai' | 'unique' | 'gate';
 
 const ACCENT = 'var(--accent, #6c63ff)';
 
@@ -51,6 +52,7 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
   const [dedup, setDedup] = useState<DedupStats | null>(null);
   const [gate, setGate] = useState<GateStats | null>(null);
   const [ai, setAi] = useState<AiStats | null>(null);
+  const [cat, setCat] = useState<CategoryStats | null>(null);
   const [open, setOpen] = useState<StageKey>('normalize');
 
   useEffect(() => {
@@ -71,6 +73,10 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
       api.findings
         .aiStats({ project_id, top: 15 })
         .then((r) => alive && setAi(r))
+        .catch(() => {});
+      api.findings
+        .categoryStats({ project_id, top: 20 })
+        .then((r) => alive && setCat(r))
         .catch(() => {});
     };
     load();
@@ -97,22 +103,30 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
       tint: ACCENT,
     },
     {
+      key: 'category',
+      label: 'Phân loại OWASP',
+      value: cat ? Object.keys(cat.by_class).length : 0,
+      sub: `${cat?.with_class ?? 0} có nhóm · ${cat?.uncategorized ?? 0} chưa rõ`,
+      icon: 'threat',
+      tint: ACCENT,
+    },
+    {
       key: 'dedup',
       label: 'Khử trùng lặp',
       value: crossRemoved,
-      sub: `cross-tool −${crossRemoved} · ${dedup?.multi_tool_clusters ?? 0} cụm`,
+      sub: `đã gộp −${crossRemoved} · ${dedup?.multi_tool_clusters ?? 0} cụm`,
       icon: 'layers',
       tint: 'var(--sev-high-fg, #ff7e36)',
     },
     {
       key: 'ai',
-      label: 'AI: FP + grounding',
+      label: 'AI: lọc dương tính giả',
       value: ai?.fp_likelihood?.HIGH ?? 0,
-      sub: `${ai?.fp_likelihood?.HIGH ?? 0} nghi FP · ${ai?.ungrounded ?? 0} fix chưa neo`,
+      sub: `${ai?.fp_likelihood?.HIGH ?? 0} nghi dương tính giả · ${ai?.ungrounded ?? 0} bản vá chưa đối chiếu`,
       icon: 'brain',
       tint: ACCENT,
     },
-    { key: 'unique', label: 'Unique', value: unique, sub: '= số ở KPI/lists', icon: 'shield', tint: 'var(--sev-low-fg, #35c07a)' },
+    { key: 'unique', label: 'Còn lại', value: unique, sub: '= số hiển thị ở tổng quan', icon: 'shield', tint: 'var(--sev-low-fg, #35c07a)' },
     {
       key: 'gate',
       label: 'Security Gate',
@@ -130,7 +144,7 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
         <div>
           <h1 className="h1">Xử lý dữ liệu</h1>
           <div className="sub">
-            Quy trình chuẩn hoá & khử trùng lặp: raw → chuẩn hoá severity → dedup → kết quả → gate
+            Chuẩn hoá mức độ, gộp lỗi trùng và lọc dương tính giả trước khi vào cổng bảo mật
           </div>
         </div>
       </div>
@@ -140,10 +154,9 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
           className="card card-pad"
           style={{ marginBottom: 16, borderLeft: '3px solid var(--sev-med-fg, #f0c038)' }}
         >
-          <b>Chưa có dữ liệu chuẩn hoá severity.</b>{' '}
+          <b>Chưa có dữ liệu chuẩn hoá mức độ nghiêm trọng.</b>{' '}
           <span className="muted">
-            Các finding hiện có được ingest trước V4.1 (không có provenance). Chạy lại 1 lần scan
-            (re-ingest) để populate — dedup vẫn hiển thị bình thường bên dưới.
+            Dữ liệu hiện tại chưa được chuẩn hoá mức độ. Hãy chạy lại một lần quét để cập nhật.
           </span>
         </div>
       )}
@@ -221,7 +234,7 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
             <Stat label="nhãn ≠ điểm CVSS" value={sev?.disagreements ?? 0} />
             <Stat label="CVSS thật (tool)" value={sev?.cvss_real ?? 0} />
             <Stat label="CVSS ước lượng" value={sev?.cvss_derived ?? 0} />
-            <Stat label="có provenance" value={`${sev?.with_provenance ?? 0}/${sev?.total ?? 0}`} />
+            <Stat label="có nguồn gốc mức độ" value={`${sev?.with_provenance ?? 0}/${sev?.total ?? 0}`} />
           </div>
           <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
             Finding được nâng bậc (điểm CVSS / DAST cao hơn nhãn tool báo)
@@ -269,6 +282,94 @@ export function PageProcessing({ onNav, onOpenVuln }: Props) {
               Không có finding nào bị nâng bậc trong lần quét này.
             </div>
           )}
+        </div>
+      )}
+
+      {open === 'category' && (
+        <div className="card card-pad">
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 12 }}>
+            <Stat label="tổng finding" value={cat?.total ?? 0} />
+            <Stat label="đã phân loại" value={cat?.with_class ?? 0} color={ACCENT} />
+            <Stat
+              label="chưa phân loại (A00)"
+              value={cat?.uncategorized ?? 0}
+              color="var(--sev-high-fg, #ff7e36)"
+            />
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
+            Phân bố theo nhóm OWASP Top 10 2021 (CWE map → fallback từ khóa → A00)
+          </div>
+          {(() => {
+            const by = cat?.by_class ?? {};
+            const entries = Object.entries(by).sort((a, b) => b[1] - a[1]);
+            if (entries.length === 0)
+              return (
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Chưa có dữ liệu phân loại.
+                </div>
+              );
+            const max = Math.max(...entries.map(([, n]) => n), 1);
+            return entries.map(([code, n]) => (
+              <div
+                key={code}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '3px 0' }}
+              >
+                <span style={{ width: 240, color: 'var(--fg-2)' }}>{OWASP_LABELS[code] || code}</span>
+                <div
+                  style={{
+                    flex: 1,
+                    height: 8,
+                    borderRadius: 3,
+                    background: 'var(--surface-2, rgba(128,128,128,0.15))',
+                  }}
+                >
+                  <div
+                    style={{ width: `${(n / max) * 100}%`, height: '100%', borderRadius: 3, background: ACCENT }}
+                  />
+                </div>
+                <span className="mono" style={{ color: 'var(--fg-3)', width: 32, textAlign: 'right' }}>
+                  {n}
+                </span>
+              </div>
+            ));
+          })()}
+          <div className="muted" style={{ fontSize: 11, margin: '10px 0 6px' }}>
+            Finding theo mức độ (bấm để mở chi tiết)
+          </div>
+          {(cat?.top_classes ?? []).map((r) => (
+            <div
+              key={r.finding_id}
+              onClick={() => onOpenVuln?.(r.finding_id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 0',
+                borderBottom: '1px solid var(--line)',
+                cursor: onOpenVuln ? 'pointer' : 'default',
+              }}
+            >
+              <span className="tool-tag" style={{ flexShrink: 0 }} title={r.owasp_category}>
+                {r.owasp_class}
+              </span>
+              <span
+                className="mono"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 11,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={r.file_path}
+              >
+                {r.file_path.split('/').pop()}
+                {r.line_number ? `:${r.line_number}` : ''}
+              </span>
+              <SevChip sev={r.severity} />
+            </div>
+          ))}
         </div>
       )}
 

@@ -3,13 +3,14 @@ import { api } from '../api/client';
 import { AlertBanner } from '../components/AlertBanner';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/Icon';
+import { ProjectIntegrationModal } from '../components/ProjectIntegrationModal';
 import { ProjectMembers } from '../components/ProjectMembers';
 import { ProjectSuppressions } from '../components/ProjectSuppressions';
 import { StatusDot } from '../components/StatusDot';
 import { useAppConfig } from '../features/config/useAppConfig';
 import { useAuth } from '../features/auth/AuthContext';
 import type { AiConfig, GatesConfig, SastToolsConfig } from '../features/config/useAppConfig';
-import type { Project } from '../types';
+import type { IntegrationInfo, Project } from '../types';
 
 interface IntegrationsInfo {
   github: {
@@ -125,9 +126,11 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
   const [token, setToken] = useState('');
   const [gemini, setGemini] = useState('');
   const [staging, setStaging] = useState('');
+  const [language, setLanguage] = useState('python');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  const [bundle, setBundle] = useState<IntegrationInfo | null>(null);
 
   // Hiển thị owner/repo suy ra từ URL để người dùng kiểm tra trước khi lưu.
   const parsed = parseGitHubRepo(url);
@@ -144,8 +147,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
     }
     if (!token.trim()) {
       setError(
-        'Cần GitHub token (PAT có quyền actions:read + contents:read) để kéo SARIF ' +
-          'của repo này; thiếu token MCP sẽ rớt về repo trong .env và ingest 0 finding.',
+        'Cần GitHub token (PAT có quyền actions:read + contents:read) để lấy kết quả quét của repo này.',
       );
       return;
     }
@@ -160,8 +162,10 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
         github_token: token.trim(),
         gemini_api_key: gemini.trim() || undefined,
         staging_url: staging.trim() || undefined,
+        language,
       });
       onAdded(p);
+      if (p.integration) setBundle(p.integration);
       setName('');
       setUrl('');
       setToken('');
@@ -177,13 +181,16 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
 
   if (!open) {
     return (
-      <button
-        className="btn ghost sm"
-        style={{ margin: '8px 16px 12px' }}
-        onClick={() => setOpen(true)}
-      >
-        <Icon name="plus" size={12} /> Add project
-      </button>
+      <>
+        <button
+          className="btn ghost sm"
+          style={{ margin: '8px 16px 12px' }}
+          onClick={() => setOpen(true)}
+        >
+          <Icon name="plus" size={12} /> Add project
+        </button>
+        {bundle && <ProjectIntegrationModal info={bundle} onClose={() => setBundle(null)} />}
+      </>
     );
   }
 
@@ -255,7 +262,7 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
           fontSize: 12,
           outline: 'none',
         }}
-        placeholder="Gemini API key (tuỳ chọn) — bỏ trống dùng key trong .env"
+        placeholder="Gemini API key (tuỳ chọn) — bỏ trống để dùng key mặc định"
         value={gemini}
         onChange={(e) => setGemini(e.target.value)}
       />
@@ -277,6 +284,25 @@ function AddProjectForm({ onAdded }: { onAdded: (p: Project) => void }) {
           if (e.key === 'Enter') handleSubmit();
         }}
       />
+      <select
+        value={language}
+        onChange={(e) => setLanguage(e.target.value)}
+        title="Ngôn ngữ chính của repo — điền sẵn vào workflow snippet"
+        style={{
+          padding: '6px 10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          color: 'var(--fg)',
+          fontSize: 12,
+          outline: 'none',
+        }}
+      >
+        <option value="python">Language: python</option>
+        <option value="java">Language: java</option>
+        <option value="node">Language: node</option>
+        <option value="go">Language: go</option>
+      </select>
       {error && <AlertBanner type="error" message={error} onDismiss={() => setError('')} />}
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn primary sm" onClick={handleSubmit} disabled={loading}>
@@ -495,7 +521,7 @@ export function PageSettings() {
       >
         <StatusDot status={health === 'ok' ? 'ok' : health === 'error' ? 'error' : 'info'} />
         <div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>Backend API — GET /health</div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Máy chủ API</div>
           <div className="muted" style={{ fontSize: 11 }}>
             {health === 'checking'
               ? 'Đang kiểm tra…'
@@ -752,7 +778,7 @@ export function PageSettings() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Icon name="link" size={14} style={{ color: 'var(--fg-3)' }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>MCP Gateway</div>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>Cổng kết nối API</div>
                   <div className="mono" style={{ fontSize: 12 }}>
                     {import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}
                   </div>
@@ -803,7 +829,7 @@ export function PageSettings() {
                 <Icon name="branch" size={14} style={{ color: 'var(--fg-3)' }} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                    CI Ingest (webhook + artifact)
+                    Nhận kết quả CI
                   </div>
                   <div className="mono" style={{ fontSize: 12 }}>
                     {integrations

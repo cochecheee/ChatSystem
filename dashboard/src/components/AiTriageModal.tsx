@@ -114,10 +114,10 @@ export function AiTriageModal({ open, onClose, projectId, onTriaged }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <Icon name="sparkle" size={16} />
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>AI Triage (V3.1)</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Phân loại AI</div>
             <div className="muted" style={{ fontSize: 11.5 }}>
-              Gemini classify pending findings as TRUE/FALSE positive — auto-revoke high-confidence
-              FP
+              AI tự động phân loại lỗi chờ duyệt là thật hay dương tính giả, và loại bỏ các lỗi
+              dương tính giả có độ tin cậy cao.
             </div>
           </div>
         </div>

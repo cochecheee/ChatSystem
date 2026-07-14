@@ -133,7 +133,14 @@ class ScrubbingService:
 # Layer 4 — Prompt Injection Prevention
 # ---------------------------------------------------------------------------
 
-_MAX_CONTENT_LENGTH = 2000
+# Budget for a single LLM input chunk. Sized for the V4.3 "/verify"
+# investigation, which sends a WIDE code context (the whole file when ≤400
+# lines) so the model can trace data-flow. The old 2000 was tuned for the
+# short `finding.message` and rejected almost every real-source /verify
+# (a typical file is 3–16 KB). `sanitize()` truncates to this length, and
+# callers check the *sanitized* text — so an over-long chunk is truncated,
+# never rejected. Length is not an injection signal.
+_MAX_CONTENT_LENGTH = 16000
 
 _INJECTION_PATTERNS: list[re.Pattern] = [
     re.compile(r"<script", re.IGNORECASE),

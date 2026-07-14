@@ -11,19 +11,19 @@ const VERDICT_META: Record<
   { label: string; bg: string; fg: string; icon: string }
 > = {
   FALSE_POSITIVE: {
-    label: 'Khả năng FALSE POSITIVE',
+    label: 'Khả năng là dương tính giả',
     bg: 'var(--sev-med-bg, rgba(240,192,56,0.12))',
     fg: 'var(--sev-med-fg, #f0c038)',
     icon: '⚠️',
   },
   TRUE_POSITIVE: {
-    label: 'Lỗi thật (TRUE POSITIVE)',
+    label: 'Lỗi thật',
     bg: 'var(--sev-high-bg, rgba(255,126,54,0.12))',
     fg: 'var(--sev-high-fg, #ff7e36)',
     icon: '🛑',
   },
   UNCERTAIN: {
-    label: 'Chưa kết luận (UNCERTAIN)',
+    label: 'Chưa kết luận',
     bg: 'var(--bg-2, rgba(120,120,120,0.12))',
     fg: 'var(--fg-2, #8a8a8a)',
     icon: '❓',
@@ -104,7 +104,7 @@ export function InvestigationCard({ inv }: { inv: FPInvestigation }) {
       >
         {meta.icon} <b>{meta.label}.</b>{' '}
         <span className="chip" style={{ fontSize: 10, marginLeft: 4 }}>
-          confidence: {inv.confidence}
+          độ tin cậy: {inv.confidence}
         </span>{' '}
         {inv.summary_vi}
       </div>

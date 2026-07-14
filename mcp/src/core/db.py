@@ -152,6 +152,8 @@ def _migrate_schema(sync_conn) -> None:
         ("revoke_justification", "TEXT"),
         ("revoked_by",           "VARCHAR(255)"),
         ("revoked_at",           "DATETIME"),
+        # V4.4 — OWASP Top-10 class code for category filter/group.
+        ("owasp_class",          "VARCHAR(20)"),
     ])
 
     add_columns("artifacts", [

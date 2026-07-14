@@ -77,8 +77,8 @@ export function PageMonitor() {
         <div>
           <h1 style={{ margin: 0 }}>Uptime — Health checks + Alerts</h1>
           <p style={{ color: 'var(--fg-3)', margin: '4px 0 0', fontSize: 13 }}>
-            Background ping mỗi 5 phút từ chat-system mcp tới staging URL của inheritor. Đây là{' '}
-            <b>uptime monitor server-side</b> — không track user action trên dashboard.
+            Hệ thống tự động kiểm tra mỗi 5 phút tới URL staging của dự án để theo dõi thời gian
+            hoạt động (uptime).
           </p>
         </div>
         <button className="btn" onClick={onPing} disabled={pinging}>

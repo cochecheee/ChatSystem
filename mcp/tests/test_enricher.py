@@ -56,10 +56,13 @@ def test_enrich_adds_owasp_category(enricher):
 
 
 def test_enrich_cwe_without_owasp_mapping(enricher):
-    # CWE-1 has no OWASP mapping in our table
+    # CWE-1 has no OWASP mapping → V4.4 falls back to A00 (Uncategorized),
+    # never empty. (Old behavior left owasp_category unset.)
     f = _finding(cwe_id="CWE-1")
     result = enricher.enrich(f)
-    assert "owasp_category" not in (result.raw_data or {})
+    assert result.raw_data.get("owasp_class") == "A00"
+    assert result.raw_data.get("owasp_category", "").startswith("A00")
+    assert result.owasp_class == "A00"
 
 
 @pytest.mark.parametrize("cwe_id,expected_prefix", [
@@ -115,3 +118,65 @@ def test_enrich_merges_existing_raw_data(enricher):
     result = enricher.enrich(f)
     assert result.raw_data["dedup_hash"] == "abc123"
     assert "cwe_name" in result.raw_data
+
+
+# ---------------------------------------------------------------------------
+# V4.4 — OWASP classification (fallback) + reference URLs
+# ---------------------------------------------------------------------------
+
+def test_classify_by_cwe():
+    from src.services.enricher import classify_owasp
+    code, label = classify_owasp(_finding(cwe_id="CWE-89"))
+    assert code == "A03" and label.startswith("A03")
+
+
+def test_classify_deps_tool_fallback_a06():
+    # No CWE, message has no keyword → dependency tool defaults to A06.
+    from src.services.enricher import classify_owasp
+    code, _ = classify_owasp(_finding(tool="trivy", message="package foo 1.0"))
+    assert code == "A06"
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("SQL Injection via string concat", "A03"),
+    ("Reflected XSS in template", "A03"),
+    ("Potential SSRF when fetching URL", "A10"),
+    ("Path traversal in file read", "A01"),
+    ("Hardcoded secret / credential in source", "A07"),
+    ("Weak hash MD5 used", "A02"),
+    ("Insecure deserialization of pickle", "A08"),
+])
+def test_classify_keyword_fallback(message, expected):
+    from src.services.enricher import classify_owasp
+    code, _ = classify_owasp(_finding(cwe_id=None, message=message))
+    assert code == expected
+
+
+def test_classify_unknown_is_a00():
+    from src.services.enricher import classify_owasp
+    code, label = classify_owasp(_finding(cwe_id=None, message="some neutral note"))
+    assert code == "A00" and "Uncategorized" in label
+
+
+def test_enrich_sets_owasp_class_column_and_references(enricher):
+    f = _finding(
+        cwe_id="CWE-89", tool="trivy",
+        raw_data={"cve": "CVE-2021-1234", "reference": "https://a.test https://b.test"},
+    )
+    result = enricher.enrich(f)
+    assert result.owasp_class == "A03"
+    refs = result.raw_data.get("references") or []
+    urls = [r["url"] for r in refs]
+    assert "https://cwe.mitre.org/data/definitions/89.html" in urls
+    assert "https://owasp.org/Top10/A03_2021-Injection/" in urls
+    assert "https://nvd.nist.gov/vuln/detail/CVE-2021-1234" in urls
+    assert "https://a.test" in urls and "https://b.test" in urls
+    assert len(urls) == len(set(urls))  # de-duplicated
+
+
+def test_build_references_dedups_and_skips_non_http():
+    from src.services.enricher import build_references
+    f = _finding(raw_data={"reference": ["https://x.test", "not-a-url", "https://x.test"]})
+    refs = build_references(f, None, None)
+    urls = [r["url"] for r in refs]
+    assert urls == ["https://x.test"]

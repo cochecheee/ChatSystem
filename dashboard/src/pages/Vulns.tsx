@@ -9,7 +9,7 @@ import { flagFalsePositive } from '../features/findings/flagFalsePositive';
 import { useResizableSplit } from '../hooks/useResizableSplit';
 import { POLL_INTERVAL_MS } from '../lib/constants';
 import type { Finding } from '../types';
-import { getCorrelation } from '../types';
+import { getCorrelation, OWASP_LABELS } from '../types';
 
 export function PageVulns({ initialId }: { initialId?: number }) {
   // Vulns page = SAST findings only. Dependencies → SCA page.
@@ -30,6 +30,8 @@ export function PageVulns({ initialId }: { initialId?: number }) {
     setStatusFilter,
     toolFilter,
     setToolFilter,
+    owaspFilter,
+    setOwaspFilter,
     search,
     setSearch,
     selectedId,
@@ -216,6 +218,21 @@ export function PageVulns({ initialId }: { initialId?: number }) {
                 <span className="tb-sep" />
               </>
             )}
+            <select
+              value={owaspFilter}
+              onChange={(e) => setOwaspFilter(e.target.value)}
+              title="Filter by OWASP Top-10 class"
+            >
+              <option value="all">All OWASP</option>
+              {Object.entries(OWASP_LABELS)
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([code, label]) => (
+                  <option key={code} value={code}>
+                    {label}
+                  </option>
+                ))}
+            </select>
+            <span className="tb-sep" />
             {(
               [
                 ['all', 'All'],

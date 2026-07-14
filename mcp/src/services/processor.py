@@ -814,6 +814,7 @@ class SecurityProcessor:
                         raw_data=enriched.raw_data,
                         cwe_id=enriched.cwe_id,
                         cvss_score=enriched.cvss_score,
+                        owasp_class=enriched.owasp_class,
                         dedup_hash=h,
                         normalized_at=datetime.now(UTC),
                     )
